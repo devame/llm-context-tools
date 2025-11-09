@@ -420,3 +420,165 @@ New functions added:
 - 5 new functions added
 - No breaking changes to existing functions
 - Validation logic properly extracted
+
+## Example 9: Python Project Analysis
+
+**Scenario**: Analyzing a Python data processing project
+
+```bash
+$ cd ~/projects/data-pipeline
+$ ls
+src/ tests/ requirements.txt
+
+$ node analyze.js
+```
+
+**Output**:
+```
+🔍 No previous analysis found - running initial full analysis...
+[1/4] Running custom analysis (multi-language parsing)...
+    Functions found: 47
+    Call relationships: 134
+    Side effects detected: 23
+[2/4] Generating manifest...
+✅ Initial analysis complete!
+```
+
+**Query Python Functions**:
+```bash
+$ node query.js side-effects
+```
+
+**Output**:
+```
+Found 23 results:
+
+  1. load_data (src/data_loader.py:15)
+     Calls: open, pd.read_csv
+     Effects: file_io
+
+  2. fetch_api_data (src/api_client.py:34)
+     Calls: requests.get, response.json
+     Effects: network, logging
+
+  3. save_to_database (src/db_handler.py:56)
+     Calls: sqlite3.connect, cursor.execute
+     Effects: database
+
+  4. process_large_file (src/processor.py:78)
+     Calls: open, json.load, print
+     Effects: file_io, logging
+  ...
+```
+
+**Trace Python Function**:
+```bash
+$ node query.js trace process_pipeline
+```
+
+**Output**:
+```json
+{
+  "function": "process_pipeline",
+  "file": "src/pipeline.py",
+  "line": 23,
+  "async": true,
+  "calls": [
+    {
+      "function": "load_data",
+      "file": "src/data_loader.py",
+      "line": 15,
+      "effects": ["file_io"]
+    },
+    {
+      "function": "transform_data",
+      "file": "src/transformer.py",
+      "line": 45
+    },
+    {
+      "function": "save_to_database",
+      "file": "src/db_handler.py",
+      "line": 56,
+      "effects": ["database"]
+    }
+  ]
+}
+```
+
+**LLM Analysis**:
+```
+Python pipeline analysis:
+
+Flow: process_pipeline (async) → load_data → transform_data → save_to_database
+
+Side effects:
+- File I/O: load_data reads CSV files
+- Database: save_to_database writes to SQLite
+- Logging: Multiple print() statements for progress
+
+The async pipeline efficiently processes data through three stages:
+1. Data loading from CSV
+2. Transformation (pure function, no side effects)
+3. Database persistence
+
+Recommendations:
+- Consider adding error handling for file operations
+- Database connection should be reused, not created per call
+```
+
+## Example 10: Mixed Language Codebase
+
+**Scenario**: Full-stack project with JavaScript backend and Python ML service
+
+```bash
+$ cd ~/projects/ml-app
+$ ls
+backend/ (Node.js)
+ml-service/ (Python)
+
+$ node analyze.js
+```
+
+**Output**:
+```
+🔍 Running analysis...
+[2] Discovering source files...
+    Found 67 source files (42 JavaScript, 25 Python)
+
+[3] Running custom analysis (multi-language parsing)...
+    Functions found: 156 (98 JavaScript, 58 Python)
+    Call relationships: 387
+    Side effects detected: 67
+```
+
+**Query by Language**:
+```bash
+# Find all Python functions
+$ node query.js find-function . | grep "\.py:"
+
+# Find network calls in both languages
+$ node query.js side-effects | grep network
+```
+
+**Output**:
+```
+JavaScript (backend/):
+  1. handleRequest (backend/api.js:23)
+     Effects: network, database
+
+  2. fetchUserData (backend/services.js:45)
+     Effects: network
+
+Python (ml-service/):
+  3. predict (ml-service/model.py:67)
+     Effects: network, logging
+
+  4. train_model (ml-service/trainer.py:34)
+     Effects: file_io, logging
+```
+
+**Cross-language analysis works seamlessly:**
+- Single unified graph for all functions
+- Language-specific side effect detection
+- Same query interface for all languages
+- Incremental updates work across languages

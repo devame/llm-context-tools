@@ -10,6 +10,7 @@ Generate compact, semantically-rich code context optimized for LLM consumption w
 A tool that transforms raw source code into LLM-optimized context, enabling AI assistants like Claude, ChatGPT, and Copilot to understand your codebase with **80-95% fewer tokens**.
 
 **Key Features:**
+- 🌐 **Multi-language support** (JavaScript, TypeScript, Python)
 - 🔍 **Function call graphs** with side effect detection
 - 📊 **Multi-level summaries** (System → Domain → Module)
 - ⚡ **Incremental updates** (99%+ faster than full re-analysis)
@@ -131,16 +132,37 @@ Read only what you need:
 4. **Graph** (variable) - Function specifics
 5. **Source** (as needed) - Targeted file reading
 
-### 4. Side Effect Detection
+### 4. Multi-Language Support
+
+Analyzes codebases in multiple languages with language-specific parsing:
+
+**Supported Languages:**
+- **JavaScript** (.js, .jsx) - via Babel parser
+- **TypeScript** (.ts, .tsx) - via Babel parser
+- **Python** (.py) - via tree-sitter
+
+**Language-Specific Features:**
+- Function extraction with parameters
+- Async/await detection (`async def` in Python, `async function` in JS)
+- Call graph analysis
+- Side effect detection (file I/O, network, database, logging)
+- Method detection (class methods in Python)
+
+All languages share the same analysis pipeline, incremental updates, and query interface.
+
+### 5. Side Effect Detection
 
 Automatically identifies:
-- `file_io` - File operations
-- `network` - HTTP requests
-- `database` - DB queries
-- `logging` - Console output
-- `dom` - Browser DOM manipulation
+- `file_io` - File operations (`fs.*`, `open()`, `pathlib`)
+- `network` - HTTP requests (`fetch`, `axios`, `requests`, `urllib`)
+- `database` - DB queries (`db.*`, `sqlite3`, `query`)
+- `logging` - Console output (`console.log`, `print()`, `logger.*`)
+- `state_mutation` - Global state changes (`global`, `nonlocal`)
+- `dom` - Browser DOM manipulation (JavaScript only)
 
-### 5. Query Interface
+Works across all supported languages with language-specific pattern detection.
+
+### 6. Query Interface
 
 ```bash
 # Find function
@@ -466,11 +488,12 @@ if (currentHash !== cachedHash) {
 - [x] **Function-level granularity** (98% faster for large files)
 - [x] **Advanced features**: Rename detection, dependency analysis, source storage
 - [x] **GitHub Action** (CI/CD integration)
+- [x] **Multi-language support** (JavaScript, TypeScript, Python)
 
 ### 🚧 In Progress
 
 - [ ] Watch mode (auto-analyze on file changes)
-- [ ] Multi-language support (Python, Go, Rust, Java)
+- [ ] Additional language support (Go, Rust, Java)
 
 ### 📋 Planned
 
@@ -489,7 +512,7 @@ if (currentHash !== cachedHash) {
 ## Requirements
 
 - Node.js ≥ 16.0.0
-- JavaScript or TypeScript project
+- JavaScript, TypeScript, or Python project
 - Works on Linux, macOS, Windows
 
 ## Contributing
