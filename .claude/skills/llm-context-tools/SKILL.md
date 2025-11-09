@@ -1,550 +1,259 @@
 ---
 name: llm-context-tools
-description: Generate LLM-optimized code context with incremental updates for efficient codebase understanding
+description: Generate LLM-optimized code context with incremental updates for efficient codebase understanding. Use when the user wants to analyze a codebase, understand code architecture, or needs code intelligence data.
 categories:
   - code-analysis
   - developer-tools
   - llm-optimization
 triggers:
   - analyze codebase
-  - generate code context
-  - llm context
+  - analyze code
+  - code context
   - code intelligence
+  - understand codebase
   - incremental analysis
 version: 0.2.0
 ---
 
-# LLM Context Tools Skill
+# LLM Context Tools
 
-This skill helps LLMs efficiently understand codebases by generating compact, semantically-rich code representations with incremental update support.
+Generate compact, semantically-rich code context for LLM consumption with 99%+ faster incremental updates.
 
 ## What This Skill Does
 
-Generates and maintains LLM-optimized code context that includes:
-- **Function-level call graphs** with side effect detection
+Transforms raw source code into LLM-optimized context:
+- **Function call graphs** with side effect detection
 - **Multi-level summaries** (System → Domain → Module)
-- **Incremental updates** (99%+ faster re-analysis)
-- **Hash-based change detection**
+- **Incremental updates** (only re-analyze changed files)
+- **Hash-based change tracking**
 - **Query interface** for instant lookups
 
-## When To Use This Skill
+**Token Efficiency**: 74-97% reduction vs reading raw files
 
-Use this skill when:
-- User asks to "analyze this codebase"
-- User wants to understand code architecture
-- User needs help debugging or refactoring
-- You need efficient context about a large codebase
-- User wants to set up LLM-friendly code documentation
+## When To Use
+
+✅ User asks to "analyze this codebase"
+✅ User wants to understand code architecture
+✅ User needs help debugging or refactoring
+✅ You need efficient context about a large codebase
+✅ User wants LLM-friendly code documentation
+
+## Quick Start
+
+```bash
+# Check if tool is available
+llm-context version
+
+# If not available, user needs to install
+# See setup.md for installation
+
+# Run analysis
+llm-context analyze
+
+# Query results
+llm-context stats
+```
 
 ## How It Works
 
 ### Progressive Disclosure Strategy
 
-1. **L0 (System Overview)** - 200 tokens - Architecture, entry points, key components
-2. **L1 (Domain Summaries)** - 50-100 tokens per domain - Subsystem boundaries
-3. **L2 (Module Summaries)** - 20-50 tokens per module - File-level details
-4. **Graph (Function Details)** - Variable tokens - Call relationships, side effects
+Read in this order for maximum token efficiency:
 
-**Token Efficiency**: 74-97% reduction vs reading raw source files
+1. **L0** (200 tokens) → `.llm-context/summaries/L0-system.md`
+   - Architecture overview, entry points, statistics
 
-### Analysis Modes
+2. **L1** (50-100 tokens/domain) → `.llm-context/summaries/L1-domains.json`
+   - Domain boundaries, module lists
 
-**Initial Analysis** (first time):
-- Runs SCIP indexer (if available)
-- Parses all JavaScript/TypeScript files
-- Builds complete function graph
-- Generates manifest with MD5 hashes
-- Creates multi-level summaries
+3. **L2** (20-50 tokens/module) → `.llm-context/summaries/L2-modules.json`
+   - File-level exports, entry points
 
-**Incremental Analysis** (subsequent runs):
-- Detects changes via hash comparison
-- Re-analyzes only changed files (99%+ faster)
-- Patches graph without full rebuild
-- Updates only affected summaries
+4. **Graph** (variable) → `.llm-context/graph.jsonl`
+   - Function details, call relationships, side effects
 
-## Installation & Setup
+5. **Source** (as needed) → Read targeted files only
 
-### Step 1: Check if tool is installed
+**Never read raw source files first!** Use summaries and graph for context.
+
+## Common Commands
 
 ```bash
-# Check if analysis tools exist
-ls -la analyze.js manifest-generator.js 2>/dev/null
+# Analysis
+llm-context analyze              # Auto-detect full/incremental
+llm-context check-changes        # Preview what changed
+
+# Queries
+llm-context stats                # Show statistics
+llm-context entry-points         # Find entry points
+llm-context side-effects         # Functions with side effects
+llm-context query calls-to func  # Who calls this?
+llm-context query trace func     # Call tree
 ```
-
-If files don't exist, the tool needs to be installed in this project.
-
-### Step 2: Install dependencies
-
-```bash
-npm install --save-dev @babel/parser @babel/traverse @sourcegraph/scip-typescript protobufjs
-```
-
-### Step 3: Run initial analysis
-
-```bash
-node analyze.js
-```
-
-This will:
-- Create `.llm-context/` directory
-- Generate function graph (`graph.jsonl`)
-- Create manifest (`manifest.json`)
-- Build summaries (`L0-system.md`, `L1-domains.json`, `L2-modules.json`)
 
 ## Usage Patterns
 
 ### Pattern 1: First-Time Codebase Understanding
 
-**User asks**: "Help me understand this codebase"
-
-**LLM workflow**:
 ```bash
-# 1. Check if already analyzed
-ls .llm-context/manifest.json
+# 1. Run analysis
+llm-context analyze
 
-# 2. If not, run analysis
-node analyze.js
-
-# 3. Read L0 for overview
+# 2. Read L0 for overview
 cat .llm-context/summaries/L0-system.md
 
-# 4. Query for specifics
-node query.js stats
-node query.js entry-points
+# 3. Get statistics
+llm-context stats
+
+# 4. Find entry points
+llm-context entry-points
 ```
 
 **Response template**:
 ```
-I've analyzed the codebase. Here's what I found:
+I've analyzed the codebase:
 
-[L0 Summary Content]
+[L0 content - architecture, components, entry points]
 
-Key statistics:
-- X functions across Y files
-- Z call relationships
-- Entry points: [list]
+Statistics: X functions, Y files, Z calls
 
 Would you like me to:
-1. Explain a specific domain/module?
-2. Trace a particular function's call path?
-3. Find functions with specific side effects?
+1. Explain a specific domain?
+2. Trace a function's call path?
+3. Review the architecture?
 ```
 
-### Pattern 2: Incremental Updates
-
-**User asks**: "I just edited some files, what changed?"
-
-**LLM workflow**:
-```bash
-# 1. Check for changes
-node change-detector.js
-
-# 2. Run incremental analysis
-node analyze.js
-
-# 3. Read updated manifest to see what changed
-cat .llm-context/manifest.json | grep -A5 '"generated"'
-```
-
-**Response template**:
-```
-I've re-analyzed the changed files. Here's what's new:
-
-Files changed: X
-Files skipped: Y (Z% efficiency)
-
-Changes detected:
-- [file]: Added function `foo()`, modified `bar()`
-- [file]: New side effects detected
-
-Would you like me to explain the impact of these changes?
-```
-
-### Pattern 3: Debugging Assistance
-
-**User asks**: "There's a bug in the checkout flow"
-
-**LLM workflow**:
-```bash
-# 1. Find checkout-related functions
-node query.js find-function checkout
-
-# 2. Trace the call path
-node query.js trace handleCheckout
-
-# 3. Check for side effects
-node query.js side-effects | grep checkout
-```
-
-**Response template**:
-```
-Based on the call graph analysis:
-
-Checkout flow:
-handleCheckout() → validateCart() → processPayment() → createOrder()
-
-Side effects detected:
-- validateCart(): database reads
-- processPayment(): network calls (external API)
-- createOrder(): database writes + email sending
-
-The bug is likely in [function] because [reasoning based on side effects].
-
-Let me read that specific file to investigate...
-```
-
-### Pattern 4: Code Navigation
-
-**User asks**: "What calls the `updateUser` function?"
-
-**LLM workflow**:
-```bash
-node query.js calls-to updateUser
-```
-
-**Response template**:
-```
-The `updateUser` function is called by:
-1. handleProfileUpdate (users.js:45)
-2. adminUpdateUser (admin.js:78)
-3. syncUserData (sync.js:23)
-
-Would you like me to explain any of these call sites?
-```
-
-## Available Commands
-
-### Analysis Commands
+### Pattern 2: After Code Changes
 
 ```bash
-# Main analysis (auto-detects full vs incremental)
-node analyze.js
+# Incremental analysis (only changed files)
+llm-context analyze
 
-# Force full re-analysis
-npm run analyze:full
-
-# Check what changed without analyzing
-node change-detector.js
-```
-
-### Query Commands
-
-```bash
-# Statistics
-node query.js stats
-
-# Find function by name
-node query.js find-function <name>
-
-# Show what calls a function
-node query.js calls-to <name>
-
-# Show what a function calls
-node query.js called-by <name>
-
-# Find functions with side effects
-node query.js side-effects
-
-# Find entry points
-node query.js entry-points
-
-# Trace call tree
-node query.js trace <name>
-```
-
-## Understanding the Generated Files
-
-### `.llm-context/graph.jsonl`
-
-JSONL format (one function per line):
-
-```json
-{
-  "id": "processPayment",
-  "type": "function",
-  "file": "checkout.js",
-  "line": 45,
-  "sig": "(amount, userId)",
-  "async": true,
-  "calls": ["validateAmount", "stripe.charge", "createTransaction"],
-  "effects": ["network", "database"],
-  "scipDoc": ""
-}
-```
-
-**Read this for**: Detailed function information, call graphs, side effects
-
-### `.llm-context/summaries/L0-system.md`
-
-System-level overview (~200 tokens):
-- Architecture type
-- Key components
-- Entry points
-- Statistics
-
-**Read this for**: Initial codebase understanding
-
-### `.llm-context/summaries/L1-domains.json`
-
-Domain-level summaries (50-100 tokens each):
-- Module lists per directory
-- Function counts
-- Side effect types
-- Key functions
-
-**Read this for**: Understanding subsystem boundaries
-
-### `.llm-context/summaries/L2-modules.json`
-
-Module-level summaries (20-50 tokens each):
-- Exports
-- Entry points
-- Effect types
-- Function counts
-
-**Read this for**: File-level details
-
-### `.llm-context/manifest.json`
-
-Change tracking metadata:
-- File MD5 hashes
-- Last analysis time
-- Functions per file
-- Global statistics
-
-**Read this for**: Understanding what changed, when analysis was last run
-
-## Best Practices for LLMs
-
-### 1. Start with Summaries, Not Source
-
-❌ **Don't**: Read raw source files first
-✅ **Do**: Read L0 → L1 → L2 → Graph → Source (as needed)
-
-**Why**: 95%+ token savings, better context
-
-### 2. Use Queries Before Reading
-
-❌ **Don't**: Grep through files manually
-✅ **Do**: Use `query.js` for instant lookups
-
-**Why**: Pre-built indices are faster and more accurate
-
-### 3. Leverage Incremental Updates
-
-❌ **Don't**: Re-read entire codebase on every change
-✅ **Do**: Run `node analyze.js` to get incremental updates
-
-**Why**: 99%+ faster re-analysis at scale
-
-### 4. Check Manifest Age
-
-```bash
-# Check when last analyzed
-cat .llm-context/manifest.json | grep generated
-```
-
-If older than user's last edit, suggest re-running analysis.
-
-### 5. Explain Side Effects
-
-When helping with debugging, always mention detected side effects:
-- `file_io`: Reads/writes files
-- `network`: External API calls
-- `database`: Database queries
-- `logging`: Console/log output
-- `dom`: Browser DOM manipulation
-
-## Performance Characteristics
-
-### Small Codebase (< 100 files)
-- Initial analysis: ~2-5 seconds
-- Incremental: ~50-200ms
-- Token usage: 500-2,000 tokens
-
-### Medium Codebase (100-1,000 files)
-- Initial analysis: ~20-60 seconds
-- Incremental: ~200-500ms
-- Token usage: 2,000-10,000 tokens
-
-### Large Codebase (1,000-10,000 files)
-- Initial analysis: ~5-15 minutes
-- Incremental: ~500ms-2s
-- Token usage: 10,000-50,000 tokens
-
-**Key insight**: Incremental updates maintain sub-second response times regardless of codebase size.
-
-## Troubleshooting
-
-### "No manifest found"
-
-**Solution**: Run initial analysis
-```bash
-node analyze.js
-```
-
-### "Cannot find module @babel/parser"
-
-**Solution**: Install dependencies
-```bash
-npm install
-```
-
-### "SCIP indexing failed"
-
-**Solution**: This is normal for JavaScript projects. The tool falls back to Babel parsing.
-
-### "Parse errors in file.js"
-
-**Solution**: File has syntax errors. Fix syntax or exclude from analysis.
-
-### "Graph is empty"
-
-**Solution**: Check that JS files exist and are being discovered. Try:
-```bash
-node manifest-generator.js
+# See what changed
 cat .llm-context/manifest.json
 ```
 
-## Integration Examples
+**Response**: Highlight new/modified functions and their impact
 
-### Example 1: Architecture Review
-
-```
-User: "Review the architecture of this codebase"
-
-LLM workflow:
-1. node analyze.js
-2. cat .llm-context/summaries/L0-system.md
-3. node query.js stats
-4. node query.js entry-points
-
-Response:
-Based on the analysis:
-- Architecture: [type from L0]
-- [X] functions across [Y] modules
-- Entry points: [list]
-- Key patterns: [observations]
-
-Recommendations:
-1. [Based on call graph complexity]
-2. [Based on side effect distribution]
-3. [Based on entry point organization]
-```
-
-### Example 2: Refactoring Assistance
-
-```
-User: "I want to refactor the authentication module"
-
-LLM workflow:
-1. node query.js find-function auth
-2. node query.js calls-to login
-3. node query.js trace authenticateUser
-4. Read .llm-context/summaries/L2-modules.json for auth.js
-
-Response:
-The authentication module has:
-- [X] functions
-- Called by [Y] other modules
-- Side effects: [list]
-
-Refactoring considerations:
-1. [Functions that depend on it]
-2. [Side effects to preserve]
-3. [Suggested approach based on call graph]
-```
-
-### Example 3: Bug Investigation
-
-```
-User: "Users report errors during checkout"
-
-LLM workflow:
-1. node query.js find-function checkout
-2. node query.js side-effects | grep checkout
-3. node query.js trace processCheckout
-
-Response:
-Checkout flow analysis:
-- [Call path from entry point]
-- Side effects: [network, database, etc]
-- Potential failure points:
-  1. [Based on network effects]
-  2. [Based on database operations]
-
-Let me read the specific functions with external dependencies...
-[Read targeted source files]
-```
-
-## Advanced Usage
-
-### Combining with Other Tools
+### Pattern 3: Debugging
 
 ```bash
-# Use with git to understand changes in a PR
-git diff main --name-only | xargs node summary-updater.js
+# Find function
+llm-context query find-function buggyFunc
 
-# Watch mode (future feature)
-# node analyze.js --watch
+# Trace calls
+llm-context query trace buggyFunc
 
-# Export for team sharing
-tar -czf llm-context.tar.gz .llm-context/
+# Check side effects
+llm-context side-effects | grep buggy
 ```
 
-### Custom Queries
+**Response**: Explain call path and identify potential issues based on side effects
 
-The graph is JSONL, so you can use standard tools:
+## Detailed Guides
 
-```bash
-# Find all async functions
-cat .llm-context/graph.jsonl | jq 'select(.async == true)'
+**Setup & Installation**: See [setup.md](setup.md)
+**Usage Examples**: See [examples.md](examples.md)
+**Command Reference**: See [reference.md](reference.md)
+**Common Workflows**: See [workflows.md](workflows.md)
 
-# Functions with network effects
-cat .llm-context/graph.jsonl | jq 'select(.effects | contains(["network"]))'
+## Side Effect Types
 
-# Most-called functions
-cat .llm-context/graph.jsonl | jq '.calls | length' | sort -rn | head
+When analyzing functions, these effects are detected:
+
+- `file_io` - Reads/writes files
+- `network` - HTTP, fetch, API calls
+- `database` - DB queries, ORM
+- `logging` - Console, logger
+- `dom` - Browser DOM manipulation
+
+## Graph Format
+
+Each function in `graph.jsonl`:
+
+```json
+{
+  "id": "functionName",
+  "file": "path/file.js",
+  "line": 42,
+  "calls": ["foo", "bar"],
+  "effects": ["database", "network"]
+}
 ```
 
-## Limitations & Future
+## Best Practices
 
-### Current Limitations
-- JavaScript/TypeScript only
-- File-level granularity (not function-level)
-- No cross-file dependency tracking
-- Pattern-based side effect detection (may miss some)
+### ✅ DO
 
-### Planned Features
-- Multi-language support (Python, Go, Rust, Java)
-- Function-level change detection
-- Cross-file dependency tracking
-- Watch mode for real-time updates
-- LLM-powered intent summarization
-- Vector embeddings for semantic search
+- Read L0 → L1 → L2 → Graph → Source (in order)
+- Use queries before reading files
+- Run incremental analysis after edits
+- Mention detected side effects when debugging
+- Check manifest age before using cached data
+
+### ❌ DON'T
+
+- Read raw source files first
+- Grep through files manually
+- Re-read entire codebase on changes
+- Skip summaries and go straight to source
+
+## Token Efficiency
+
+**Traditional approach**:
+- Read 10 files = 10,000 tokens
+- Missing: call graphs, side effects
+
+**LLM-context approach**:
+- L0 + L1 + Graph = 500-2,000 tokens
+- Includes: complete context + relationships
+
+**Savings**: 80-95%
+
+## Performance
+
+### Initial Analysis
+- 100 files: 2-5s
+- 1,000 files: 30s-2min
+- 10,000 files: 5-15min
+
+### Incremental Updates
+- 1 file: 30-50ms
+- 10 files: 200-500ms
+- 50 files: 1-2s
+
+**Key**: Incremental is 99%+ faster at scale
+
+## Troubleshooting
+
+**"No manifest found"**
+→ Run `llm-context analyze` first
+
+**"Cannot find module"**
+→ User needs to install: See [setup.md](setup.md)
+
+**"Graph is empty"**
+→ No JavaScript files found. Check directory.
 
 ## Success Criteria
 
-This skill is working correctly when:
+This skill is working when:
 
 1. ✅ Analysis completes without errors
-2. ✅ `.llm-context/` directory contains all expected files
-3. ✅ `query.js stats` shows detected functions
-4. ✅ Incremental updates are 10-100x faster than full analysis
-5. ✅ LLM can navigate codebase using summaries + graph
-6. ✅ Token usage is 50-95% less than reading raw files
+2. ✅ `.llm-context/` exists with all files
+3. ✅ `llm-context stats` shows functions
+4. ✅ You use summaries before reading source
+5. ✅ Token usage is 50-95% less than raw reading
 
 ## Summary
 
-This skill transforms codebase understanding from:
-- ❌ Reading thousands of lines of code token-by-token
-- ❌ Missing global context and relationships
-- ❌ Slow, expensive re-analysis on every change
+Transform from:
+- ❌ Reading thousands of lines token-by-token
+- ❌ Missing global context
+- ❌ Slow re-analysis
 
 To:
-- ✅ Compact, semantic code representations
-- ✅ Call graphs and side effect detection
+- ✅ Compact semantic representations
+- ✅ Call graphs + side effects
 - ✅ 99%+ faster incremental updates
 - ✅ 50-95% token savings
-
-**Net result**: 10-100x more effective LLM assistance for understanding and working with code.
