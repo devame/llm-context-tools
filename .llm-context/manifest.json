@@ -1,0 +1,102 @@
+{
+  "version": "1.0.0",
+  "generated": "2025-11-09T12:09:11.252Z",
+  "files": {
+    "manifest-generator.js": {
+      "hash": "4554b04ebbd9b671f190c9d26fcdeaff",
+      "size": 5323,
+      "lastModified": "2025-11-09T12:03:52.903Z",
+      "functions": [],
+      "analysisTime": null
+    },
+    "query.js": {
+      "hash": "71f627a5fa3784331c2b4b7ffea31f97",
+      "size": 4791,
+      "lastModified": "2025-11-09T12:05:24.062Z",
+      "functions": [
+        "query",
+        "traceCalls"
+      ],
+      "analysisTime": 14
+    },
+    "scip-parser.js": {
+      "hash": "1d92669c1d83375a50e12ff550d09f9f",
+      "size": 6186,
+      "lastModified": "2025-11-09T11:43:50.718Z",
+      "functions": [
+        "parseScip"
+      ],
+      "analysisTime": null
+    },
+    "summarizer.js": {
+      "hash": "990665808eb90cda16fab23038eff062",
+      "size": 6667,
+      "lastModified": "2025-11-09T11:43:50.719Z",
+      "functions": [],
+      "analysisTime": null
+    },
+    "transformer.js": {
+      "hash": "fd75b4a2567e0044a0f178464d941828",
+      "size": 9079,
+      "lastModified": "2025-11-09T11:43:50.721Z",
+      "functions": [],
+      "analysisTime": null
+    },
+    "change-detector.js": {
+      "hash": "52503d7cbe7bd0948370147ec4794b72",
+      "size": 5658,
+      "lastModified": "2025-11-09T12:04:57.244Z",
+      "functions": [
+        "computeFileHash",
+        "findJsFiles",
+        "walk",
+        "loadManifest",
+        "detectChanges",
+        "printSummary",
+        "main"
+      ],
+      "analysisTime": 34
+    },
+    "incremental-analyzer.js": {
+      "hash": "2c0f8f81a4388bc43f32860495253021",
+      "size": 10702,
+      "lastModified": "2025-11-09T12:06:27.357Z",
+      "functions": [
+        "computeFileHash",
+        "getFileMetadata",
+        "analyzeSingleFile",
+        "loadGraph",
+        "updateGraph",
+        "updateManifest",
+        "main"
+      ],
+      "analysisTime": 35
+    },
+    "analyze.js": {
+      "hash": "c067d028a5d6615e755b5672f370cf18",
+      "size": 3590,
+      "lastModified": "2025-11-09T12:08:59.384Z",
+      "functions": [],
+      "analysisTime": 20
+    },
+    "summary-updater.js": {
+      "hash": "edf7d29aabe5cd46e201084a4df3aabc",
+      "size": 9591,
+      "lastModified": "2025-11-09T12:08:15.567Z",
+      "functions": [
+        "loadGraph",
+        "generateL0",
+        "generateL1",
+        "generateL2",
+        "updateSummaries"
+      ],
+      "analysisTime": 41
+    }
+  },
+  "globalStats": {
+    "totalFunctions": 22,
+    "totalCalls": 161,
+    "totalFiles": 9,
+    "totalSize": 31979
+  }
+}

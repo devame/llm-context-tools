@@ -4,11 +4,13 @@
   "description": "LLM-optimized code analysis system - hybrid SCIP + custom semantic analysis",
   "type": "module",
   "scripts": {
-    "analyze": "scip-typescript index --infer-tsconfig --output .llm-context/index.scip && node .llm-context/transformer.js && node .llm-context/summarizer.js",
-    "query": "node .llm-context/query.js",
-    "parse-scip": "node .llm-context/scip-parser.js",
-    "transform": "node .llm-context/transformer.js",
-    "summarize": "node .llm-context/summarizer.js"
+    "analyze": "node analyze.js",
+    "analyze:full": "rm -f .llm-context/manifest.json && node analyze.js",
+    "query": "node query.js",
+    "check-changes": "node change-detector.js",
+    "parse-scip": "node scip-parser.js",
+    "transform": "node transformer.js",
+    "summarize": "node summary-updater.js"
   },
   "keywords": [
     "llm",

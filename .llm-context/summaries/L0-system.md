@@ -1,23 +1,23 @@
-# IBM CL Visualizer - System Overview
+# LLM Context Tools - System Overview
 
-**Type**: Interactive visualizer for IBM Control Language (CL) programs
-**Purpose**: Parse, evaluate, and visualize execution flow of CL programs
-**Architecture**: JavaScript modules with event-driven UI
+**Type**: Code analysis system for LLM-optimized context generation
+**Purpose**: Generate compact, semantically-rich code representations for LLM consumption
+**Architecture**: JavaScript modules with incremental update support
 
 ## Statistics
-- **Files**: 2 modules
-- **Functions**: 3 total
-- **Call relationships**: 25
-- **Side effects**: database, file_io, logging
+- **Files**: 5 modules
+- **Functions**: 22 total
+- **Call relationships**: 161
+- **Side effects**: file_io, logging, database
 
 ## Key Components
-- **root**: query, scip-parser
+- **.**: scip-parser, change-detector, incremental-analyzer, query, summary-updater
 
 ## Entry Points
-
+- None detected
 
 ## Architecture Pattern
-- **Parser**: Converts CL source to AST (grammar.js, cmdParser.js)
-- **Evaluator**: Executes AST and tracks state (evaluator.js, statementEvaluators.js)
-- **State**: Manages variables and execution flow (state.js, stateStorage.js)
-- **UI**: Visualizes execution and state (ui.js, formatting.js)
+- **Manifest System**: Tracks file hashes for change detection
+- **Incremental Analysis**: Re-analyze only changed files
+- **Graph Management**: JSONL format for efficient updates
+- **Query Interface**: Fast lookups on function call graphs
