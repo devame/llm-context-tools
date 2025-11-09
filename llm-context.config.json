@@ -1,0 +1,21 @@
+{
+  "granularity": "function",
+  "patterns": {
+    "include": ["**/*.js"],
+    "exclude": ["node_modules", ".git", ".llm-context", "test/**", "tests/**"]
+  },
+  "analysis": {
+    "detectSideEffects": true,
+    "trackCallGraph": true,
+    "maxCallDepth": 10
+  },
+  "incremental": {
+    "enabled": true,
+    "hashAlgorithm": "md5",
+    "normalizeWhitespace": true
+  },
+  "output": {
+    "summaryLevels": ["L0", "L1", "L2"],
+    "includeSourceInGraph": false
+  }
+}

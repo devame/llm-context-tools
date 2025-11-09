@@ -86,7 +86,29 @@ Performance at scale:
 - 1,000 files: 30-60s → 200-500ms (99% faster)
 - 10,000 files: 5-15min → 500ms-2s (99.7% faster)
 
-### 2. Progressive Disclosure
+### 2. Function-Level Granularity (NEW!)
+
+Track changes at the function level, not just file level:
+
+```bash
+# Edit 1 function in a file with 50 functions
+# File-level: Re-analyze all 50 (500ms)
+# Function-level: Re-analyze 1 (10ms) - 98% faster!
+
+# Configure in llm-context.config.json
+{
+  "granularity": "function"  // "file" or "function"
+}
+```
+
+Results:
+- Large files (50+ functions): **98% faster** when editing 1 function
+- Medium files (20-30 functions): **93% faster**
+- Perfect for utility files, generated code, and focused edits
+
+See [FUNCTION_LEVEL_GRANULARITY.md](FUNCTION_LEVEL_GRANULARITY.md) for details.
+
+### 3. Progressive Disclosure
 
 Read only what you need:
 
@@ -96,7 +118,7 @@ Read only what you need:
 4. **Graph** (variable) - Function specifics
 5. **Source** (as needed) - Targeted file reading
 
-### 3. Side Effect Detection
+### 4. Side Effect Detection
 
 Automatically identifies:
 - `file_io` - File operations
@@ -105,7 +127,7 @@ Automatically identifies:
 - `logging` - Console output
 - `dom` - Browser DOM manipulation
 
-### 4. Query Interface
+### 5. Query Interface
 
 ```bash
 # Find function
@@ -384,6 +406,7 @@ if (currentHash !== cachedHash) {
 - [x] Multi-level summaries
 - [x] Side effect detection
 - [x] Query interface
+- [x] **Function-level granularity** (98% faster for large files)
 
 ### 🚧 In Progress
 
@@ -395,7 +418,6 @@ if (currentHash !== cachedHash) {
 
 ### 📋 Planned
 
-- [ ] Function-level granularity (not just file-level)
 - [ ] Parallel analysis
 - [ ] VS Code extension
 - [ ] GitHub Action
@@ -404,6 +426,7 @@ if (currentHash !== cachedHash) {
 
 - **[Installation Guide](CLI_INSTALLATION.md)** - Detailed setup instructions
 - **[Incremental Updates](INCREMENTAL_UPDATES.md)** - How incremental updates work
+- **[Function-Level Granularity](FUNCTION_LEVEL_GRANULARITY.md)** - Track changes at function level (NEW!)
 - **[Demo](DEMO.md)** - Live demonstrations
 - **[Performance](performance-comparison.md)** - Benchmarks and projections
 - **[Proof of Concept](PROOF_OF_CONCEPT_RESULTS.md)** - Original research

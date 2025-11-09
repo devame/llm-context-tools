@@ -6,14 +6,36 @@
  * - File content hashes (for change detection)
  * - File metadata (size, last modified)
  * - Analysis results (functions found, analysis time)
+ * - Function-level hashes (when granularity=function)
  * - Global statistics
  */
 
 import { readFileSync, writeFileSync, existsSync, statSync, readdirSync } from 'fs';
 import { createHash } from 'crypto';
 import { join, relative } from 'path';
+import { parse } from '@babel/parser';
+import traverse from '@babel/traverse';
+import { extractFunctionMetadata } from './function-source-extractor.js';
 
 console.log('=== Manifest Generator ===\n');
+
+/**
+ * Load configuration file
+ * @returns {object} Configuration
+ */
+function loadConfig() {
+  const configPath = './llm-context.config.json';
+
+  if (!existsSync(configPath)) {
+    // Default config
+    return {
+      granularity: 'file',
+      incremental: { enabled: true, hashAlgorithm: 'md5' }
+    };
+  }
+
+  return JSON.parse(readFileSync(configPath, 'utf-8'));
+}
 
 /**
  * Compute MD5 hash of file content
@@ -36,6 +58,58 @@ function getFileMetadata(filePath) {
     size: stats.size,
     lastModified: stats.mtime.toISOString()
   };
+}
+
+/**
+ * Extract function-level metadata from a file
+ * @param {string} filePath - Path to file
+ * @returns {object} Map of function name to metadata
+ */
+export function extractFileFunctions(filePath) {
+  const functionMap = {};
+
+  try {
+    const source = readFileSync(filePath, 'utf-8');
+
+    // Parse with Babel
+    const ast = parse(source, {
+      sourceType: 'module',
+      plugins: []
+    });
+
+    // Collect all functions
+    traverse.default(ast, {
+      FunctionDeclaration(path) {
+        const metadata = extractFunctionMetadata(path, source, filePath);
+        functionMap[metadata.name] = {
+          hash: metadata.hash,
+          line: metadata.line,
+          endLine: metadata.endLine,
+          size: metadata.size,
+          async: metadata.isAsync
+        };
+      },
+
+      VariableDeclarator(path) {
+        if (path.node.init?.type === 'ArrowFunctionExpression' ||
+            path.node.init?.type === 'FunctionExpression') {
+          const metadata = extractFunctionMetadata(path, source, filePath);
+          functionMap[metadata.name] = {
+            hash: metadata.hash,
+            line: metadata.line,
+            endLine: metadata.endLine,
+            size: metadata.size,
+            async: metadata.isAsync
+          };
+        }
+      }
+    });
+
+  } catch (error) {
+    console.log(`    Warning: Could not parse ${filePath}: ${error.message}`);
+  }
+
+  return functionMap;
 }
 
 /**
@@ -105,11 +179,15 @@ function loadGraphData() {
  * @returns {object} Manifest data
  */
 function generateManifest() {
-  console.log('[1] Discovering JavaScript files...');
+  const config = loadConfig();
+  const granularity = config.granularity || 'file';
+
+  console.log(`[1] Configuration: granularity=${granularity}`);
+  console.log('[2] Discovering JavaScript files...');
   const jsFiles = findJsFiles();
   console.log(`    Found ${jsFiles.length} JavaScript files\n`);
 
-  console.log('[2] Computing file hashes...');
+  console.log('[3] Computing file hashes...');
   const fileToFunctions = loadGraphData();
   const files = {};
   let totalSize = 0;
@@ -118,28 +196,49 @@ function generateManifest() {
     try {
       const hash = computeFileHash(filePath);
       const metadata = getFileMetadata(filePath);
-      const functions = fileToFunctions.get(filePath) || [];
+      const graphFunctions = fileToFunctions.get(filePath) || [];
 
-      files[filePath] = {
+      const fileEntry = {
         hash,
         size: metadata.size,
         lastModified: metadata.lastModified,
-        functions,
-        analysisTime: null // Will be filled during analysis
+        functions: graphFunctions,
+        analysisTime: null
       };
 
-      totalSize += metadata.size;
+      // Add function-level hashes if granularity is 'function'
+      if (granularity === 'function') {
+        const functionMetadata = extractFileFunctions(filePath);
+        fileEntry.functionHashes = functionMetadata;
 
-      console.log(`    ${filePath}`);
-      console.log(`      Hash: ${hash.substring(0, 12)}...`);
-      console.log(`      Functions: ${functions.length > 0 ? functions.join(', ') : 'none yet'}`);
+        console.log(`    ${filePath}`);
+        console.log(`      File hash: ${hash.substring(0, 12)}...`);
+        console.log(`      Functions: ${Object.keys(functionMetadata).length}`);
+
+        // Show first few function hashes
+        const funcNames = Object.keys(functionMetadata).slice(0, 3);
+        for (const name of funcNames) {
+          const fHash = functionMetadata[name].hash.substring(0, 8);
+          console.log(`        - ${name} (${fHash}...)`);
+        }
+        if (Object.keys(functionMetadata).length > 3) {
+          console.log(`        ... and ${Object.keys(functionMetadata).length - 3} more`);
+        }
+      } else {
+        console.log(`    ${filePath}`);
+        console.log(`      Hash: ${hash.substring(0, 12)}...`);
+        console.log(`      Functions: ${graphFunctions.length > 0 ? graphFunctions.join(', ') : 'none yet'}`);
+      }
+
+      files[filePath] = fileEntry;
+      totalSize += metadata.size;
 
     } catch (error) {
       console.log(`    Warning: Could not process ${filePath}: ${error.message}`);
     }
   }
 
-  console.log(`\n[3] Building manifest...`);
+  console.log(`\n[4] Building manifest...`);
 
   // Load global stats from graph if available
   let globalStats = {
@@ -158,7 +257,8 @@ function generateManifest() {
   }
 
   const manifest = {
-    version: '1.0.0',
+    version: '2.0.0',
+    granularity,
     generated: new Date().toISOString(),
     files,
     globalStats
