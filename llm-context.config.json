@@ -1,8 +1,8 @@
 {
   "granularity": "function",
   "patterns": {
-    "include": ["**/*.js"],
-    "exclude": ["node_modules", ".git", ".llm-context", "test/**", "tests/**"]
+    "include": ["**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx", "**/*.py"],
+    "exclude": ["node_modules", ".git", ".llm-context", "test/**", "tests/**", "**/__pycache__", "**/*.pyc", "venv/**", ".venv/**"]
   },
   "analysis": {
     "detectSideEffects": true,

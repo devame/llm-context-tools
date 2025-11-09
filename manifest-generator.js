@@ -10,12 +10,11 @@
  * - Global statistics
  */
 
-import { readFileSync, writeFileSync, existsSync, statSync, readdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSync } from 'fs';
 import { createHash } from 'crypto';
 import { join, relative } from 'path';
-import { parse } from '@babel/parser';
-import traverse from '@babel/traverse';
-import { extractFunctionMetadata } from './function-source-extractor.js';
+import { parseFile } from './tree-sitter-parser.js';
+import { isSupported } from './language-detector.js';
 
 console.log('=== Manifest Generator ===\n');
 
@@ -70,55 +69,26 @@ export function extractFileFunctions(filePath, includeSource = false) {
   const functionMap = {};
 
   try {
-    const source = readFileSync(filePath, 'utf-8');
+    // Use tree-sitter parser for multi-language support
+    const result = parseFile(filePath, { includeSource });
 
-    // Parse with Babel
-    const ast = parse(source, {
-      sourceType: 'module',
-      plugins: []
-    });
+    // Convert function array to map
+    for (const func of result.functions) {
+      const funcEntry = {
+        hash: func.hash,
+        line: func.line,
+        endLine: func.endLine,
+        size: func.endLine - func.line + 1,
+        async: func.async
+      };
 
-    // Collect all functions
-    traverse.default(ast, {
-      FunctionDeclaration(path) {
-        const metadata = extractFunctionMetadata(path, source, filePath);
-        const funcEntry = {
-          hash: metadata.hash,
-          line: metadata.line,
-          endLine: metadata.endLine,
-          size: metadata.size,
-          async: metadata.isAsync
-        };
-
-        // Optionally include source for rename detection and diffs
-        if (includeSource) {
-          funcEntry.source = metadata.source;
-        }
-
-        functionMap[metadata.name] = funcEntry;
-      },
-
-      VariableDeclarator(path) {
-        if (path.node.init?.type === 'ArrowFunctionExpression' ||
-            path.node.init?.type === 'FunctionExpression') {
-          const metadata = extractFunctionMetadata(path, source, filePath);
-          const funcEntry = {
-            hash: metadata.hash,
-            line: metadata.line,
-            endLine: metadata.endLine,
-            size: metadata.size,
-            async: metadata.isAsync
-          };
-
-          // Optionally include source for rename detection and diffs
-          if (includeSource) {
-            funcEntry.source = metadata.source;
-          }
-
-          functionMap[metadata.name] = funcEntry;
-        }
+      // Include source if requested
+      if (includeSource && func.source) {
+        funcEntry.source = func.source;
       }
-    });
+
+      functionMap[func.name] = funcEntry;
+    }
 
   } catch (error) {
     console.log(`    Warning: Could not parse ${filePath}: ${error.message}`);
@@ -128,12 +98,12 @@ export function extractFileFunctions(filePath, includeSource = false) {
 }
 
 /**
- * Recursively find all JS files
+ * Recursively find all supported source files
  * @param {string} dir - Directory to search
  * @param {string[]} ignore - Patterns to ignore
- * @returns {string[]} List of JS files
+ * @returns {string[]} List of source files
  */
-function findJsFiles(dir = '.', ignore = ['node_modules', '.git', '.llm-context']) {
+function findSourceFiles(dir = '.', ignore = ['node_modules', '.git', '.llm-context', '__pycache__', '.venv', 'venv']) {
   const files = [];
 
   function walk(currentDir) {
@@ -150,7 +120,7 @@ function findJsFiles(dir = '.', ignore = ['node_modules', '.git', '.llm-context'
 
       if (entry.isDirectory()) {
         walk(fullPath);
-      } else if (entry.isFile() && entry.name.endsWith('.js')) {
+      } else if (entry.isFile() && isSupported(entry.name)) {
         files.push(relativePath);
       }
     }
@@ -198,16 +168,16 @@ function generateManifest() {
   const granularity = config.granularity || 'file';
 
   console.log(`[1] Configuration: granularity=${granularity}`);
-  console.log('[2] Discovering JavaScript files...');
-  const jsFiles = findJsFiles();
-  console.log(`    Found ${jsFiles.length} JavaScript files\n`);
+  console.log('[2] Discovering source files...');
+  const sourceFiles = findSourceFiles();
+  console.log(`    Found ${sourceFiles.length} source files\n`);
 
   console.log('[3] Computing file hashes...');
   const fileToFunctions = loadGraphData();
   const files = {};
   let totalSize = 0;
 
-  for (const filePath of jsFiles) {
+  for (const filePath of sourceFiles) {
     try {
       const hash = computeFileHash(filePath);
       const metadata = getFileMetadata(filePath);
@@ -260,7 +230,7 @@ function generateManifest() {
   let globalStats = {
     totalFunctions: 0,
     totalCalls: 0,
-    totalFiles: jsFiles.length,
+    totalFiles: sourceFiles.length,
     totalSize
   };
 
@@ -288,6 +258,11 @@ function generateManifest() {
  * @param {object} manifest - Manifest data
  */
 function saveManifest(manifest) {
+  const outputDir = '.llm-context';
+  if (!existsSync(outputDir)) {
+    mkdirSync(outputDir, { recursive: true });
+  }
+
   const manifestPath = '.llm-context/manifest.json';
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
   console.log(`\n✓ Manifest saved to ${manifestPath}`);

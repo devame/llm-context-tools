@@ -12,11 +12,9 @@
 
 import { readFileSync, writeFileSync, existsSync, statSync } from 'fs';
 import { createHash } from 'crypto';
-import { parse } from '@babel/parser';
-import traverse from '@babel/traverse';
 import { detectChanges } from './change-detector.js';
 import { detectAllFunctionChanges, printFunctionChangeSummary } from './function-change-detector.js';
-import { extractFunctionMetadata } from './function-source-extractor.js';
+import { parseFile } from './tree-sitter-parser.js';
 import { analyzeImpact } from './dependency-analyzer.js';
 
 console.log('=== Incremental Analyzer ===\n');
@@ -61,272 +59,66 @@ function getFileMetadata(filePath) {
  */
 function analyzeSpecificFunctions(sourcePath, targetFunctions = null) {
   const startTime = Date.now();
-  const source = readFileSync(sourcePath, 'utf-8');
 
-  // Parse with Babel
-  const ast = parse(source, {
-    sourceType: 'module',
-    plugins: []
-  });
-
-  const allFunctions = [];
-  const callGraph = new Map();
-  const sideEffects = new Map();
-
-  // First pass: collect all functions
-  traverse.default(ast, {
-    FunctionDeclaration(path) {
-      const metadata = extractFunctionMetadata(path, source, sourcePath);
-      allFunctions.push({ metadata, path });
-    },
-
-    VariableDeclarator(path) {
-      if (path.node.init?.type === 'ArrowFunctionExpression' ||
-          path.node.init?.type === 'FunctionExpression') {
-        const metadata = extractFunctionMetadata(path, source, sourcePath);
-        allFunctions.push({ metadata, path });
-      }
-    }
-  });
+  // Use tree-sitter parser for multi-language support
+  const result = parseFile(sourcePath, { includeSource: false });
 
   // Filter to target functions if specified
   const functionsToAnalyze = targetFunctions
-    ? allFunctions.filter(f => targetFunctions.includes(f.metadata.name))
-    : allFunctions;
+    ? result.functions.filter(f => targetFunctions.includes(f.name))
+    : result.functions;
 
-  // Second pass: analyze function bodies
-  const results = [];
-
-  for (const { metadata, path } of functionsToAnalyze) {
-    const funcId = metadata.id;
-    callGraph.set(funcId, []);
-    sideEffects.set(funcId, []);
-
-    // Analyze calls and side effects
-    path.traverse({
-      CallExpression(callPath) {
-        const callee = callPath.node.callee;
-        let calledName = '';
-
-        if (callee.type === 'Identifier') {
-          calledName = callee.name;
-        } else if (callee.type === 'MemberExpression') {
-          const obj = callee.object.name || '';
-          const prop = callee.property.name || '';
-          calledName = obj ? `${obj}.${prop}` : prop;
-        }
-
-        if (calledName) {
-          const calls = callGraph.get(funcId) || [];
-          calls.push(calledName);
-          callGraph.set(funcId, calls);
-
-          // Detect side effects
-          const effects = sideEffects.get(funcId) || [];
-
-          if (/read|write|append|unlink|mkdir|rmdir|fs\./i.test(calledName)) {
-            effects.push({ type: 'file_io', at: calledName });
-          }
-          if (/fetch|request|axios|http|socket/i.test(calledName)) {
-            effects.push({ type: 'network', at: calledName });
-          }
-          if (/console\.|log\.|logger\.|debug|info|warn|error/i.test(calledName)) {
-            effects.push({ type: 'logging', at: calledName });
-          }
-          if (/query|execute|find|findOne|save|insert|update|delete|collection|db\./i.test(calledName)) {
-            effects.push({ type: 'database', at: calledName });
-          }
-          if (/querySelector|getElementById|createElement|appendChild|innerHTML|textContent/i.test(calledName)) {
-            effects.push({ type: 'dom', at: calledName });
-          }
-
-          sideEffects.set(funcId, effects);
-        }
-      }
-    });
-
-    // Build entry
-    const calls = callGraph.get(funcId) || [];
-    const effects = sideEffects.get(funcId) || [];
-    const uniqueCalls = [...new Set(calls)].filter(c => c !== metadata.name);
-    const uniqueEffects = effects.reduce((acc, e) => {
-      const key = `${e.type}:${e.at}`;
-      if (!acc.has(key)) {
-        acc.set(key, e);
-      }
-      return acc;
-    }, new Map());
-
-    results.push({
-      id: metadata.name,
-      type: 'function',
-      file: sourcePath,
-      line: metadata.line,
-      sig: `(${metadata.isAsync ? 'async ' : ''})`,
-      async: metadata.isAsync,
-      calls: uniqueCalls.slice(0, 10),
-      effects: Array.from(uniqueEffects.values()).map(e => e.type),
-      scipDoc: '',
-      functionHash: metadata.hash  // Include for reference
-    });
-  }
+  // Convert to graph entry format
+  const results = functionsToAnalyze.map(func => ({
+    id: func.name,
+    type: 'function',
+    file: sourcePath,
+    line: func.line,
+    sig: func.params,
+    async: func.async,
+    calls: func.calls,
+    effects: func.effects,
+    scipDoc: '',
+    functionHash: func.hash
+  }));
 
   return {
     entries: results,
     analysisTime: Date.now() - startTime,
-    totalFunctions: allFunctions.length,
+    totalFunctions: result.functions.length,
     analyzedFunctions: results.length
   };
 }
 
 /**
- * Analyze a single file using Babel AST parsing
+ * Analyze a single file using tree-sitter parser
  * @param {string} sourcePath - Path to file
  * @returns {Array} Array of function entries for graph
  */
 function analyzeSingleFile(sourcePath) {
   const startTime = Date.now();
-  const functions = [];
 
   try {
-    const source = readFileSync(sourcePath, 'utf-8');
+    // Use tree-sitter parser for multi-language support
+    const result = parseFile(sourcePath, { includeSource: false });
 
-    // Parse with Babel
-    const ast = parse(source, {
-      sourceType: 'module',
-      plugins: []
-    });
-
-    const callGraph = new Map();
-    const sideEffects = new Map();
-
-    // First pass: collect all functions
-    traverse.default(ast, {
-      FunctionDeclaration(path) {
-        const funcName = path.node.id?.name || 'anonymous';
-        const funcId = `${sourcePath}#${funcName}`;
-
-        functions.push({
-          id: funcId,
-          name: funcName,
-          type: 'function',
-          file: sourcePath,
-          line: path.node.loc?.start.line || 0,
-          params: path.node.params.map(p => p.name || '?').join(', '),
-          async: path.node.async,
-          path: path
-        });
-
-        callGraph.set(funcId, []);
-        sideEffects.set(funcId, []);
-      },
-
-      VariableDeclarator(path) {
-        if (path.node.init?.type === 'ArrowFunctionExpression' ||
-            path.node.init?.type === 'FunctionExpression') {
-          const funcName = path.node.id?.name || 'anonymous';
-          const funcId = `${sourcePath}#${funcName}`;
-
-          functions.push({
-            id: funcId,
-            name: funcName,
-            type: 'function',
-            file: sourcePath,
-            line: path.node.loc?.start.line || 0,
-            params: path.node.init.params.map(p => p.name || '?').join(', '),
-            async: path.node.init.async,
-            path: path
-          });
-
-          callGraph.set(funcId, []);
-          sideEffects.set(funcId, []);
-        }
-      }
-    });
-
-    // Second pass: analyze each function's body
-    functions.forEach(func => {
-      if (!func.path) return;
-
-      const funcId = func.id;
-
-      func.path.traverse({
-        CallExpression(path) {
-          const callee = path.node.callee;
-          let calledName = '';
-
-          if (callee.type === 'Identifier') {
-            calledName = callee.name;
-          } else if (callee.type === 'MemberExpression') {
-            const obj = callee.object.name || '';
-            const prop = callee.property.name || '';
-            calledName = obj ? `${obj}.${prop}` : prop;
-          }
-
-          if (calledName) {
-            const calls = callGraph.get(funcId) || [];
-            calls.push(calledName);
-            callGraph.set(funcId, calls);
-
-            // Detect side effects
-            const effects = sideEffects.get(funcId) || [];
-
-            if (/read|write|append|unlink|mkdir|rmdir|fs\./i.test(calledName)) {
-              effects.push({ type: 'file_io', at: calledName });
-            }
-            if (/fetch|request|axios|http|socket/i.test(calledName)) {
-              effects.push({ type: 'network', at: calledName });
-            }
-            if (/console\.|log\.|logger\.|debug|info|warn|error/i.test(calledName)) {
-              effects.push({ type: 'logging', at: calledName });
-            }
-            if (/query|execute|find|findOne|save|insert|update|delete|collection|db\./i.test(calledName)) {
-              effects.push({ type: 'database', at: calledName });
-            }
-            if (/querySelector|getElementById|createElement|appendChild|innerHTML|textContent/i.test(calledName)) {
-              effects.push({ type: 'dom', at: calledName });
-            }
-
-            sideEffects.set(funcId, effects);
-          }
-        }
-      });
-
-      // Clean up
-      delete func.path;
-    });
-
-    // Build output
-    const result = functions.map(func => {
-      const calls = callGraph.get(func.id) || [];
-      const effects = sideEffects.get(func.id) || [];
-
-      const uniqueCalls = [...new Set(calls)].filter(c => c !== func.name);
-      const uniqueEffects = effects.reduce((acc, e) => {
-        const key = `${e.type}:${e.at}`;
-        if (!acc.has(key)) {
-          acc.set(key, e);
-        }
-        return acc;
-      }, new Map());
-
-      return {
-        id: func.name,
-        type: func.type,
-        file: func.file,
-        line: func.line,
-        sig: `(${func.params})`,
-        async: func.async || false,
-        calls: uniqueCalls.slice(0, 10),
-        effects: Array.from(uniqueEffects.values()).map(e => e.type),
-        scipDoc: ''
-      };
-    });
+    // Convert to graph entry format
+    const entries = result.functions.map(func => ({
+      id: func.name,
+      type: 'function',
+      file: sourcePath,
+      line: func.line,
+      sig: func.params,
+      async: func.async,
+      calls: func.calls,
+      effects: func.effects,
+      scipDoc: ''
+    }));
 
     const analysisTime = Date.now() - startTime;
-    console.log(`      Analysis complete: ${functions.length} functions, ${analysisTime}ms`);
+    console.log(`      Analysis complete: ${entries.length} functions, ${analysisTime}ms`);
 
-    return { entries: result, analysisTime };
+    return { entries, analysisTime };
 
   } catch (error) {
     console.log(`      Warning: Could not parse ${sourcePath}: ${error.message}`);
