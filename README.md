@@ -420,14 +420,12 @@ if (currentHash !== cachedHash) {
 - [x] Side effect detection
 - [x] Query interface
 - [x] **Function-level granularity** (98% faster for large files)
+- [x] **Advanced features**: Rename detection, dependency analysis, source storage
 
 ### 🚧 In Progress
 
 - [ ] Watch mode (auto-analyze on file changes)
 - [ ] Multi-language support (Python, Go, Rust, Java)
-- [ ] LLM-powered summarization (using Haiku)
-- [ ] Vector embeddings for semantic search
-- [ ] Cross-file dependency tracking
 
 ### 📋 Planned
 
