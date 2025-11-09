@@ -1,0 +1,31 @@
+{
+  "name": "llm-context-analyzer",
+  "version": "0.1.0",
+  "description": "LLM-optimized code analysis system - hybrid SCIP + custom semantic analysis",
+  "type": "module",
+  "scripts": {
+    "analyze": "node analyze.js",
+    "analyze:full": "rm -f .llm-context/manifest.json && node analyze.js",
+    "query": "node query.js",
+    "check-changes": "node change-detector.js",
+    "parse-scip": "node scip-parser.js",
+    "transform": "node transformer.js",
+    "summarize": "node summary-updater.js"
+  },
+  "keywords": [
+    "llm",
+    "code-analysis",
+    "ast",
+    "scip",
+    "code-intelligence",
+    "semantic-analysis"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@babel/parser": "^7.28.5",
+    "@babel/traverse": "^7.28.5",
+    "@sourcegraph/scip-typescript": "^0.4.0",
+    "protobufjs": "^7.5.4"
+  }
+}

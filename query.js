@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 /**
  * Query Interface - Fast lookups on the LLM-optimized graph
+ *
+ * Note: This file is used to test incremental update detection
  */
 
 import { readFileSync } from 'fs';

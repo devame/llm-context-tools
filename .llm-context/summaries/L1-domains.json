@@ -1,0 +1,70 @@
+[
+  {
+    "domain": "root",
+    "modules": [
+      "query",
+      "scip-parser"
+    ],
+    "functionCount": 3,
+    "effects": [
+      "database",
+      "file_io",
+      "logging"
+    ],
+    "keyFunctions": [
+      {
+        "name": "unknown",
+        "file": "query.js",
+        "line": 49
+      },
+      {
+        "name": "unknown",
+        "file": "query.js",
+        "line": 93
+      },
+      {
+        "name": "unknown",
+        "file": "scip-parser.js",
+        "line": 12
+      }
+    ]
+  },
+  {
+    "domain": ".",
+    "modules": [
+      "scip-parser",
+      "change-detector",
+      "incremental-analyzer",
+      "query",
+      "summary-updater"
+    ],
+    "functionCount": 22,
+    "effects": [
+      "file_io",
+      "logging",
+      "database"
+    ],
+    "keyFunctions": [
+      {
+        "file": "scip-parser.js",
+        "line": 12
+      },
+      {
+        "file": "change-detector.js",
+        "line": 22
+      },
+      {
+        "file": "change-detector.js",
+        "line": 33
+      },
+      {
+        "file": "change-detector.js",
+        "line": 36
+      },
+      {
+        "file": "change-detector.js",
+        "line": 63
+      }
+    ]
+  }
+]
