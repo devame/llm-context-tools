@@ -1,0 +1,66 @@
+# PR comment example: Post analysis stats on pull requests
+
+name: LLM Context (PR Comment)
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Analyze codebase
+        id: analyze
+        uses: ./.github/actions/llm-context-action
+        with:
+          upload-artifact: true
+
+      - name: Read L0 summary
+        id: summary
+        run: |
+          if [ -f ".llm-context/L0-system.md" ]; then
+            SUMMARY=$(head -20 .llm-context/L0-system.md)
+            echo "summary<<EOF" >> $GITHUB_OUTPUT
+            echo "$SUMMARY" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            // Read dependency stats
+            let depInfo = '';
+            if (fs.existsSync('.llm-context/dependencies.json')) {
+              const deps = JSON.parse(fs.readFileSync('.llm-context/dependencies.json', 'utf8'));
+              depInfo = `\n**Dependencies:**\n` +
+                       `- Entry points: ${deps.stats.entryPoints}\n` +
+                       `- Leaf functions: ${deps.stats.leafFunctions}\n` +
+                       `- Cycles: ${deps.stats.cycles}`;
+            }
+
+            const body = `## 📊 LLM Context Analysis\n\n` +
+                        `**Stats:**\n` +
+                        `- Functions: \`${{ steps.analyze.outputs.total-functions }}\`\n` +
+                        `- Files: \`${{ steps.analyze.outputs.total-files }}\`\n` +
+                        depInfo + `\n\n` +
+                        `**Artifact:** [Download context](${context.payload.repository.html_url}/actions/runs/${context.runId})\n\n` +
+                        `<details><summary>System Overview</summary>\n\n` +
+                        `\`\`\`\n${{ steps.summary.outputs.summary }}\n\`\`\`\n\n</details>`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });

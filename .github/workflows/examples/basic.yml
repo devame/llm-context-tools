@@ -1,0 +1,28 @@
+# Basic example: Analyze and upload as artifact
+
+name: LLM Context (Basic)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Analyze codebase
+        uses: ./.github/actions/llm-context-action
+        with:
+          upload-artifact: true
+          artifact-name: llm-context
+
+      - name: Summary
+        run: |
+          echo "✅ Analysis complete!"
+          echo "📥 Artifact uploaded: llm-context"
+          echo "🔗 Download from workflow artifacts"
