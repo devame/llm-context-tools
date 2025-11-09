@@ -1,18 +1,6 @@
 ---
-name: llm-context-tools
-description: Generate LLM-optimized code context with incremental updates for efficient codebase understanding. Use when the user wants to analyze a codebase, understand code architecture, or needs code intelligence data.
-categories:
-  - code-analysis
-  - developer-tools
-  - llm-optimization
-triggers:
-  - analyze codebase
-  - analyze code
-  - code context
-  - code intelligence
-  - understand codebase
-  - incremental analysis
-version: 0.2.0
+name: analyzing-codebases
+description: Generates LLM-optimized code context with function call graphs, side effect detection, and incremental updates. Processes JavaScript/TypeScript codebases to create compact semantic representations including multi-level summaries, entry point identification, and hash-based change tracking. Provides 74-97% token reduction compared to reading raw source files. Useful for understanding code architecture, debugging complex systems, reviewing pull requests, and onboarding to unfamiliar projects.
 ---
 
 # LLM Context Tools

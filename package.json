@@ -11,7 +11,7 @@
     "bin/",
     "*.js",
     "scip.proto",
-    ".claude/skills/llm-context-tools/",
+    ".claude/skills/analyzing-codebases/",
     "README.md",
     "INCREMENTAL_UPDATES.md",
     "DEMO.md",
