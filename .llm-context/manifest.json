@@ -1,51 +1,36 @@
 {
-  "version": "1.0.0",
-  "generated": "2025-11-09T12:09:11.252Z",
+  "version": "2.0.0",
+  "granularity": "function",
+  "generated": "2025-11-09T13:44:12.472Z",
   "files": {
-    "manifest-generator.js": {
-      "hash": "4554b04ebbd9b671f190c9d26fcdeaff",
-      "size": 5323,
-      "lastModified": "2025-11-09T12:03:52.903Z",
+    "analyze.js": {
+      "hash": "c067d028a5d6615e755b5672f370cf18",
+      "size": 3590,
+      "lastModified": "2025-11-09T12:08:59.384Z",
       "functions": [],
-      "analysisTime": null
+      "analysisTime": null,
+      "functionHashes": {}
     },
-    "query.js": {
-      "hash": "71f627a5fa3784331c2b4b7ffea31f97",
-      "size": 4791,
-      "lastModified": "2025-11-09T12:05:24.062Z",
-      "functions": [
-        "query",
-        "traceCalls"
-      ],
-      "analysisTime": 14
-    },
-    "scip-parser.js": {
-      "hash": "1d92669c1d83375a50e12ff550d09f9f",
-      "size": 6186,
-      "lastModified": "2025-11-09T11:43:50.718Z",
-      "functions": [
-        "parseScip"
-      ],
-      "analysisTime": null
-    },
-    "summarizer.js": {
-      "hash": "990665808eb90cda16fab23038eff062",
-      "size": 6667,
-      "lastModified": "2025-11-09T11:43:50.719Z",
+    "bin/llm-context.js": {
+      "hash": "ca1438b59e0ed86f3e7ae8009e7a0159",
+      "size": 5762,
+      "lastModified": "2025-11-09T12:39:49.573Z",
       "functions": [],
-      "analysisTime": null
-    },
-    "transformer.js": {
-      "hash": "fd75b4a2567e0044a0f178464d941828",
-      "size": 9079,
-      "lastModified": "2025-11-09T11:43:50.721Z",
-      "functions": [],
-      "analysisTime": null
+      "analysisTime": null,
+      "functionHashes": {
+        "runScript": {
+          "hash": "f75e11694dfd6a771762bed60e6d045f",
+          "line": 23,
+          "endLine": 40,
+          "size": 451,
+          "async": false
+        }
+      }
     },
     "change-detector.js": {
-      "hash": "52503d7cbe7bd0948370147ec4794b72",
-      "size": 5658,
-      "lastModified": "2025-11-09T12:04:57.244Z",
+      "hash": "ad8cb9a63f590f6cb6dcdd13087c1120",
+      "size": 5735,
+      "lastModified": "2025-11-09T13:44:04.074Z",
       "functions": [
         "computeFileHash",
         "findJsFiles",
@@ -55,12 +40,164 @@
         "printSummary",
         "main"
       ],
-      "analysisTime": 34
+      "analysisTime": null,
+      "functionHashes": {
+        "computeFileHash": {
+          "hash": "4015e9a8b5396528ac52f9aae4a444a8",
+          "line": 23,
+          "endLine": 27,
+          "size": 159,
+          "async": false
+        },
+        "findJsFiles": {
+          "hash": "89c99a1206f400d543a97c862b5ea524",
+          "line": 35,
+          "endLine": 59,
+          "size": 648,
+          "async": false
+        },
+        "walk": {
+          "hash": "da39670806521944b417a2adc808b966",
+          "line": 38,
+          "endLine": 55,
+          "size": 508,
+          "async": false
+        },
+        "loadManifest": {
+          "hash": "0fc889c1a5882ebe921bbb0cacfb13a6",
+          "line": 65,
+          "endLine": 74,
+          "size": 275,
+          "async": false
+        },
+        "detectChanges": {
+          "hash": "08e23badf74fb5e4c7fbe82a97e87863",
+          "line": 80,
+          "endLine": 153,
+          "size": 1953,
+          "async": false
+        },
+        "printSummary": {
+          "hash": "c50ef203bd585e3141e389bf006915b8",
+          "line": 159,
+          "endLine": 191,
+          "size": 1301,
+          "async": false
+        },
+        "main": {
+          "hash": "401ee1e744ad9394bd18e0b680e8107d",
+          "line": 196,
+          "endLine": 200,
+          "size": 94,
+          "async": false
+        }
+      }
+    },
+    "function-change-detector.js": {
+      "hash": "8acfbe4d7bd51b8d4f81d68794e93ebd",
+      "size": 7029,
+      "lastModified": "2025-11-09T13:42:55.589Z",
+      "functions": [
+        "loadConfig",
+        "extractCurrentFunctions",
+        "detectFunctionChanges",
+        "detectAllFunctionChanges",
+        "printFunctionChangeSummary"
+      ],
+      "analysisTime": null,
+      "functionHashes": {
+        "loadConfig": {
+          "hash": "df76c1763901b8b276b265bd5f5ee6d5",
+          "line": 18,
+          "endLine": 26,
+          "size": 206,
+          "async": false
+        },
+        "extractCurrentFunctions": {
+          "hash": "0d7d72a122df746c1b8ad624a08a0bb0",
+          "line": 33,
+          "endLine": 66,
+          "size": 918,
+          "async": false
+        },
+        "detectFunctionChanges": {
+          "hash": "f167240b9160ea7d6eacf1b7eae9756c",
+          "line": 74,
+          "endLine": 154,
+          "size": 2204,
+          "async": false
+        },
+        "detectAllFunctionChanges": {
+          "hash": "8008a3c7a9fa1e75ccf31df1aae0ce7d",
+          "line": 162,
+          "endLine": 177,
+          "size": 440,
+          "async": false
+        },
+        "printFunctionChangeSummary": {
+          "hash": "936ef1de7a3470795fff5a5e6a22d279",
+          "line": 183,
+          "endLine": 240,
+          "size": 2022,
+          "async": false
+        }
+      }
+    },
+    "function-source-extractor.js": {
+      "hash": "bcb559135bb9d8cff91019e96df66ca8",
+      "size": 4708,
+      "lastModified": "2025-11-09T13:38:16.354Z",
+      "functions": [],
+      "analysisTime": null,
+      "functionHashes": {
+        "extractFunctionSource": {
+          "hash": "15a438d0ef62a870463de67a6fce3532",
+          "line": 17,
+          "endLine": 43,
+          "size": 738,
+          "async": false
+        },
+        "hashFunctionSource": {
+          "hash": "c58095851b6575484c4729270b2f0b99",
+          "line": 50,
+          "endLine": 57,
+          "size": 262,
+          "async": false
+        },
+        "generateFunctionId": {
+          "hash": "7c0492931edf72b387002a81fa3744ec",
+          "line": 66,
+          "endLine": 73,
+          "size": 226,
+          "async": false
+        },
+        "extractFunctionMetadata": {
+          "hash": "14a241dfaa98a6e32d9d22728518eff2",
+          "line": 82,
+          "endLine": 115,
+          "size": 831,
+          "async": false
+        },
+        "computeSimilarity": {
+          "hash": "fd0e75623233e33160750947ef74af55",
+          "line": 123,
+          "endLine": 142,
+          "size": 579,
+          "async": false
+        },
+        "detectRename": {
+          "hash": "a88944da2979e00483235fa55fbd2230",
+          "line": 151,
+          "endLine": 169,
+          "size": 437,
+          "async": false
+        }
+      }
     },
     "incremental-analyzer.js": {
-      "hash": "2c0f8f81a4388bc43f32860495253021",
-      "size": 10702,
-      "lastModified": "2025-11-09T12:06:27.357Z",
+      "hash": "d269898572ae1d0769858e137a71c8dd",
+      "size": 20516,
+      "lastModified": "2025-11-09T13:41:58.814Z",
       "functions": [
         "computeFileHash",
         "getFileMetadata",
@@ -70,14 +207,224 @@
         "updateManifest",
         "main"
       ],
-      "analysisTime": 35
+      "analysisTime": null,
+      "functionHashes": {
+        "loadConfig": {
+          "hash": "df76c1763901b8b276b265bd5f5ee6d5",
+          "line": 26,
+          "endLine": 34,
+          "size": 206,
+          "async": false
+        },
+        "computeFileHash": {
+          "hash": "b4700116aae3e5fd58d1b945f2ab7428",
+          "line": 39,
+          "endLine": 42,
+          "size": 138,
+          "async": false
+        },
+        "getFileMetadata": {
+          "hash": "033c4d4618e3789932d03e568030b192",
+          "line": 47,
+          "endLine": 53,
+          "size": 156,
+          "async": false
+        },
+        "analyzeSpecificFunctions": {
+          "hash": "7e2127a3a3f9d0b0819801d1ead53c8e",
+          "line": 61,
+          "endLine": 179,
+          "size": 3832,
+          "async": false
+        },
+        "analyzeSingleFile": {
+          "hash": "edc3c00dcef24bba3658b8eadd07e0b1",
+          "line": 186,
+          "endLine": 334,
+          "size": 4660,
+          "async": false
+        },
+        "loadGraph": {
+          "hash": "8521ff896fb3da800c1313f00fe1dcb5",
+          "line": 339,
+          "endLine": 348,
+          "size": 249,
+          "async": false
+        },
+        "updateGraphFunctionLevel": {
+          "hash": "1ede1a3cd711dfb69336b6d91a8aeaa7",
+          "line": 353,
+          "endLine": 390,
+          "size": 1376,
+          "async": false
+        },
+        "updateGraph": {
+          "hash": "14c877494027cea8c9ecc5fc4c98bb75",
+          "line": 395,
+          "endLine": 422,
+          "size": 1089,
+          "async": false
+        },
+        "updateManifest": {
+          "hash": "525b4db9cdd36f6fd07766cda1e8d935",
+          "line": 427,
+          "endLine": 469,
+          "size": 1395,
+          "async": false
+        },
+        "mainFunctionLevel": {
+          "hash": "dcc483810375e6f50750c4e39a1e011a",
+          "line": 474,
+          "endLine": 567,
+          "size": 3346,
+          "async": true
+        },
+        "mainFileLevel": {
+          "hash": "bb5f67e9b793f071c5fa527a504a7d5e",
+          "line": 572,
+          "endLine": 622,
+          "size": 1982,
+          "async": true
+        },
+        "main": {
+          "hash": "dcf93ee7d2cc472d4f67c30d6dac07ab",
+          "line": 627,
+          "endLine": 638,
+          "size": 272,
+          "async": true
+        }
+      }
     },
-    "analyze.js": {
-      "hash": "c067d028a5d6615e755b5672f370cf18",
-      "size": 3590,
-      "lastModified": "2025-11-09T12:08:59.384Z",
+    "manifest-generator.js": {
+      "hash": "9b7c24133cb54794b7e0a73752991a85",
+      "size": 8395,
+      "lastModified": "2025-11-09T13:43:12.982Z",
       "functions": [],
-      "analysisTime": 20
+      "analysisTime": null,
+      "functionHashes": {
+        "loadConfig": {
+          "hash": "863cd40e998d1eb96353e89dadca18d2",
+          "line": 26,
+          "endLine": 38,
+          "size": 298,
+          "async": false
+        },
+        "computeFileHash": {
+          "hash": "b4700116aae3e5fd58d1b945f2ab7428",
+          "line": 45,
+          "endLine": 48,
+          "size": 138,
+          "async": false
+        },
+        "getFileMetadata": {
+          "hash": "033c4d4618e3789932d03e568030b192",
+          "line": 55,
+          "endLine": 61,
+          "size": 156,
+          "async": false
+        },
+        "extractFileFunctions": {
+          "hash": "f7a6f47e370db3af821d397ba7fc4844",
+          "line": 68,
+          "endLine": 113,
+          "size": 1248,
+          "async": false
+        },
+        "findJsFiles": {
+          "hash": "5d9688df93cc3ad11830c7561cb64ad2",
+          "line": 121,
+          "endLine": 146,
+          "size": 682,
+          "async": false
+        },
+        "walk": {
+          "hash": "096254dcdbe490ad48df089e1272a85a",
+          "line": 124,
+          "endLine": 142,
+          "size": 542,
+          "async": false
+        },
+        "loadGraphData": {
+          "hash": "e5f8ab5b7def01c329e4f2c5478a6ad8",
+          "line": 152,
+          "endLine": 175,
+          "size": 609,
+          "async": false
+        },
+        "generateManifest": {
+          "hash": "51946c7ac3e013956d8f71d46f859f87",
+          "line": 181,
+          "endLine": 268,
+          "size": 2858,
+          "async": false
+        },
+        "saveManifest": {
+          "hash": "71f667bdb45a3714724a9f87aecdacf1",
+          "line": 274,
+          "endLine": 286,
+          "size": 625,
+          "async": false
+        },
+        "main": {
+          "hash": "31e20048d05396d5fda09fc71ce58988",
+          "line": 291,
+          "endLine": 294,
+          "size": 84,
+          "async": false
+        }
+      }
+    },
+    "query.js": {
+      "hash": "4ac4dc5c496454b6fcd558c0d5124259",
+      "size": 4843,
+      "lastModified": "2025-11-09T13:42:36.844Z",
+      "functions": [
+        "query",
+        "traceCalls"
+      ],
+      "analysisTime": null,
+      "functionHashes": {
+        "query": {
+          "hash": "cde8c41e24b6c4b4b78ac7720ee03617",
+          "line": 52,
+          "endLine": 94,
+          "size": 1298,
+          "async": false
+        },
+        "traceCalls": {
+          "hash": "1126a12ebf837e5f8c7e6dff92cdcd54",
+          "line": 96,
+          "endLine": 110,
+          "size": 426,
+          "async": false
+        }
+      }
+    },
+    "scip-parser.js": {
+      "hash": "1d92669c1d83375a50e12ff550d09f9f",
+      "size": 6186,
+      "lastModified": "2025-11-09T11:43:50.718Z",
+      "functions": [
+        "parseScip"
+      ],
+      "analysisTime": null,
+      "functionHashes": {
+        "parseScip": {
+          "hash": "7361e522e6d5a944f7e465d87f9ef0f6",
+          "line": 12,
+          "endLine": 196,
+          "size": 5917,
+          "async": true
+        }
+      }
+    },
+    "summarizer.js": {
+      "hash": "990665808eb90cda16fab23038eff062",
+      "size": 6667,
+      "lastModified": "2025-11-09T11:43:50.719Z",
+      "functions": [],
+      "analysisTime": null,
+      "functionHashes": {}
     },
     "summary-updater.js": {
       "hash": "edf7d29aabe5cd46e201084a4df3aabc",
@@ -90,13 +437,58 @@
         "generateL2",
         "updateSummaries"
       ],
-      "analysisTime": 41
+      "analysisTime": null,
+      "functionHashes": {
+        "loadGraph": {
+          "hash": "54d9c211ef2a5e1f97c1792c80338c85",
+          "line": 22,
+          "endLine": 31,
+          "size": 291,
+          "async": false
+        },
+        "generateL0": {
+          "hash": "5ebf51f2817216586042c797de78ede3",
+          "line": 36,
+          "endLine": 102,
+          "size": 2247,
+          "async": false
+        },
+        "generateL1": {
+          "hash": "484234fdea30d0ab77a216eaf3365589",
+          "line": 107,
+          "endLine": 190,
+          "size": 2602,
+          "async": false
+        },
+        "generateL2": {
+          "hash": "e70b198e3a1640d0136a606509a31d84",
+          "line": 195,
+          "endLine": 260,
+          "size": 2045,
+          "async": false
+        },
+        "updateSummaries": {
+          "hash": "c6f949f4c669f04bd048ab3fa691da69",
+          "line": 266,
+          "endLine": 299,
+          "size": 1151,
+          "async": false
+        }
+      }
+    },
+    "transformer.js": {
+      "hash": "fd75b4a2567e0044a0f178464d941828",
+      "size": 9079,
+      "lastModified": "2025-11-09T11:43:50.721Z",
+      "functions": [],
+      "analysisTime": null,
+      "functionHashes": {}
     }
   },
   "globalStats": {
-    "totalFunctions": 22,
-    "totalCalls": 161,
-    "totalFiles": 9,
-    "totalSize": 31979
+    "totalFunctions": 27,
+    "totalCalls": 177,
+    "totalFiles": 12,
+    "totalSize": 92017
   }
 }
