@@ -1,0 +1,241 @@
+{
+  "version": "1.0.0",
+  "generated": "2025-11-09T13:55:25.434Z",
+  "stats": {
+    "totalFunctions": 27,
+    "totalDependencies": 20,
+    "entryPoints": 23,
+    "leafFunctions": 15,
+    "cycles": 0
+  },
+  "entryPoints": [
+    {
+      "name": "parseScip",
+      "callers": 0
+    },
+    {
+      "name": "main",
+      "callers": 0
+    },
+    {
+      "name": "query",
+      "callers": 0
+    },
+    {
+      "name": "updateSummaries",
+      "callers": 0
+    },
+    {
+      "name": "loadConfig",
+      "callers": 0
+    },
+    {
+      "name": "detectAllFunctionChanges",
+      "callers": 0
+    },
+    {
+      "name": "printFunctionChangeSummary",
+      "callers": 0
+    },
+    {
+      "name": "findJsFiles",
+      "callers": 1
+    },
+    {
+      "name": "walk",
+      "callers": 1
+    },
+    {
+      "name": "loadManifest",
+      "callers": 1
+    },
+    {
+      "name": "detectChanges",
+      "callers": 1
+    },
+    {
+      "name": "printSummary",
+      "callers": 1
+    },
+    {
+      "name": "getFileMetadata",
+      "callers": 1
+    },
+    {
+      "name": "analyzeSingleFile",
+      "callers": 1
+    },
+    {
+      "name": "updateGraph",
+      "callers": 1
+    },
+    {
+      "name": "updateManifest",
+      "callers": 1
+    },
+    {
+      "name": "traceCalls",
+      "callers": 1
+    },
+    {
+      "name": "generateL0",
+      "callers": 1
+    },
+    {
+      "name": "generateL1",
+      "callers": 1
+    },
+    {
+      "name": "generateL2",
+      "callers": 1
+    },
+    {
+      "name": "extractCurrentFunctions",
+      "callers": 1
+    },
+    {
+      "name": "detectFunctionChanges",
+      "callers": 1
+    },
+    {
+      "name": "computeFileHash",
+      "callers": 2
+    }
+  ],
+  "leaves": [
+    "parseScip",
+    "walk",
+    "loadManifest",
+    "printSummary",
+    "computeFileHash",
+    "getFileMetadata",
+    "analyzeSingleFile",
+    "loadGraph",
+    "traceCalls",
+    "generateL0",
+    "generateL1",
+    "generateL2",
+    "loadConfig",
+    "extractCurrentFunctions",
+    "printFunctionChangeSummary"
+  ],
+  "cycles": [],
+  "dependencies": {
+    "parseScip": [],
+    "findJsFiles": [
+      "walk"
+    ],
+    "walk": [],
+    "loadManifest": [],
+    "detectChanges": [
+      "loadManifest",
+      "findJsFiles",
+      "computeFileHash"
+    ],
+    "printSummary": [],
+    "main": [
+      "detectChanges",
+      "printSummary",
+      "analyzeSingleFile",
+      "updateGraph",
+      "updateManifest"
+    ],
+    "computeFileHash": [],
+    "getFileMetadata": [],
+    "analyzeSingleFile": [],
+    "loadGraph": [],
+    "updateGraph": [
+      "loadGraph"
+    ],
+    "updateManifest": [
+      "computeFileHash",
+      "getFileMetadata",
+      "loadGraph"
+    ],
+    "query": [
+      "traceCalls"
+    ],
+    "traceCalls": [],
+    "generateL0": [],
+    "generateL1": [],
+    "generateL2": [],
+    "updateSummaries": [
+      "loadGraph",
+      "generateL0",
+      "generateL1",
+      "generateL2"
+    ],
+    "loadConfig": [],
+    "extractCurrentFunctions": [],
+    "detectFunctionChanges": [
+      "extractCurrentFunctions"
+    ],
+    "detectAllFunctionChanges": [
+      "detectFunctionChanges"
+    ],
+    "printFunctionChangeSummary": []
+  },
+  "dependents": {
+    "parseScip": [],
+    "findJsFiles": [
+      "detectChanges"
+    ],
+    "walk": [
+      "findJsFiles"
+    ],
+    "loadManifest": [
+      "detectChanges"
+    ],
+    "detectChanges": [
+      "main"
+    ],
+    "printSummary": [
+      "main"
+    ],
+    "main": [],
+    "computeFileHash": [
+      "detectChanges",
+      "updateManifest"
+    ],
+    "getFileMetadata": [
+      "updateManifest"
+    ],
+    "analyzeSingleFile": [
+      "main"
+    ],
+    "loadGraph": [
+      "updateGraph",
+      "updateManifest",
+      "updateSummaries"
+    ],
+    "updateGraph": [
+      "main"
+    ],
+    "updateManifest": [
+      "main"
+    ],
+    "query": [],
+    "traceCalls": [
+      "query"
+    ],
+    "generateL0": [
+      "updateSummaries"
+    ],
+    "generateL1": [
+      "updateSummaries"
+    ],
+    "generateL2": [
+      "updateSummaries"
+    ],
+    "updateSummaries": [],
+    "loadConfig": [],
+    "extractCurrentFunctions": [
+      "detectFunctionChanges"
+    ],
+    "detectFunctionChanges": [
+      "detectAllFunctionChanges"
+    ],
+    "detectAllFunctionChanges": [],
+    "printFunctionChangeSummary": []
+  }
+}

@@ -48,6 +48,7 @@ functions.forEach(func => {
 });
 
 // Query functions
+// This function provides fast lookups on the graph
 function query(cmd, arg) {
   switch (cmd) {
     case 'find-function':

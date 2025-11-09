@@ -18,10 +18,12 @@ console.log('=== Change Detector ===\n');
  * Compute MD5 hash of file content
  * @param {string} filePath - Path to file
  * @returns {string} MD5 hash
+ * Note: Uses MD5 for speed, not cryptographic security
  */
-function computeFileHash(filePath) {
+function hashFile(filePath) {
   const content = readFileSync(filePath);
-  return createHash('md5').update(content).digest('hex');
+  const hash = createHash('md5').update(content).digest('hex');
+  return hash;
 }
 
 /**
@@ -114,7 +116,7 @@ function detectChanges() {
       console.log(`    + ${filePath} (NEW)`);
     } else {
       // Existing file - check hash
-      const currentHash = computeFileHash(filePath);
+      const currentHash = hashFile(filePath);
       const manifestHash = manifest.files[filePath].hash;
 
       if (currentHash !== manifestHash) {

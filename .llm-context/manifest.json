@@ -1,66 +1,319 @@
 {
-  "version": "1.0.0",
-  "generated": "2025-11-09T12:09:11.252Z",
+  "version": "2.0.0",
+  "granularity": "function",
+  "generated": "2025-11-09T13:56:11.983Z",
   "files": {
-    "manifest-generator.js": {
-      "hash": "4554b04ebbd9b671f190c9d26fcdeaff",
-      "size": 5323,
-      "lastModified": "2025-11-09T12:03:52.903Z",
+    "analyze.js": {
+      "hash": "c067d028a5d6615e755b5672f370cf18",
+      "size": 3590,
+      "lastModified": "2025-11-09T12:08:59.384Z",
       "functions": [],
-      "analysisTime": null
+      "analysisTime": null,
+      "functionHashes": {}
     },
-    "query.js": {
-      "hash": "71f627a5fa3784331c2b4b7ffea31f97",
-      "size": 4791,
-      "lastModified": "2025-11-09T12:05:24.062Z",
-      "functions": [
-        "query",
-        "traceCalls"
-      ],
-      "analysisTime": 14
-    },
-    "scip-parser.js": {
-      "hash": "1d92669c1d83375a50e12ff550d09f9f",
-      "size": 6186,
-      "lastModified": "2025-11-09T11:43:50.718Z",
-      "functions": [
-        "parseScip"
-      ],
-      "analysisTime": null
-    },
-    "summarizer.js": {
-      "hash": "990665808eb90cda16fab23038eff062",
-      "size": 6667,
-      "lastModified": "2025-11-09T11:43:50.719Z",
+    "bin/llm-context.js": {
+      "hash": "ca1438b59e0ed86f3e7ae8009e7a0159",
+      "size": 5762,
+      "lastModified": "2025-11-09T12:39:49.573Z",
       "functions": [],
-      "analysisTime": null
-    },
-    "transformer.js": {
-      "hash": "fd75b4a2567e0044a0f178464d941828",
-      "size": 9079,
-      "lastModified": "2025-11-09T11:43:50.721Z",
-      "functions": [],
-      "analysisTime": null
+      "analysisTime": null,
+      "functionHashes": {
+        "runScript": {
+          "hash": "f75e11694dfd6a771762bed60e6d045f",
+          "line": 23,
+          "endLine": 40,
+          "size": 451,
+          "async": false,
+          "source": "function runScript(scriptPath, extraArgs = []) {\n  const fullPath = join(rootDir, scriptPath);\n\n  if (!existsSync(fullPath)) {\n    console.error(`Error: Script not found: ${scriptPath}`);\n    process.exit(1);\n  }\n\n  try {\n    const allArgs = [...extraArgs, ...commandArgs].join(' ');\n    execSync(`node \"${fullPath}\" ${allArgs}`, {\n      stdio: 'inherit',\n      cwd: process.cwd()\n    });\n  } catch (error) {\n    process.exit(error.status || 1);\n  }\n}"
+        }
+      }
     },
     "change-detector.js": {
-      "hash": "52503d7cbe7bd0948370147ec4794b72",
-      "size": 5658,
-      "lastModified": "2025-11-09T12:04:57.244Z",
+      "hash": "7a67d1d66098c9d402d1da4ac56c80f6",
+      "size": 5721,
+      "lastModified": "2025-11-09T13:56:01.461Z",
       "functions": [
-        "computeFileHash",
         "findJsFiles",
         "walk",
         "loadManifest",
         "detectChanges",
         "printSummary",
-        "main"
+        "main",
+        "computeFileHash"
       ],
-      "analysisTime": 34
+      "analysisTime": null,
+      "functionHashes": {
+        "hashFile": {
+          "hash": "9e96f31965bab82be63fb83f2c462d10",
+          "line": 23,
+          "endLine": 27,
+          "size": 152,
+          "async": false,
+          "source": "function hashFile(filePath) {\n  const content = readFileSync(filePath);\n  const hash = createHash('md5').update(content).digest('hex');\n  return hash;\n}"
+        },
+        "findJsFiles": {
+          "hash": "89c99a1206f400d543a97c862b5ea524",
+          "line": 35,
+          "endLine": 59,
+          "size": 648,
+          "async": false,
+          "source": "function findJsFiles(dir = '.', ignore = ['node_modules', '.git', '.llm-context']) {\n  const files = [];\n\n  function walk(currentDir) {\n    const entries = readdirSync(currentDir, { withFileTypes: true });\n\n    for (const entry of entries) {\n      const fullPath = join(currentDir, entry.name);\n      const relativePath = relative('.', fullPath);\n\n      if (ignore.some(pattern => relativePath.includes(pattern))) {\n        continue;\n      }\n\n      if (entry.isDirectory()) {\n        walk(fullPath);\n      } else if (entry.isFile() && entry.name.endsWith('.js')) {\n        files.push(relativePath);\n      }\n    }\n  }\n\n  walk(dir);\n  return files;\n}"
+        },
+        "walk": {
+          "hash": "da39670806521944b417a2adc808b966",
+          "line": 38,
+          "endLine": 55,
+          "size": 508,
+          "async": false,
+          "source": "function walk(currentDir) {\n    const entries = readdirSync(currentDir, { withFileTypes: true });\n\n    for (const entry of entries) {\n      const fullPath = join(currentDir, entry.name);\n      const relativePath = relative('.', fullPath);\n\n      if (ignore.some(pattern => relativePath.includes(pattern))) {\n        continue;\n      }\n\n      if (entry.isDirectory()) {\n        walk(fullPath);\n      } else if (entry.isFile() && entry.name.endsWith('.js')) {\n        files.push(relativePath);\n      }\n    }\n  }"
+        },
+        "loadManifest": {
+          "hash": "0fc889c1a5882ebe921bbb0cacfb13a6",
+          "line": 65,
+          "endLine": 74,
+          "size": 275,
+          "async": false,
+          "source": "function loadManifest() {\n  const manifestPath = '.llm-context/manifest.json';\n\n  if (!existsSync(manifestPath)) {\n    console.log('⚠ No manifest.json found - run manifest-generator.js first');\n    return null;\n  }\n\n  return JSON.parse(readFileSync(manifestPath, 'utf-8'));\n}"
+        },
+        "detectChanges": {
+          "hash": "20380ed472521d85278bc6d6a40659af",
+          "line": 80,
+          "endLine": 153,
+          "size": 1946,
+          "async": false,
+          "source": "function detectChanges() {\n  console.log('[1] Loading manifest...');\n  const manifest = loadManifest();\n\n  if (!manifest) {\n    return {\n      added: [],\n      modified: [],\n      deleted: [],\n      unchanged: [],\n      needsFullAnalysis: true\n    };\n  }\n\n  console.log(`    Last analysis: ${manifest.generated}`);\n  console.log(`    Files tracked: ${Object.keys(manifest.files).length}\\n`);\n\n  console.log('[2] Discovering current files...');\n  const currentFiles = findJsFiles();\n  console.log(`    Found ${currentFiles.length} JavaScript files\\n`);\n\n  console.log('[3] Computing changes...');\n\n  const manifestFiles = new Set(Object.keys(manifest.files));\n  const currentFilesSet = new Set(currentFiles);\n\n  const added = [];\n  const modified = [];\n  const deleted = [];\n  const unchanged = [];\n\n  // Check for new and modified files\n  for (const filePath of currentFiles) {\n    if (!manifestFiles.has(filePath)) {\n      // New file\n      added.push(filePath);\n      console.log(`    + ${filePath} (NEW)`);\n    } else {\n      // Existing file - check hash\n      const currentHash = hashFile(filePath);\n      const manifestHash = manifest.files[filePath].hash;\n\n      if (currentHash !== manifestHash) {\n        modified.push(filePath);\n        console.log(`    M ${filePath} (MODIFIED)`);\n        console.log(`      Old: ${manifestHash.substring(0, 12)}...`);\n        console.log(`      New: ${currentHash.substring(0, 12)}...`);\n      } else {\n        unchanged.push(filePath);\n      }\n    }\n  }\n\n  // Check for deleted files\n  for (const filePath of manifestFiles) {\n    if (!currentFilesSet.has(filePath)) {\n      deleted.push(filePath);\n      console.log(`    - ${filePath} (DELETED)`);\n    }\n  }\n\n  if (added.length === 0 && modified.length === 0 && deleted.length === 0) {\n    console.log('    ✓ No changes detected');\n  }\n\n  return {\n    added,\n    modified,\n    deleted,\n    unchanged,\n    needsFullAnalysis: false,\n    manifest\n  };\n}"
+        },
+        "printSummary": {
+          "hash": "c50ef203bd585e3141e389bf006915b8",
+          "line": 159,
+          "endLine": 191,
+          "size": 1301,
+          "async": false,
+          "source": "function printSummary(report) {\n  console.log('\\n=== Change Summary ===');\n\n  if (report.needsFullAnalysis) {\n    console.log('Status: Full analysis needed (no existing manifest)');\n    return;\n  }\n\n  const total = report.added.length + report.modified.length + report.deleted.length;\n\n  console.log(`Total files: ${report.added.length + report.modified.length + report.unchanged.length}`);\n  console.log(`Changes detected: ${total}`);\n  console.log(`  Added: ${report.added.length}`);\n  console.log(`  Modified: ${report.modified.length}`);\n  console.log(`  Deleted: ${report.deleted.length}`);\n  console.log(`  Unchanged: ${report.unchanged.length}`);\n\n  if (total === 0) {\n    console.log('\\n✓ All files up to date - no re-analysis needed!');\n  } else {\n    const percentChanged = ((total / (total + report.unchanged.length)) * 100).toFixed(1);\n    console.log(`\\nRe-analysis needed for ${total} files (${percentChanged}% of codebase)`);\n\n    // Estimate time savings\n    const unchangedCount = report.unchanged.length;\n    if (unchangedCount > 0) {\n      console.log(`\\nEstimated savings:`);\n      console.log(`  Files skipped: ${unchangedCount}`);\n      console.log(`  Approximate time saved: ${(unchangedCount * 0.5).toFixed(1)}s`);\n      console.log(`  (Assuming ~500ms per file)`);\n    }\n  }\n}"
+        },
+        "main": {
+          "hash": "401ee1e744ad9394bd18e0b680e8107d",
+          "line": 196,
+          "endLine": 200,
+          "size": 94,
+          "async": false,
+          "source": "function main() {\n  const report = detectChanges();\n  printSummary(report);\n  return report;\n}"
+        }
+      }
+    },
+    "dependency-analyzer.js": {
+      "hash": "c8d1def3b049d614a3aedcca929425e3",
+      "size": 10555,
+      "lastModified": "2025-11-09T13:54:06.583Z",
+      "functions": [],
+      "analysisTime": null,
+      "functionHashes": {
+        "loadConfig": {
+          "hash": "8324daae1cd076e72a2cff6c009bc7ba",
+          "line": 17,
+          "endLine": 25,
+          "size": 225,
+          "async": false,
+          "source": "function loadConfig() {\n  const configPath = './llm-context.config.json';\n\n  if (!existsSync(configPath)) {\n    return { analysis: { trackDependencies: false } };\n  }\n\n  return JSON.parse(readFileSync(configPath, 'utf-8'));\n}"
+        },
+        "loadGraph": {
+          "hash": "8521ff896fb3da800c1313f00fe1dcb5",
+          "line": 31,
+          "endLine": 40,
+          "size": 249,
+          "async": false,
+          "source": "function loadGraph() {\n  const graphPath = '.llm-context/graph.jsonl';\n\n  if (!existsSync(graphPath)) {\n    return [];\n  }\n\n  const lines = readFileSync(graphPath, 'utf-8').split('\\n').filter(Boolean);\n  return lines.map(line => JSON.parse(line));\n}"
+        },
+        "buildDependencyGraph": {
+          "hash": "a79b75dc5a094a3a0bd54b71f75f2418",
+          "line": 47,
+          "endLine": 79,
+          "size": 1001,
+          "async": false,
+          "source": "function buildDependencyGraph(functions) {\n  const dependencies = new Map(); // function -> functions it depends on\n  const dependents = new Map();   // function -> functions that depend on it\n  const functionMap = new Map();  // name -> full entry\n\n  // Index functions by name\n  for (const func of functions) {\n    const name = func.name || func.id;\n    functionMap.set(name, func);\n    dependencies.set(name, new Set());\n    dependents.set(name, new Set());\n  }\n\n  // Build dependency relationships\n  for (const func of functions) {\n    const name = func.name || func.id;\n    const calls = func.calls || [];\n\n    for (const calledName of calls) {\n      // Only track dependencies to functions we know about\n      if (functionMap.has(calledName)) {\n        dependencies.get(name).add(calledName);\n        dependents.get(calledName).add(name);\n      }\n    }\n  }\n\n  return {\n    dependencies,  // what each function depends on\n    dependents,    // what depends on each function\n    functionMap\n  };\n}"
+        },
+        "computeImpactSet": {
+          "hash": "084d1f78d9d6434a7ba0aa5f8cf24bda",
+          "line": 88,
+          "endLine": 116,
+          "size": 690,
+          "async": false,
+          "source": "function computeImpactSet(functionName, dependents, maxDepth = 10) {\n  const impacted = new Set();\n  const queue = [[functionName, 0]]; // [name, depth]\n  const visited = new Set();\n\n  while (queue.length > 0) {\n    const [current, depth] = queue.shift();\n\n    if (visited.has(current) || depth > maxDepth) {\n      continue;\n    }\n\n    visited.add(current);\n\n    if (current !== functionName) {\n      impacted.add(current);\n    }\n\n    // Add all functions that depend on current\n    const deps = dependents.get(current) || new Set();\n    for (const dependent of deps) {\n      if (!visited.has(dependent)) {\n        queue.push([dependent, depth + 1]);\n      }\n    }\n  }\n\n  return impacted;\n}"
+        },
+        "findEntryPoints": {
+          "hash": "693d1692424f0dbb3444002651ab5930",
+          "line": 124,
+          "endLine": 140,
+          "size": 443,
+          "async": false,
+          "source": "function findEntryPoints(dependents, maxCallers = 2) {\n  const entryPoints = [];\n\n  for (const [funcName, callers] of dependents) {\n    if (callers.size <= maxCallers ||\n        funcName.includes('main') ||\n        funcName.includes('init') ||\n        funcName.includes('start')) {\n      entryPoints.push({\n        name: funcName,\n        callers: callers.size\n      });\n    }\n  }\n\n  return entryPoints.sort((a, b) => a.callers - b.callers);\n}"
+        },
+        "findLeafFunctions": {
+          "hash": "a73c3fbb14e5546501a1d815f24bbe8b",
+          "line": 147,
+          "endLine": 157,
+          "size": 199,
+          "async": false,
+          "source": "function findLeafFunctions(dependencies) {\n  const leaves = [];\n\n  for (const [funcName, deps] of dependencies) {\n    if (deps.size === 0) {\n      leaves.push(funcName);\n    }\n  }\n\n  return leaves;\n}"
+        },
+        "detectCycles": {
+          "hash": "b1bba446d43ddb4717c6270f3db306be",
+          "line": 164,
+          "endLine": 203,
+          "size": 853,
+          "async": false,
+          "source": "function detectCycles(dependencies) {\n  const cycles = [];\n  const visited = new Set();\n  const recursionStack = new Set();\n  const path = [];\n\n  function dfs(node) {\n    visited.add(node);\n    recursionStack.add(node);\n    path.push(node);\n\n    const deps = dependencies.get(node) || new Set();\n\n    for (const dep of deps) {\n      if (!visited.has(dep)) {\n        if (dfs(dep)) {\n          return true;\n        }\n      } else if (recursionStack.has(dep)) {\n        // Found cycle\n        const cycleStart = path.indexOf(dep);\n        const cycle = path.slice(cycleStart);\n        cycle.push(dep); // Close the cycle\n        cycles.push(cycle);\n      }\n    }\n\n    path.pop();\n    recursionStack.delete(node);\n    return false;\n  }\n\n  for (const node of dependencies.keys()) {\n    if (!visited.has(node)) {\n      dfs(node);\n    }\n  }\n\n  return cycles;\n}"
+        },
+        "dfs": {
+          "hash": "fbf2ed9aed25aad330749c339be072bf",
+          "line": 214,
+          "endLine": 233,
+          "size": 410,
+          "async": false,
+          "source": "function dfs(node, depth) {\n    if (visited.has(node)) {\n      return 0; // Avoid cycles\n    }\n\n    visited.add(node);\n\n    const deps = dependencies.get(node) || new Set();\n    if (deps.size === 0) {\n      return depth;\n    }\n\n    let maxDepth = depth;\n    for (const dep of deps) {\n      const childDepth = dfs(dep, depth + 1);\n      maxDepth = Math.max(maxDepth, childDepth);\n    }\n\n    return maxDepth;\n  }"
+        },
+        "computeDependencyDepth": {
+          "hash": "2331d748e2559fcde765560ea9442688",
+          "line": 211,
+          "endLine": 236,
+          "size": 538,
+          "async": false,
+          "source": "function computeDependencyDepth(functionName, dependencies) {\n  const visited = new Set();\n\n  function dfs(node, depth) {\n    if (visited.has(node)) {\n      return 0; // Avoid cycles\n    }\n\n    visited.add(node);\n\n    const deps = dependencies.get(node) || new Set();\n    if (deps.size === 0) {\n      return depth;\n    }\n\n    let maxDepth = depth;\n    for (const dep of deps) {\n      const childDepth = dfs(dep, depth + 1);\n      maxDepth = Math.max(maxDepth, childDepth);\n    }\n\n    return maxDepth;\n  }\n\n  return dfs(functionName, 0);\n}"
+        },
+        "analyzeDependencies": {
+          "hash": "82a7c7400e8082356f76940d35c1e411",
+          "line": 241,
+          "endLine": 324,
+          "size": 2754,
+          "async": false,
+          "source": "function analyzeDependencies() {\n  console.log('=== Dependency Analyzer ===\\n');\n\n  const config = loadConfig();\n  const trackDeps = config.analysis?.trackDependencies || false;\n\n  if (!trackDeps) {\n    console.log('Dependency tracking disabled in config');\n    console.log('Set analysis.trackDependencies = true to enable');\n    return null;\n  }\n\n  const functions = loadGraph();\n  console.log(`[1] Loaded ${functions.length} functions from graph\\n`);\n\n  const { dependencies, dependents, functionMap } = buildDependencyGraph(functions);\n  console.log(`[2] Built dependency graph`);\n  console.log(`    Total dependencies: ${Array.from(dependencies.values()).reduce((sum, deps) => sum + deps.size, 0)}\\n`);\n\n  // Find entry points\n  const entryPoints = findEntryPoints(dependents);\n  console.log(`[3] Entry points (${entryPoints.length}):`);\n  for (const ep of entryPoints.slice(0, 10)) {\n    console.log(`    - ${ep.name} (${ep.callers} callers)`);\n  }\n  if (entryPoints.length > 10) {\n    console.log(`    ... and ${entryPoints.length - 10} more`);\n  }\n\n  // Find leaf functions\n  const leaves = findLeafFunctions(dependencies);\n  console.log(`\\n[4] Leaf functions (${leaves.length}):`);\n  console.log(`    ${leaves.slice(0, 20).join(', ')}`);\n  if (leaves.length > 20) {\n    console.log(`    ... and ${leaves.length - 20} more`);\n  }\n\n  // Detect cycles\n  const cycles = detectCycles(dependencies);\n  if (cycles.length > 0) {\n    console.log(`\\n[5] ⚠ Dependency cycles detected (${cycles.length}):`);\n    for (const cycle of cycles.slice(0, 5)) {\n      console.log(`    ${cycle.join(' → ')}`);\n    }\n    if (cycles.length > 5) {\n      console.log(`    ... and ${cycles.length - 5} more`);\n    }\n  } else {\n    console.log(`\\n[5] ✓ No dependency cycles detected`);\n  }\n\n  // Save dependency graph\n  const depGraph = {\n    version: '1.0.0',\n    generated: new Date().toISOString(),\n    stats: {\n      totalFunctions: functions.length,\n      totalDependencies: Array.from(dependencies.values()).reduce((sum, deps) => sum + deps.size, 0),\n      entryPoints: entryPoints.length,\n      leafFunctions: leaves.length,\n      cycles: cycles.length\n    },\n    entryPoints,\n    leaves,\n    cycles,\n    dependencies: Object.fromEntries(\n      Array.from(dependencies.entries()).map(([name, deps]) => [\n        name,\n        Array.from(deps)\n      ])\n    ),\n    dependents: Object.fromEntries(\n      Array.from(dependents.entries()).map(([name, deps]) => [\n        name,\n        Array.from(deps)\n      ])\n    )\n  };\n\n  writeFileSync('.llm-context/dependencies.json', JSON.stringify(depGraph, null, 2));\n  console.log(`\\n✓ Dependency graph saved to .llm-context/dependencies.json`);\n\n  return { dependencies, dependents, functionMap, cycles, entryPoints, leaves };\n}"
+        },
+        "analyzeImpact": {
+          "hash": "e4ae24d43fb29831f16f37329756d707",
+          "line": 331,
+          "endLine": 377,
+          "size": 1525,
+          "async": false,
+          "source": "function analyzeImpact(changedFunctions) {\n  const functions = loadGraph();\n  const { dependencies, dependents, functionMap } = buildDependencyGraph(functions);\n\n  const config = loadConfig();\n  const maxDepth = config.analysis?.maxCallDepth || 10;\n\n  const impactReport = {\n    changedFunctions,\n    totalImpacted: new Set(),\n    perFunctionImpact: {}\n  };\n\n  console.log('\\n=== Impact Analysis ===\\n');\n\n  for (const funcName of changedFunctions) {\n    const impacted = computeImpactSet(funcName, dependents, maxDepth);\n\n    impactReport.perFunctionImpact[funcName] = {\n      directCallers: Array.from(dependents.get(funcName) || new Set()),\n      totalImpacted: impacted.size,\n      impactedFunctions: Array.from(impacted)\n    };\n\n    // Add to total impacted set\n    for (const imp of impacted) {\n      impactReport.totalImpacted.add(imp);\n    }\n\n    console.log(`${funcName}:`);\n    console.log(`  Direct callers: ${impactReport.perFunctionImpact[funcName].directCallers.length}`);\n    console.log(`  Total impacted: ${impacted.size}`);\n\n    if (impacted.size > 0 && impacted.size <= 10) {\n      console.log(`  Affected functions: ${Array.from(impacted).join(', ')}`);\n    } else if (impacted.size > 10) {\n      console.log(`  Affected functions: ${Array.from(impacted).slice(0, 10).join(', ')}...`);\n    }\n\n    console.log('');\n  }\n\n  impactReport.totalImpacted = Array.from(impactReport.totalImpacted);\n  console.log(`Total unique functions impacted: ${impactReport.totalImpacted.length}\\n`);\n\n  return impactReport;\n}"
+        }
+      }
+    },
+    "function-change-detector.js": {
+      "hash": "698db3673b7d6d900696b931592151db",
+      "size": 8905,
+      "lastModified": "2025-11-09T13:52:58.495Z",
+      "functions": [
+        "loadConfig",
+        "extractCurrentFunctions",
+        "detectFunctionChanges",
+        "detectAllFunctionChanges",
+        "printFunctionChangeSummary"
+      ],
+      "analysisTime": null,
+      "functionHashes": {
+        "loadConfig": {
+          "hash": "df76c1763901b8b276b265bd5f5ee6d5",
+          "line": 18,
+          "endLine": 26,
+          "size": 206,
+          "async": false,
+          "source": "function loadConfig() {\n  const configPath = './llm-context.config.json';\n\n  if (!existsSync(configPath)) {\n    return { granularity: 'file' };\n  }\n\n  return JSON.parse(readFileSync(configPath, 'utf-8'));\n}"
+        },
+        "extractCurrentFunctions": {
+          "hash": "0d7d72a122df746c1b8ad624a08a0bb0",
+          "line": 33,
+          "endLine": 66,
+          "size": 918,
+          "async": false,
+          "source": "function extractCurrentFunctions(filePath) {\n  const functionMap = new Map();\n\n  try {\n    const source = readFileSync(filePath, 'utf-8');\n\n    // Parse with Babel\n    const ast = parse(source, {\n      sourceType: 'module',\n      plugins: []\n    });\n\n    // Collect all functions\n    traverse.default(ast, {\n      FunctionDeclaration(path) {\n        const metadata = extractFunctionMetadata(path, source, filePath);\n        functionMap.set(metadata.name, metadata);\n      },\n\n      VariableDeclarator(path) {\n        if (path.node.init?.type === 'ArrowFunctionExpression' ||\n            path.node.init?.type === 'FunctionExpression') {\n          const metadata = extractFunctionMetadata(path, source, filePath);\n          functionMap.set(metadata.name, metadata);\n        }\n      }\n    });\n\n  } catch (error) {\n    console.log(`    Warning: Could not parse ${filePath}: ${error.message}`);\n  }\n\n  return functionMap;\n}"
+        },
+        "detectFunctionChanges": {
+          "hash": "075d502608d6b7afcb16061caa138ced",
+          "line": 74,
+          "endLine": 189,
+          "size": 3495,
+          "async": true,
+          "source": "async function detectFunctionChanges(filePath, manifest) {\n  const changes = {\n    filePath,\n    added: [],\n    modified: [],\n    deleted: [],\n    unchanged: [],\n    renames: []\n  };\n\n  // Get current functions\n  const currentFunctions = extractCurrentFunctions(filePath);\n\n  // Get manifest functions\n  const fileEntry = manifest.files[filePath];\n  if (!fileEntry || !fileEntry.functionHashes) {\n    // No previous function data - all current functions are \"added\"\n    for (const [name, metadata] of currentFunctions) {\n      changes.added.push({\n        name,\n        hash: metadata.hash,\n        line: metadata.line,\n        size: metadata.size\n      });\n    }\n    return changes;\n  }\n\n  const manifestFunctions = fileEntry.functionHashes;\n\n  // Compare current vs manifest\n  for (const [name, metadata] of currentFunctions) {\n    const manifestFunc = manifestFunctions[name];\n\n    if (!manifestFunc) {\n      // New function\n      changes.added.push({\n        name,\n        hash: metadata.hash,\n        line: metadata.line,\n        size: metadata.size\n      });\n    } else if (manifestFunc.hash !== metadata.hash) {\n      // Modified function\n      changes.modified.push({\n        name,\n        oldHash: manifestFunc.hash,\n        newHash: metadata.hash,\n        oldLine: manifestFunc.line,\n        newLine: metadata.line,\n        sizeDelta: metadata.size - manifestFunc.size\n      });\n    } else {\n      // Unchanged function\n      changes.unchanged.push(name);\n    }\n  }\n\n  // Find deleted functions\n  for (const name in manifestFunctions) {\n    if (!currentFunctions.has(name)) {\n      changes.deleted.push({\n        name,\n        hash: manifestFunctions[name].hash,\n        line: manifestFunctions[name].line\n      });\n    }\n  }\n\n  // Detect potential renames (deleted + added with similar code)\n  if (changes.deleted.length > 0 && changes.added.length > 0) {\n    const config = loadConfig();\n    const detectRenames = config.incremental?.detectRenames || false;\n\n    if (detectRenames && fileEntry.functionHashes) {\n      // Check if we have source stored for similarity comparison\n      const hasStoredSource = Object.values(fileEntry.functionHashes).some(f => f.source);\n\n      if (hasStoredSource) {\n        const { computeSimilarity } = await import('./function-source-extractor.js');\n        const threshold = config.incremental?.similarityThreshold || 0.85;\n\n        for (const deletedFunc of changes.deleted) {\n          const oldSource = manifestFunctions[deletedFunc.name]?.source;\n\n          if (!oldSource) continue;\n\n          // Compare with each added function\n          for (const addedFunc of changes.added) {\n            const newMetadata = currentFunctions.get(addedFunc.name);\n            if (!newMetadata || !newMetadata.source) continue;\n\n            const similarity = computeSimilarity(oldSource, newMetadata.source);\n\n            if (similarity >= threshold) {\n              changes.renames.push({\n                from: deletedFunc.name,\n                to: addedFunc.name,\n                similarity: similarity.toFixed(3),\n                oldLine: deletedFunc.line,\n                newLine: addedFunc.line\n              });\n\n              // Remove from deleted and added since it's a rename\n              changes.deleted = changes.deleted.filter(f => f.name !== deletedFunc.name);\n              changes.added = changes.added.filter(f => f.name !== addedFunc.name);\n              break;\n            }\n          }\n        }\n      }\n    }\n  }\n\n  return changes;\n}"
+        },
+        "detectAllFunctionChanges": {
+          "hash": "e9b2ce6bd30fe1771446187815fb14f6",
+          "line": 197,
+          "endLine": 213,
+          "size": 511,
+          "async": true,
+          "source": "async function detectAllFunctionChanges(changedFiles, manifest) {\n  const allChanges = new Map();\n\n  for (const filePath of changedFiles) {\n    const changes = await detectFunctionChanges(filePath, manifest);\n\n    // Only include files with actual function changes\n    if (changes.added.length > 0 ||\n        changes.modified.length > 0 ||\n        changes.deleted.length > 0 ||\n        (changes.renames && changes.renames.length > 0)) {\n      allChanges.set(filePath, changes);\n    }\n  }\n\n  return allChanges;\n}"
+        },
+        "printFunctionChangeSummary": {
+          "hash": "39b2bd4ff089e1fd4437eb10a8a82f02",
+          "line": 219,
+          "endLine": 288,
+          "size": 2530,
+          "async": false,
+          "source": "function printFunctionChangeSummary(functionChanges) {\n  let totalAdded = 0;\n  let totalModified = 0;\n  let totalDeleted = 0;\n  let totalRenamed = 0;\n  let totalUnchanged = 0;\n\n  console.log('\\n=== Function-Level Changes ===\\n');\n\n  for (const [filePath, changes] of functionChanges) {\n    console.log(`${filePath}:`);\n\n    if (changes.renames && changes.renames.length > 0) {\n      console.log(`  Renamed (${changes.renames.length}):`);\n      for (const rename of changes.renames) {\n        console.log(`    ≈ ${rename.from} → ${rename.to} (${(rename.similarity * 100).toFixed(1)}% similar, line ${rename.oldLine}→${rename.newLine})`);\n      }\n      totalRenamed += changes.renames.length;\n    }\n\n    if (changes.added.length > 0) {\n      console.log(`  Added (${changes.added.length}):`);\n      for (const func of changes.added) {\n        console.log(`    + ${func.name} (line ${func.line}, ${func.size} bytes)`);\n      }\n      totalAdded += changes.added.length;\n    }\n\n    if (changes.modified.length > 0) {\n      console.log(`  Modified (${changes.modified.length}):`);\n      for (const func of changes.modified) {\n        const delta = func.sizeDelta >= 0 ? `+${func.sizeDelta}` : `${func.sizeDelta}`;\n        console.log(`    ~ ${func.name} (line ${func.oldLine}→${func.newLine}, ${delta} bytes)`);\n      }\n      totalModified += changes.modified.length;\n    }\n\n    if (changes.deleted.length > 0) {\n      console.log(`  Deleted (${changes.deleted.length}):`);\n      for (const func of changes.deleted) {\n        console.log(`    - ${func.name} (was line ${func.line})`);\n      }\n      totalDeleted += changes.deleted.length;\n    }\n\n    if (changes.unchanged.length > 0) {\n      console.log(`  Unchanged: ${changes.unchanged.length} functions`);\n      totalUnchanged += changes.unchanged.length;\n    }\n\n    console.log('');\n  }\n\n  console.log('=== Summary ===');\n  if (totalRenamed > 0) {\n    console.log(`Total functions renamed: ${totalRenamed}`);\n  }\n  console.log(`Total functions added: ${totalAdded}`);\n  console.log(`Total functions modified: ${totalModified}`);\n  console.log(`Total functions deleted: ${totalDeleted}`);\n  console.log(`Total functions unchanged: ${totalUnchanged}`);\n\n  const totalChanged = totalAdded + totalModified + totalDeleted + totalRenamed;\n  const totalFunctions = totalChanged + totalUnchanged;\n  const percentUnchanged = totalFunctions > 0\n    ? ((totalUnchanged / totalFunctions) * 100).toFixed(1)\n    : 0;\n\n  console.log(`\\n✓ Efficiency: ${percentUnchanged}% of functions skipped!`);\n}"
+        }
+      }
+    },
+    "function-source-extractor.js": {
+      "hash": "bcb559135bb9d8cff91019e96df66ca8",
+      "size": 4708,
+      "lastModified": "2025-11-09T13:38:16.354Z",
+      "functions": [],
+      "analysisTime": null,
+      "functionHashes": {
+        "extractFunctionSource": {
+          "hash": "15a438d0ef62a870463de67a6fce3532",
+          "line": 17,
+          "endLine": 43,
+          "size": 738,
+          "async": false,
+          "source": "function extractFunctionSource(path, sourceCode) {\n  const { start, end } = path.node.loc;\n\n  if (!start || !end) {\n    return '';\n  }\n\n  const lines = sourceCode.split('\\n');\n\n  // Extract lines from start.line to end.line (1-indexed)\n  const funcLines = lines.slice(start.line - 1, end.line);\n\n  // Handle single-line functions\n  if (funcLines.length === 1) {\n    return funcLines[0].substring(start.column, end.column);\n  }\n\n  // Multi-line functions\n  // First line: from start.column to end\n  funcLines[0] = funcLines[0].substring(start.column);\n\n  // Last line: from beginning to end.column\n  const lastIdx = funcLines.length - 1;\n  funcLines[lastIdx] = funcLines[lastIdx].substring(0, end.column);\n\n  return funcLines.join('\\n');\n}"
+        },
+        "hashFunctionSource": {
+          "hash": "c58095851b6575484c4729270b2f0b99",
+          "line": 50,
+          "endLine": 57,
+          "size": 262,
+          "async": false,
+          "source": "function hashFunctionSource(source) {\n  // Normalize whitespace to avoid spurious changes from reformatting\n  const normalized = source\n    .replace(/\\s+/g, ' ')  // Collapse whitespace\n    .trim();\n\n  return createHash('md5').update(normalized).digest('hex');\n}"
+        },
+        "generateFunctionId": {
+          "hash": "7c0492931edf72b387002a81fa3744ec",
+          "line": 66,
+          "endLine": 73,
+          "size": 226,
+          "async": false,
+          "source": "function generateFunctionId(filePath, funcName, line) {\n  // For anonymous functions, use line number\n  if (!funcName || funcName === 'anonymous') {\n    return `${filePath}#L${line}`;\n  }\n\n  return `${filePath}#${funcName}`;\n}"
+        },
+        "extractFunctionMetadata": {
+          "hash": "14a241dfaa98a6e32d9d22728518eff2",
+          "line": 82,
+          "endLine": 115,
+          "size": 831,
+          "async": false,
+          "source": "function extractFunctionMetadata(path, sourceCode, filePath) {\n  const node = path.node;\n\n  // Get function name\n  let funcName = 'anonymous';\n  if (node.id?.name) {\n    funcName = node.id.name;\n  } else if (path.parent?.type === 'VariableDeclarator' && path.parent.id?.name) {\n    funcName = path.parent.id.name;\n  }\n\n  // Extract source\n  const source = extractFunctionSource(path, sourceCode);\n  const hash = hashFunctionSource(source);\n\n  // Get location\n  const line = node.loc?.start.line || 0;\n  const endLine = node.loc?.end.line || 0;\n\n  // Generate unique ID\n  const funcId = generateFunctionId(filePath, funcName, line);\n\n  return {\n    id: funcId,\n    name: funcName,\n    line,\n    endLine,\n    source,\n    hash,\n    size: source.length,\n    isAsync: node.async || false,\n    isGenerator: node.generator || false\n  };\n}"
+        },
+        "computeSimilarity": {
+          "hash": "fd0e75623233e33160750947ef74af55",
+          "line": 123,
+          "endLine": 142,
+          "size": 579,
+          "async": false,
+          "source": "function computeSimilarity(source1, source2) {\n  // Simple similarity: compare normalized versions\n  const norm1 = source1.replace(/\\s+/g, ' ').trim();\n  const norm2 = source2.replace(/\\s+/g, ' ').trim();\n\n  if (norm1 === norm2) return 1.0;\n\n  // Levenshtein distance would be better, but this is simple\n  const maxLen = Math.max(norm1.length, norm2.length);\n  if (maxLen === 0) return 1.0;\n\n  let matches = 0;\n  const minLen = Math.min(norm1.length, norm2.length);\n\n  for (let i = 0; i < minLen; i++) {\n    if (norm1[i] === norm2[i]) matches++;\n  }\n\n  return matches / maxLen;\n}"
+        },
+        "detectRename": {
+          "hash": "a88944da2979e00483235fa55fbd2230",
+          "line": 151,
+          "endLine": 169,
+          "size": 437,
+          "async": false,
+          "source": "function detectRename(deletedFunc, addedFuncs, threshold = 0.9) {\n  let bestMatch = null;\n  let bestScore = threshold;\n\n  for (const addedFunc of addedFuncs) {\n    const score = computeSimilarity(deletedFunc.source, addedFunc.source);\n\n    if (score > bestScore) {\n      bestScore = score;\n      bestMatch = {\n        from: deletedFunc.name,\n        to: addedFunc.name,\n        similarity: score\n      };\n    }\n  }\n\n  return bestMatch;\n}"
+        }
+      }
     },
     "incremental-analyzer.js": {
-      "hash": "2c0f8f81a4388bc43f32860495253021",
-      "size": 10702,
-      "lastModified": "2025-11-09T12:06:27.357Z",
+      "hash": "e79b31339478c6103fd614776d3854ee",
+      "size": 21332,
+      "lastModified": "2025-11-09T13:55:05.733Z",
       "functions": [
         "computeFileHash",
         "getFileMetadata",
@@ -70,14 +323,249 @@
         "updateManifest",
         "main"
       ],
-      "analysisTime": 35
+      "analysisTime": null,
+      "functionHashes": {
+        "loadConfig": {
+          "hash": "df76c1763901b8b276b265bd5f5ee6d5",
+          "line": 27,
+          "endLine": 35,
+          "size": 206,
+          "async": false,
+          "source": "function loadConfig() {\n  const configPath = './llm-context.config.json';\n\n  if (!existsSync(configPath)) {\n    return { granularity: 'file' };\n  }\n\n  return JSON.parse(readFileSync(configPath, 'utf-8'));\n}"
+        },
+        "computeFileHash": {
+          "hash": "b4700116aae3e5fd58d1b945f2ab7428",
+          "line": 40,
+          "endLine": 43,
+          "size": 138,
+          "async": false,
+          "source": "function computeFileHash(filePath) {\n  const content = readFileSync(filePath);\n  return createHash('md5').update(content).digest('hex');\n}"
+        },
+        "getFileMetadata": {
+          "hash": "033c4d4618e3789932d03e568030b192",
+          "line": 48,
+          "endLine": 54,
+          "size": 156,
+          "async": false,
+          "source": "function getFileMetadata(filePath) {\n  const stats = statSync(filePath);\n  return {\n    size: stats.size,\n    lastModified: stats.mtime.toISOString()\n  };\n}"
+        },
+        "analyzeSpecificFunctions": {
+          "hash": "7e2127a3a3f9d0b0819801d1ead53c8e",
+          "line": 62,
+          "endLine": 180,
+          "size": 3832,
+          "async": false,
+          "source": "function analyzeSpecificFunctions(sourcePath, targetFunctions = null) {\n  const startTime = Date.now();\n  const source = readFileSync(sourcePath, 'utf-8');\n\n  // Parse with Babel\n  const ast = parse(source, {\n    sourceType: 'module',\n    plugins: []\n  });\n\n  const allFunctions = [];\n  const callGraph = new Map();\n  const sideEffects = new Map();\n\n  // First pass: collect all functions\n  traverse.default(ast, {\n    FunctionDeclaration(path) {\n      const metadata = extractFunctionMetadata(path, source, sourcePath);\n      allFunctions.push({ metadata, path });\n    },\n\n    VariableDeclarator(path) {\n      if (path.node.init?.type === 'ArrowFunctionExpression' ||\n          path.node.init?.type === 'FunctionExpression') {\n        const metadata = extractFunctionMetadata(path, source, sourcePath);\n        allFunctions.push({ metadata, path });\n      }\n    }\n  });\n\n  // Filter to target functions if specified\n  const functionsToAnalyze = targetFunctions\n    ? allFunctions.filter(f => targetFunctions.includes(f.metadata.name))\n    : allFunctions;\n\n  // Second pass: analyze function bodies\n  const results = [];\n\n  for (const { metadata, path } of functionsToAnalyze) {\n    const funcId = metadata.id;\n    callGraph.set(funcId, []);\n    sideEffects.set(funcId, []);\n\n    // Analyze calls and side effects\n    path.traverse({\n      CallExpression(callPath) {\n        const callee = callPath.node.callee;\n        let calledName = '';\n\n        if (callee.type === 'Identifier') {\n          calledName = callee.name;\n        } else if (callee.type === 'MemberExpression') {\n          const obj = callee.object.name || '';\n          const prop = callee.property.name || '';\n          calledName = obj ? `${obj}.${prop}` : prop;\n        }\n\n        if (calledName) {\n          const calls = callGraph.get(funcId) || [];\n          calls.push(calledName);\n          callGraph.set(funcId, calls);\n\n          // Detect side effects\n          const effects = sideEffects.get(funcId) || [];\n\n          if (/read|write|append|unlink|mkdir|rmdir|fs\\./i.test(calledName)) {\n            effects.push({ type: 'file_io', at: calledName });\n          }\n          if (/fetch|request|axios|http|socket/i.test(calledName)) {\n            effects.push({ type: 'network', at: calledName });\n          }\n          if (/console\\.|log\\.|logger\\.|debug|info|warn|error/i.test(calledName)) {\n            effects.push({ type: 'logging', at: calledName });\n          }\n          if (/query|execute|find|findOne|save|insert|update|delete|collection|db\\./i.test(calledName)) {\n            effects.push({ type: 'database', at: calledName });\n          }\n          if (/querySelector|getElementById|createElement|appendChild|innerHTML|textContent/i.test(calledName)) {\n            effects.push({ type: 'dom', at: calledName });\n          }\n\n          sideEffects.set(funcId, effects);\n        }\n      }\n    });\n\n    // Build entry\n    const calls = callGraph.get(funcId) || [];\n    const effects = sideEffects.get(funcId) || [];\n    const uniqueCalls = [...new Set(calls)].filter(c => c !== metadata.name);\n    const uniqueEffects = effects.reduce((acc, e) => {\n      const key = `${e.type}:${e.at}`;\n      if (!acc.has(key)) {\n        acc.set(key, e);\n      }\n      return acc;\n    }, new Map());\n\n    results.push({\n      id: metadata.name,\n      type: 'function',\n      file: sourcePath,\n      line: metadata.line,\n      sig: `(${metadata.isAsync ? 'async ' : ''})`,\n      async: metadata.isAsync,\n      calls: uniqueCalls.slice(0, 10),\n      effects: Array.from(uniqueEffects.values()).map(e => e.type),\n      scipDoc: '',\n      functionHash: metadata.hash  // Include for reference\n    });\n  }\n\n  return {\n    entries: results,\n    analysisTime: Date.now() - startTime,\n    totalFunctions: allFunctions.length,\n    analyzedFunctions: results.length\n  };\n}"
+        },
+        "analyzeSingleFile": {
+          "hash": "edc3c00dcef24bba3658b8eadd07e0b1",
+          "line": 187,
+          "endLine": 335,
+          "size": 4660,
+          "async": false,
+          "source": "function analyzeSingleFile(sourcePath) {\n  const startTime = Date.now();\n  const functions = [];\n\n  try {\n    const source = readFileSync(sourcePath, 'utf-8');\n\n    // Parse with Babel\n    const ast = parse(source, {\n      sourceType: 'module',\n      plugins: []\n    });\n\n    const callGraph = new Map();\n    const sideEffects = new Map();\n\n    // First pass: collect all functions\n    traverse.default(ast, {\n      FunctionDeclaration(path) {\n        const funcName = path.node.id?.name || 'anonymous';\n        const funcId = `${sourcePath}#${funcName}`;\n\n        functions.push({\n          id: funcId,\n          name: funcName,\n          type: 'function',\n          file: sourcePath,\n          line: path.node.loc?.start.line || 0,\n          params: path.node.params.map(p => p.name || '?').join(', '),\n          async: path.node.async,\n          path: path\n        });\n\n        callGraph.set(funcId, []);\n        sideEffects.set(funcId, []);\n      },\n\n      VariableDeclarator(path) {\n        if (path.node.init?.type === 'ArrowFunctionExpression' ||\n            path.node.init?.type === 'FunctionExpression') {\n          const funcName = path.node.id?.name || 'anonymous';\n          const funcId = `${sourcePath}#${funcName}`;\n\n          functions.push({\n            id: funcId,\n            name: funcName,\n            type: 'function',\n            file: sourcePath,\n            line: path.node.loc?.start.line || 0,\n            params: path.node.init.params.map(p => p.name || '?').join(', '),\n            async: path.node.init.async,\n            path: path\n          });\n\n          callGraph.set(funcId, []);\n          sideEffects.set(funcId, []);\n        }\n      }\n    });\n\n    // Second pass: analyze each function's body\n    functions.forEach(func => {\n      if (!func.path) return;\n\n      const funcId = func.id;\n\n      func.path.traverse({\n        CallExpression(path) {\n          const callee = path.node.callee;\n          let calledName = '';\n\n          if (callee.type === 'Identifier') {\n            calledName = callee.name;\n          } else if (callee.type === 'MemberExpression') {\n            const obj = callee.object.name || '';\n            const prop = callee.property.name || '';\n            calledName = obj ? `${obj}.${prop}` : prop;\n          }\n\n          if (calledName) {\n            const calls = callGraph.get(funcId) || [];\n            calls.push(calledName);\n            callGraph.set(funcId, calls);\n\n            // Detect side effects\n            const effects = sideEffects.get(funcId) || [];\n\n            if (/read|write|append|unlink|mkdir|rmdir|fs\\./i.test(calledName)) {\n              effects.push({ type: 'file_io', at: calledName });\n            }\n            if (/fetch|request|axios|http|socket/i.test(calledName)) {\n              effects.push({ type: 'network', at: calledName });\n            }\n            if (/console\\.|log\\.|logger\\.|debug|info|warn|error/i.test(calledName)) {\n              effects.push({ type: 'logging', at: calledName });\n            }\n            if (/query|execute|find|findOne|save|insert|update|delete|collection|db\\./i.test(calledName)) {\n              effects.push({ type: 'database', at: calledName });\n            }\n            if (/querySelector|getElementById|createElement|appendChild|innerHTML|textContent/i.test(calledName)) {\n              effects.push({ type: 'dom', at: calledName });\n            }\n\n            sideEffects.set(funcId, effects);\n          }\n        }\n      });\n\n      // Clean up\n      delete func.path;\n    });\n\n    // Build output\n    const result = functions.map(func => {\n      const calls = callGraph.get(func.id) || [];\n      const effects = sideEffects.get(func.id) || [];\n\n      const uniqueCalls = [...new Set(calls)].filter(c => c !== func.name);\n      const uniqueEffects = effects.reduce((acc, e) => {\n        const key = `${e.type}:${e.at}`;\n        if (!acc.has(key)) {\n          acc.set(key, e);\n        }\n        return acc;\n      }, new Map());\n\n      return {\n        id: func.name,\n        type: func.type,\n        file: func.file,\n        line: func.line,\n        sig: `(${func.params})`,\n        async: func.async || false,\n        calls: uniqueCalls.slice(0, 10),\n        effects: Array.from(uniqueEffects.values()).map(e => e.type),\n        scipDoc: ''\n      };\n    });\n\n    const analysisTime = Date.now() - startTime;\n    console.log(`      Analysis complete: ${functions.length} functions, ${analysisTime}ms`);\n\n    return { entries: result, analysisTime };\n\n  } catch (error) {\n    console.log(`      Warning: Could not parse ${sourcePath}: ${error.message}`);\n    return { entries: [], analysisTime: Date.now() - startTime };\n  }\n}"
+        },
+        "loadGraph": {
+          "hash": "8521ff896fb3da800c1313f00fe1dcb5",
+          "line": 340,
+          "endLine": 349,
+          "size": 249,
+          "async": false,
+          "source": "function loadGraph() {\n  const graphPath = '.llm-context/graph.jsonl';\n\n  if (!existsSync(graphPath)) {\n    return [];\n  }\n\n  const lines = readFileSync(graphPath, 'utf-8').split('\\n').filter(Boolean);\n  return lines.map(line => JSON.parse(line));\n}"
+        },
+        "updateGraphFunctionLevel": {
+          "hash": "1ede1a3cd711dfb69336b6d91a8aeaa7",
+          "line": 354,
+          "endLine": 391,
+          "size": 1376,
+          "async": false,
+          "source": "function updateGraphFunctionLevel(functionChanges, newEntries) {\n  console.log('\\n[4] Updating graph.jsonl (function-level)...');\n\n  const existingEntries = loadGraph();\n  console.log(`    Current entries: ${existingEntries.length}`);\n\n  // Build a set of (file, function) pairs to remove\n  const toRemove = new Set();\n\n  for (const [filePath, changes] of functionChanges) {\n    // Remove modified and deleted functions\n    for (const func of [...changes.modified, ...changes.deleted]) {\n      toRemove.add(`${filePath}#${func.name}`);\n    }\n  }\n\n  // Keep entries that aren't in the remove set\n  const keptEntries = existingEntries.filter(entry => {\n    const key = `${entry.file}#${entry.id}`;\n    return !toRemove.has(key);\n  });\n\n  console.log(`    Entries kept (unchanged functions): ${keptEntries.length}`);\n  console.log(`    Entries removed (changed/deleted functions): ${existingEntries.length - keptEntries.length}`);\n\n  // Add new entries\n  const updatedGraph = [...keptEntries, ...newEntries];\n  console.log(`    New entries added: ${newEntries.length}`);\n  console.log(`    Total entries: ${updatedGraph.length}`);\n\n  // Write updated graph\n  const jsonlContent = updatedGraph.map(node => JSON.stringify(node)).join('\\n');\n  writeFileSync('.llm-context/graph.jsonl', jsonlContent);\n\n  console.log('    ✓ Graph updated (function-level)');\n\n  return updatedGraph;\n}"
+        },
+        "updateGraph": {
+          "hash": "14c877494027cea8c9ecc5fc4c98bb75",
+          "line": 396,
+          "endLine": 423,
+          "size": 1089,
+          "async": false,
+          "source": "function updateGraph(changedFiles, newEntries) {\n  console.log('\\n[4] Updating graph.jsonl (file-level)...');\n\n  // Load existing graph\n  const existingEntries = loadGraph();\n  console.log(`    Current entries: ${existingEntries.length}`);\n\n  // Create set of changed files for fast lookup\n  const changedSet = new Set(changedFiles);\n\n  // Keep only entries from unchanged files\n  const keptEntries = existingEntries.filter(entry => !changedSet.has(entry.file));\n  console.log(`    Entries kept (unchanged files): ${keptEntries.length}`);\n  console.log(`    Entries removed (changed files): ${existingEntries.length - keptEntries.length}`);\n\n  // Add all new entries\n  const updatedGraph = [...keptEntries, ...newEntries];\n  console.log(`    New entries added: ${newEntries.length}`);\n  console.log(`    Total entries: ${updatedGraph.length}`);\n\n  // Write updated graph\n  const jsonlContent = updatedGraph.map(node => JSON.stringify(node)).join('\\n');\n  writeFileSync('.llm-context/graph.jsonl', jsonlContent);\n\n  console.log('    ✓ Graph updated (file-level)');\n\n  return updatedGraph;\n}"
+        },
+        "updateManifest": {
+          "hash": "525b4db9cdd36f6fd07766cda1e8d935",
+          "line": 428,
+          "endLine": 470,
+          "size": 1395,
+          "async": false,
+          "source": "function updateManifest(changeReport, analysisResults) {\n  console.log('\\n[5] Updating manifest.json...');\n\n  const manifest = changeReport.manifest;\n\n  // Remove deleted files\n  for (const filePath of changeReport.deleted) {\n    delete manifest.files[filePath];\n    console.log(`    - Removed: ${filePath}`);\n  }\n\n  // Update changed and new files\n  const allChangedFiles = [...changeReport.added, ...changeReport.modified];\n\n  for (const filePath of allChangedFiles) {\n    const hash = computeFileHash(filePath);\n    const metadata = getFileMetadata(filePath);\n    const result = analysisResults.get(filePath);\n\n    manifest.files[filePath] = {\n      hash,\n      size: metadata.size,\n      lastModified: metadata.lastModified,\n      functions: result ? result.entries.map(e => e.id) : [],\n      analysisTime: result ? result.analysisTime : null\n    };\n\n    console.log(`    ✓ Updated: ${filePath}`);\n  }\n\n  // Update global stats\n  const graph = loadGraph();\n  manifest.globalStats.totalFunctions = graph.length;\n  manifest.globalStats.totalCalls = graph.reduce((sum, f) => sum + (f.calls?.length || 0), 0);\n  manifest.globalStats.totalFiles = Object.keys(manifest.files).length;\n  manifest.generated = new Date().toISOString();\n\n  // Save manifest\n  writeFileSync('.llm-context/manifest.json', JSON.stringify(manifest, null, 2));\n  console.log('    ✓ Manifest updated');\n\n  return manifest;\n}"
+        },
+        "mainFunctionLevel": {
+          "hash": "a4d7cfedbb46690e84ccb34855fae87f",
+          "line": 475,
+          "endLine": 590,
+          "size": 4104,
+          "async": true,
+          "source": "async function mainFunctionLevel() {\n  console.log('[1] Detecting file-level changes...');\n  const changeReport = detectChanges();\n\n  if (changeReport.needsFullAnalysis) {\n    console.log('\\n⚠ No manifest found - run full analysis first');\n    return;\n  }\n\n  const changedFiles = [...changeReport.added, ...changeReport.modified];\n\n  if (changedFiles.length === 0) {\n    console.log('\\n✓ No changes detected - all files up to date!');\n    return;\n  }\n\n  console.log(`\\n[2] Detecting function-level changes in ${changedFiles.length} files...`);\n  const functionChanges = await detectAllFunctionChanges(changedFiles, changeReport.manifest);\n\n  if (functionChanges.size === 0) {\n    console.log('\\n✓ No function-level changes detected!');\n    return;\n  }\n\n  printFunctionChangeSummary(functionChanges);\n\n  // Impact analysis (if enabled)\n  const config = loadConfig();\n  if (config.analysis?.trackDependencies) {\n    const changedFunctionNames = [];\n    for (const [filePath, changes] of functionChanges) {\n      changedFunctionNames.push(...changes.modified.map(f => f.name));\n      changedFunctionNames.push(...changes.added.map(f => f.name));\n      if (changes.renames) {\n        changedFunctionNames.push(...changes.renames.map(r => r.to));\n      }\n    }\n\n    if (changedFunctionNames.length > 0) {\n      try {\n        analyzeImpact(changedFunctionNames);\n      } catch (error) {\n        console.log(`\\nWarning: Impact analysis failed: ${error.message}`);\n      }\n    }\n  }\n\n  console.log('\\n[3] Re-analyzing changed/added functions...');\n\n  const allNewEntries = [];\n  const analysisResults = new Map();\n\n  for (const [filePath, changes] of functionChanges) {\n    // Get names of functions to analyze (modified + added)\n    const targetFunctions = [\n      ...changes.modified.map(f => f.name),\n      ...changes.added.map(f => f.name)\n    ];\n\n    if (targetFunctions.length === 0) {\n      continue;\n    }\n\n    console.log(`    ${filePath}: analyzing ${targetFunctions.length} functions`);\n\n    try {\n      const result = analyzeSpecificFunctions(filePath, targetFunctions);\n      analysisResults.set(filePath, result);\n      allNewEntries.push(...result.entries);\n\n      console.log(`      Found: ${result.entries.length} entries, ${result.analysisTime}ms`);\n      console.log(`      Skipped: ${result.totalFunctions - result.analyzedFunctions} unchanged functions`);\n    } catch (error) {\n      console.log(`      Error: ${error.message}`);\n    }\n  }\n\n  // Update graph (function-level)\n  const updatedGraph = updateGraphFunctionLevel(functionChanges, allNewEntries);\n\n  // Update manifest (note: still need to update function hashes)\n  console.log('\\n[5] Updating manifest.json...');\n  const manifest = changeReport.manifest;\n  const storeSource = config.incremental?.storeSource || false;\n\n  for (const filePath of changedFiles) {\n    const hash = computeFileHash(filePath);\n    const metadata = getFileMetadata(filePath);\n\n    // Re-extract all function hashes for changed files\n    const { extractFileFunctions } = await import('./manifest-generator.js');\n    const functionHashes = extractFileFunctions(filePath, storeSource);\n\n    if (manifest.files[filePath]) {\n      manifest.files[filePath].hash = hash;\n      manifest.files[filePath].size = metadata.size;\n      manifest.files[filePath].lastModified = metadata.lastModified;\n      manifest.files[filePath].functionHashes = functionHashes;\n    }\n\n    console.log(`    ✓ Updated: ${filePath}`);\n  }\n\n  // Update global stats\n  manifest.globalStats.totalFunctions = updatedGraph.length;\n  manifest.globalStats.totalCalls = updatedGraph.reduce((sum, f) => sum + (f.calls?.length || 0), 0);\n  manifest.generated = new Date().toISOString();\n\n  writeFileSync('.llm-context/manifest.json', JSON.stringify(manifest, null, 2));\n  console.log('    ✓ Manifest updated');\n\n  console.log('\\n=== Incremental Analysis Complete (Function-Level) ===');\n  console.log(`Functions re-analyzed: ${allNewEntries.length}`);\n  console.log(`Total functions in graph: ${updatedGraph.length}`);\n  console.log(`Total calls tracked: ${manifest.globalStats.totalCalls}`);\n}"
+        },
+        "mainFileLevel": {
+          "hash": "bb5f67e9b793f071c5fa527a504a7d5e",
+          "line": 595,
+          "endLine": 645,
+          "size": 1982,
+          "async": true,
+          "source": "async function mainFileLevel() {\n  console.log('[1] Detecting changes...');\n  const changeReport = detectChanges();\n\n  if (changeReport.needsFullAnalysis) {\n    console.log('\\n⚠ No manifest found - run full analysis first:');\n    console.log('  1. node manifest-generator.js');\n    console.log('  2. Ensure graph.jsonl exists');\n    console.log('  3. Run this script again');\n    return;\n  }\n\n  const changedFiles = [...changeReport.added, ...changeReport.modified];\n\n  if (changedFiles.length === 0) {\n    console.log('\\n✓ No changes detected - all files up to date!');\n    return;\n  }\n\n  console.log(`\\n[2] Re-analyzing ${changedFiles.length} changed files...`);\n\n  const analysisResults = new Map();\n  const allNewEntries = [];\n\n  for (const filePath of changedFiles) {\n    console.log(`    Analyzing: ${filePath}`);\n    const result = analyzeSingleFile(filePath);\n    analysisResults.set(filePath, result);\n    allNewEntries.push(...result.entries);\n  }\n\n  console.log(`\\n[3] Summary of re-analysis:`);\n  console.log(`    Files analyzed: ${changedFiles.length}`);\n  console.log(`    Functions found: ${allNewEntries.length}`);\n  console.log(`    Total time: ${Array.from(analysisResults.values()).reduce((sum, r) => sum + r.analysisTime, 0)}ms`);\n\n  // Update graph\n  const updatedGraph = updateGraph(changedFiles, allNewEntries);\n\n  // Update manifest\n  const updatedManifest = updateManifest(changeReport, analysisResults);\n\n  console.log('\\n=== Incremental Analysis Complete (File-Level) ===');\n  console.log(`Files re-analyzed: ${changedFiles.length}`);\n  console.log(`Files skipped: ${changeReport.unchanged.length}`);\n  console.log(`Total functions in graph: ${updatedGraph.length}`);\n  console.log(`Total calls tracked: ${updatedManifest.globalStats.totalCalls}`);\n\n  const percentSkipped = ((changeReport.unchanged.length / (changedFiles.length + changeReport.unchanged.length)) * 100).toFixed(1);\n  console.log(`\\n✓ Efficiency: ${percentSkipped}% of files skipped!`);\n}"
+        },
+        "main": {
+          "hash": "dcf93ee7d2cc472d4f67c30d6dac07ab",
+          "line": 650,
+          "endLine": 661,
+          "size": 272,
+          "async": true,
+          "source": "async function main() {\n  const config = loadConfig();\n  const granularity = config.granularity || 'file';\n\n  console.log(`Granularity mode: ${granularity}\\n`);\n\n  if (granularity === 'function') {\n    await mainFunctionLevel();\n  } else {\n    await mainFileLevel();\n  }\n}"
+        }
+      }
     },
-    "analyze.js": {
-      "hash": "c067d028a5d6615e755b5672f370cf18",
-      "size": 3590,
-      "lastModified": "2025-11-09T12:08:59.384Z",
+    "manifest-generator.js": {
+      "hash": "137ed1d10c3fdc702699fee4f9ce0d79",
+      "size": 8966,
+      "lastModified": "2025-11-09T13:52:03.907Z",
       "functions": [],
-      "analysisTime": 20
+      "analysisTime": null,
+      "functionHashes": {
+        "loadConfig": {
+          "hash": "863cd40e998d1eb96353e89dadca18d2",
+          "line": 26,
+          "endLine": 38,
+          "size": 298,
+          "async": false,
+          "source": "function loadConfig() {\n  const configPath = './llm-context.config.json';\n\n  if (!existsSync(configPath)) {\n    // Default config\n    return {\n      granularity: 'file',\n      incremental: { enabled: true, hashAlgorithm: 'md5' }\n    };\n  }\n\n  return JSON.parse(readFileSync(configPath, 'utf-8'));\n}"
+        },
+        "computeFileHash": {
+          "hash": "b4700116aae3e5fd58d1b945f2ab7428",
+          "line": 45,
+          "endLine": 48,
+          "size": 138,
+          "async": false,
+          "source": "function computeFileHash(filePath) {\n  const content = readFileSync(filePath);\n  return createHash('md5').update(content).digest('hex');\n}"
+        },
+        "getFileMetadata": {
+          "hash": "033c4d4618e3789932d03e568030b192",
+          "line": 55,
+          "endLine": 61,
+          "size": 156,
+          "async": false,
+          "source": "function getFileMetadata(filePath) {\n  const stats = statSync(filePath);\n  return {\n    size: stats.size,\n    lastModified: stats.mtime.toISOString()\n  };\n}"
+        },
+        "extractFileFunctions": {
+          "hash": "b9860b18f334af440309246d66dce55d",
+          "line": 69,
+          "endLine": 128,
+          "size": 1665,
+          "async": false,
+          "source": "function extractFileFunctions(filePath, includeSource = false) {\n  const functionMap = {};\n\n  try {\n    const source = readFileSync(filePath, 'utf-8');\n\n    // Parse with Babel\n    const ast = parse(source, {\n      sourceType: 'module',\n      plugins: []\n    });\n\n    // Collect all functions\n    traverse.default(ast, {\n      FunctionDeclaration(path) {\n        const metadata = extractFunctionMetadata(path, source, filePath);\n        const funcEntry = {\n          hash: metadata.hash,\n          line: metadata.line,\n          endLine: metadata.endLine,\n          size: metadata.size,\n          async: metadata.isAsync\n        };\n\n        // Optionally include source for rename detection and diffs\n        if (includeSource) {\n          funcEntry.source = metadata.source;\n        }\n\n        functionMap[metadata.name] = funcEntry;\n      },\n\n      VariableDeclarator(path) {\n        if (path.node.init?.type === 'ArrowFunctionExpression' ||\n            path.node.init?.type === 'FunctionExpression') {\n          const metadata = extractFunctionMetadata(path, source, filePath);\n          const funcEntry = {\n            hash: metadata.hash,\n            line: metadata.line,\n            endLine: metadata.endLine,\n            size: metadata.size,\n            async: metadata.isAsync\n          };\n\n          // Optionally include source for rename detection and diffs\n          if (includeSource) {\n            funcEntry.source = metadata.source;\n          }\n\n          functionMap[metadata.name] = funcEntry;\n        }\n      }\n    });\n\n  } catch (error) {\n    console.log(`    Warning: Could not parse ${filePath}: ${error.message}`);\n  }\n\n  return functionMap;\n}"
+        },
+        "findJsFiles": {
+          "hash": "5d9688df93cc3ad11830c7561cb64ad2",
+          "line": 136,
+          "endLine": 161,
+          "size": 682,
+          "async": false,
+          "source": "function findJsFiles(dir = '.', ignore = ['node_modules', '.git', '.llm-context']) {\n  const files = [];\n\n  function walk(currentDir) {\n    const entries = readdirSync(currentDir, { withFileTypes: true });\n\n    for (const entry of entries) {\n      const fullPath = join(currentDir, entry.name);\n      const relativePath = relative('.', fullPath);\n\n      // Skip ignored directories\n      if (ignore.some(pattern => relativePath.includes(pattern))) {\n        continue;\n      }\n\n      if (entry.isDirectory()) {\n        walk(fullPath);\n      } else if (entry.isFile() && entry.name.endsWith('.js')) {\n        files.push(relativePath);\n      }\n    }\n  }\n\n  walk(dir);\n  return files;\n}"
+        },
+        "walk": {
+          "hash": "096254dcdbe490ad48df089e1272a85a",
+          "line": 139,
+          "endLine": 157,
+          "size": 542,
+          "async": false,
+          "source": "function walk(currentDir) {\n    const entries = readdirSync(currentDir, { withFileTypes: true });\n\n    for (const entry of entries) {\n      const fullPath = join(currentDir, entry.name);\n      const relativePath = relative('.', fullPath);\n\n      // Skip ignored directories\n      if (ignore.some(pattern => relativePath.includes(pattern))) {\n        continue;\n      }\n\n      if (entry.isDirectory()) {\n        walk(fullPath);\n      } else if (entry.isFile() && entry.name.endsWith('.js')) {\n        files.push(relativePath);\n      }\n    }\n  }"
+        },
+        "loadGraphData": {
+          "hash": "e5f8ab5b7def01c329e4f2c5478a6ad8",
+          "line": 167,
+          "endLine": 190,
+          "size": 609,
+          "async": false,
+          "source": "function loadGraphData() {\n  const graphPath = '.llm-context/graph.jsonl';\n  const fileToFunctions = new Map();\n\n  if (!existsSync(graphPath)) {\n    console.log('No existing graph.jsonl found - this will be the initial analysis');\n    return fileToFunctions;\n  }\n\n  const lines = readFileSync(graphPath, 'utf-8').split('\\n').filter(Boolean);\n\n  for (const line of lines) {\n    const func = JSON.parse(line);\n    const file = func.file;\n\n    if (!fileToFunctions.has(file)) {\n      fileToFunctions.set(file, []);\n    }\n\n    fileToFunctions.get(file).push(func.id || func.name);\n  }\n\n  return fileToFunctions;\n}"
+        },
+        "generateManifest": {
+          "hash": "ea9a1ce533d8da5356e0f3c712920d43",
+          "line": 196,
+          "endLine": 284,
+          "size": 2941,
+          "async": false,
+          "source": "function generateManifest() {\n  const config = loadConfig();\n  const granularity = config.granularity || 'file';\n\n  console.log(`[1] Configuration: granularity=${granularity}`);\n  console.log('[2] Discovering JavaScript files...');\n  const jsFiles = findJsFiles();\n  console.log(`    Found ${jsFiles.length} JavaScript files\\n`);\n\n  console.log('[3] Computing file hashes...');\n  const fileToFunctions = loadGraphData();\n  const files = {};\n  let totalSize = 0;\n\n  for (const filePath of jsFiles) {\n    try {\n      const hash = computeFileHash(filePath);\n      const metadata = getFileMetadata(filePath);\n      const graphFunctions = fileToFunctions.get(filePath) || [];\n\n      const fileEntry = {\n        hash,\n        size: metadata.size,\n        lastModified: metadata.lastModified,\n        functions: graphFunctions,\n        analysisTime: null\n      };\n\n      // Add function-level hashes if granularity is 'function'\n      if (granularity === 'function') {\n        const storeSource = config.incremental?.storeSource || false;\n        const functionMetadata = extractFileFunctions(filePath, storeSource);\n        fileEntry.functionHashes = functionMetadata;\n\n        console.log(`    ${filePath}`);\n        console.log(`      File hash: ${hash.substring(0, 12)}...`);\n        console.log(`      Functions: ${Object.keys(functionMetadata).length}`);\n\n        // Show first few function hashes\n        const funcNames = Object.keys(functionMetadata).slice(0, 3);\n        for (const name of funcNames) {\n          const fHash = functionMetadata[name].hash.substring(0, 8);\n          console.log(`        - ${name} (${fHash}...)`);\n        }\n        if (Object.keys(functionMetadata).length > 3) {\n          console.log(`        ... and ${Object.keys(functionMetadata).length - 3} more`);\n        }\n      } else {\n        console.log(`    ${filePath}`);\n        console.log(`      Hash: ${hash.substring(0, 12)}...`);\n        console.log(`      Functions: ${graphFunctions.length > 0 ? graphFunctions.join(', ') : 'none yet'}`);\n      }\n\n      files[filePath] = fileEntry;\n      totalSize += metadata.size;\n\n    } catch (error) {\n      console.log(`    Warning: Could not process ${filePath}: ${error.message}`);\n    }\n  }\n\n  console.log(`\\n[4] Building manifest...`);\n\n  // Load global stats from graph if available\n  let globalStats = {\n    totalFunctions: 0,\n    totalCalls: 0,\n    totalFiles: jsFiles.length,\n    totalSize\n  };\n\n  if (existsSync('.llm-context/graph.jsonl')) {\n    const lines = readFileSync('.llm-context/graph.jsonl', 'utf-8').split('\\n').filter(Boolean);\n    const functions = lines.map(line => JSON.parse(line));\n\n    globalStats.totalFunctions = functions.length;\n    globalStats.totalCalls = functions.reduce((sum, f) => sum + (f.calls?.length || 0), 0);\n  }\n\n  const manifest = {\n    version: '2.0.0',\n    granularity,\n    generated: new Date().toISOString(),\n    files,\n    globalStats\n  };\n\n  return manifest;\n}"
+        },
+        "saveManifest": {
+          "hash": "71f667bdb45a3714724a9f87aecdacf1",
+          "line": 290,
+          "endLine": 302,
+          "size": 625,
+          "async": false,
+          "source": "function saveManifest(manifest) {\n  const manifestPath = '.llm-context/manifest.json';\n  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));\n  console.log(`\\n✓ Manifest saved to ${manifestPath}`);\n\n  // Print summary\n  console.log('\\n=== Manifest Summary ===');\n  console.log(`Files tracked: ${Object.keys(manifest.files).length}`);\n  console.log(`Total size: ${(manifest.globalStats.totalSize / 1024).toFixed(1)} KB`);\n  console.log(`Functions: ${manifest.globalStats.totalFunctions}`);\n  console.log(`Call relationships: ${manifest.globalStats.totalCalls}`);\n  console.log(`Generated: ${manifest.generated}`);\n}"
+        },
+        "main": {
+          "hash": "31e20048d05396d5fda09fc71ce58988",
+          "line": 307,
+          "endLine": 310,
+          "size": 84,
+          "async": false,
+          "source": "function main() {\n  const manifest = generateManifest();\n  saveManifest(manifest);\n}"
+        }
+      }
+    },
+    "query.js": {
+      "hash": "4ac4dc5c496454b6fcd558c0d5124259",
+      "size": 4843,
+      "lastModified": "2025-11-09T13:42:36.844Z",
+      "functions": [
+        "query",
+        "traceCalls"
+      ],
+      "analysisTime": null,
+      "functionHashes": {
+        "query": {
+          "hash": "cde8c41e24b6c4b4b78ac7720ee03617",
+          "line": 52,
+          "endLine": 94,
+          "size": 1298,
+          "async": false,
+          "source": "function query(cmd, arg) {\n  switch (cmd) {\n    case 'find-function':\n      return Array.from(byName.get(arg) || []);\n\n    case 'functions-in-file':\n      return byFile.get(arg) || [];\n\n    case 'calls-to':\n      return Array.from(calledByIndex.get(arg) || []);\n\n    case 'called-by':\n      const func = functions.find(f => (f.name || f.id) === arg);\n      return func ? func.calls : [];\n\n    case 'side-effects':\n      return functions.filter(f => f.effects.length > 0);\n\n    case 'entry-points':\n      // Functions called by few others (likely entry points)\n      return functions.filter(f => {\n        const name = f.name || f.id;\n        const callers = calledByIndex.get(name) || new Set();\n        return callers.size === 0 || f.name?.includes('main') || f.name?.includes('init');\n      });\n\n    case 'trace':\n      // Trace call path from function\n      return traceCalls(arg, 3);\n\n    case 'stats':\n      return {\n        totalFunctions: functions.length,\n        filesAnalyzed: byFile.size,\n        totalCalls: functions.reduce((sum, f) => sum + f.calls.length, 0),\n        withSideEffects: functions.filter(f => f.effects.length > 0).length,\n        effectTypes: [...new Set(functions.flatMap(f => f.effects))]\n      };\n\n    default:\n      return { error: 'Unknown query command' };\n  }\n}"
+        },
+        "traceCalls": {
+          "hash": "1126a12ebf837e5f8c7e6dff92cdcd54",
+          "line": 96,
+          "endLine": 110,
+          "size": 426,
+          "async": false,
+          "source": "function traceCalls(funcName, depth = 3, visited = new Set()) {\n  if (depth === 0 || visited.has(funcName)) return [];\n\n  visited.add(funcName);\n\n  const func = functions.find(f => (f.name || f.id) === funcName);\n  if (!func) return [];\n\n  return {\n    function: funcName,\n    file: func.file,\n    line: func.line,\n    calls: func.calls.slice(0, 10).map(called => traceCalls(called, depth - 1, visited)).filter(Boolean)\n  };\n}"
+        }
+      }
+    },
+    "scip-parser.js": {
+      "hash": "1d92669c1d83375a50e12ff550d09f9f",
+      "size": 6186,
+      "lastModified": "2025-11-09T11:43:50.718Z",
+      "functions": [
+        "parseScip"
+      ],
+      "analysisTime": null,
+      "functionHashes": {
+        "parseScip": {
+          "hash": "7361e522e6d5a944f7e465d87f9ef0f6",
+          "line": 12,
+          "endLine": 196,
+          "size": 5917,
+          "async": true,
+          "source": "async function parseScip() {\n  try {\n    // Load the protobuf schema\n    const root = await protobuf.load(protoFile);\n    const Index = root.lookupType('scip.Index');\n\n    // Read and decode the SCIP file\n    const buffer = readFileSync(scipFile);\n    const index = Index.decode(buffer);\n\n    const indexObj = Index.toObject(index, {\n      longs: String,\n      enums: String,\n      bytes: String,\n    });\n\n    console.log('=== SCIP Index Summary ===\\n');\n\n    const metadata = indexObj.metadata || {};\n    console.log('Metadata:');\n    console.log('  Tool:', metadata.toolInfo?.name || 'N/A', metadata.toolInfo?.version || '');\n    console.log('  Project Root:', metadata.projectRoot || 'N/A');\n\n    const documents = indexObj.documents || [];\n    console.log('\\nDocuments indexed:', documents.length);\n\n    // Group files by directory\n    const byDir = {};\n    documents.forEach(doc => {\n      const dir = doc.relativePath.split('/').slice(0, -1).join('/') || '.';\n      byDir[dir] = (byDir[dir] || 0) + 1;\n    });\n\n    console.log('\\nFiles by directory:');\n    Object.entries(byDir).slice(0, 10).forEach(([dir, count]) => {\n      console.log(`  ${dir}: ${count} files`);\n    });\n\n    // Analyze first few documents in detail\n    console.log('\\n=== Sample Documents (first 3) ===\\n');\n\n    documents.slice(0, 3).forEach((doc, idx) => {\n      console.log(`\\n[${idx + 1}] ${doc.relativePath}`);\n      console.log(`    Language: ${doc.language || 'unknown'}`);\n\n      const occurrences = doc.occurrences || [];\n      const symbols = doc.symbols || [];\n\n      console.log(`    Occurrences: ${occurrences.length}`);\n      console.log(`    Symbols defined: ${symbols.length}`);\n\n      // Show first few symbols\n      if (symbols.length > 0) {\n        console.log('\\n    Symbol Details:');\n        symbols.slice(0, 5).forEach(sym => {\n          const symStr = sym.symbol || '';\n          const kind = sym.kind || 0;\n          const docs = sym.documentation || [];\n          const sig = sym.signatureDocumentation?.text || '';\n\n          // Parse symbol to get just the name\n          const parts = symStr.split('/');\n          const name = parts[parts.length - 1]?.replace(/[.`]/g, '') || symStr;\n\n          const kindNames = {\n            1: 'Unknown',\n            6: 'Class',\n            8: 'Method',\n            9: 'Function',\n            10: 'Property',\n            12: 'Variable',\n          };\n\n          console.log(`      - ${name}`);\n          console.log(`        Kind: ${kindNames[kind] || kind}`);\n          if (sig) {\n            console.log(`        Sig: ${sig.substring(0, 60)}${sig.length > 60 ? '...' : ''}`);\n          }\n          if (docs.length > 0) {\n            const docText = docs[0];\n            console.log(`        Doc: ${docText.substring(0, 60)}${docText.length > 60 ? '...' : ''}`);\n          }\n        });\n      }\n\n      // Show sample occurrences (function calls/references)\n      if (occurrences.length > 0) {\n        console.log('\\n    Sample Occurrences (first 5):');\n        occurrences.slice(0, 5).forEach(occ => {\n          const range = occ.range || [];\n          const symbol = occ.symbol || '';\n          const roles = occ.symbolRoles || 0;\n\n          // Parse symbol to get readable name\n          const parts = symbol.split('/');\n          const name = parts[parts.length - 1]?.replace(/[.`]/g, '') || symbol;\n\n          const roleNames = {\n            1: 'Definition',\n            2: 'Import',\n            4: 'Reference',\n            8: 'WriteAccess',\n            16: 'ReadAccess',\n          };\n\n          console.log(`      - ${name}`);\n          console.log(`        Line: ${range[0] || 0}, Roles: ${roleNames[roles] || roles}`);\n        });\n      }\n    });\n\n    // Global statistics\n    console.log('\\n\\n=== Global Statistics ===\\n');\n\n    let totalOccurrences = 0;\n    let totalSymbols = 0;\n    let symbolsByKind = {};\n    let functionSymbols = [];\n\n    documents.forEach(doc => {\n      const symbols = doc.symbols || [];\n      const occurrences = doc.occurrences || [];\n\n      totalSymbols += symbols.length;\n      totalOccurrences += occurrences.length;\n\n      symbols.forEach(sym => {\n        const kind = sym.kind || 0;\n        symbolsByKind[kind] = (symbolsByKind[kind] || 0) + 1;\n\n        // Collect function symbols for later analysis\n        if (kind === 9 || kind === 8) { // Function or Method\n          functionSymbols.push({\n            name: sym.symbol,\n            file: doc.relativePath,\n            sig: sym.signatureDocumentation?.text || '',\n            doc: (sym.documentation || [])[0] || ''\n          });\n        }\n      });\n    });\n\n    console.log('Total Symbols:', totalSymbols);\n    console.log('Total Occurrences:', totalOccurrences);\n    console.log('\\nSymbols by Kind:');\n\n    const kindNames = {\n      1: 'Unknown',\n      2: 'Namespace',\n      3: 'Type',\n      6: 'Class',\n      8: 'Method',\n      9: 'Function',\n      10: 'Property',\n      12: 'Variable',\n      13: 'Constant',\n    };\n\n    Object.entries(symbolsByKind)\n      .sort((a, b) => b[1] - a[1])\n      .forEach(([kind, count]) => {\n        console.log(`  ${kindNames[kind] || kind}: ${count}`);\n      });\n\n    console.log('\\nFunctions/Methods found:', functionSymbols.length);\n    console.log('Sample functions:');\n    functionSymbols.slice(0, 10).forEach(fn => {\n      const name = fn.name.split('/').pop().replace(/[.`]/g, '');\n      console.log(`  ${name} (${fn.file})`);\n      if (fn.sig) {\n        console.log(`    Signature: ${fn.sig.substring(0, 70)}`);\n      }\n    });\n\n    // Save full data for transformer\n    console.log('\\n\\n=== Saving parsed data for transformer ===');\n    const fs = await import('fs');\n    fs.writeFileSync('.llm-context/scip-parsed.json', JSON.stringify(indexObj, null, 2));\n    console.log('Saved to .llm-context/scip-parsed.json');\n\n  } catch (error) {\n    console.error('Error parsing SCIP file:', error.message);\n    console.error(error.stack);\n  }\n}"
+        }
+      }
+    },
+    "summarizer.js": {
+      "hash": "990665808eb90cda16fab23038eff062",
+      "size": 6667,
+      "lastModified": "2025-11-09T11:43:50.719Z",
+      "functions": [],
+      "analysisTime": null,
+      "functionHashes": {}
     },
     "summary-updater.js": {
       "hash": "edf7d29aabe5cd46e201084a4df3aabc",
@@ -90,13 +578,63 @@
         "generateL2",
         "updateSummaries"
       ],
-      "analysisTime": 41
+      "analysisTime": null,
+      "functionHashes": {
+        "loadGraph": {
+          "hash": "54d9c211ef2a5e1f97c1792c80338c85",
+          "line": 22,
+          "endLine": 31,
+          "size": 291,
+          "async": false,
+          "source": "function loadGraph() {\n  const graphPath = '.llm-context/graph.jsonl';\n  if (!existsSync(graphPath)) {\n    console.log('⚠ No graph.jsonl found');\n    return [];\n  }\n\n  const lines = readFileSync(graphPath, 'utf-8').split('\\n').filter(Boolean);\n  return lines.map(line => JSON.parse(line));\n}"
+        },
+        "generateL0": {
+          "hash": "5ebf51f2817216586042c797de78ede3",
+          "line": 36,
+          "endLine": 102,
+          "size": 2247,
+          "async": false,
+          "source": "function generateL0(functions) {\n  console.log('[1] Generating L0 (system overview)...');\n\n  // Group by file\n  const byFile = {};\n  functions.forEach(func => {\n    if (!byFile[func.file]) byFile[func.file] = [];\n    byFile[func.file].push(func);\n  });\n\n  // Group by domain (directory)\n  const byDomain = {};\n  Object.keys(byFile).forEach(file => {\n    const dir = dirname(file) || 'root';\n    if (!byDomain[dir]) byDomain[dir] = {};\n\n    const module = file.split('/').pop().replace('.js', '');\n    byDomain[dir][module] = byFile[file];\n  });\n\n  const totalFuncs = functions.length;\n  const totalCalls = functions.reduce((sum, f) => sum + f.calls.length, 0);\n  const effectTypes = new Set();\n  functions.forEach(f => f.effects.forEach(e => effectTypes.add(e)));\n\n  const entryPoints = functions.filter(f =>\n    f.name && (\n      f.name.includes('main') ||\n      f.name.includes('init') ||\n      f.name.includes('eval')\n    )\n  );\n\n  const L0 = `# LLM Context Tools - System Overview\n\n**Type**: Code analysis system for LLM-optimized context generation\n**Purpose**: Generate compact, semantically-rich code representations for LLM consumption\n**Architecture**: JavaScript modules with incremental update support\n\n## Statistics\n- **Files**: ${Object.keys(byFile).length} modules\n- **Functions**: ${totalFuncs} total\n- **Call relationships**: ${totalCalls}\n- **Side effects**: ${Array.from(effectTypes).join(', ') || 'none'}\n\n## Key Components\n${Object.keys(byDomain).map(domain => {\n  const modules = Object.keys(byDomain[domain]);\n  return `- **${domain}**: ${modules.join(', ')}`;\n}).join('\\n')}\n\n## Entry Points\n${entryPoints.length > 0 ? entryPoints.slice(0, 5).map(f => `- \\`${f.name}\\` (${f.file}:${f.line})`).join('\\n') : '- None detected'}\n\n## Architecture Pattern\n- **Manifest System**: Tracks file hashes for change detection\n- **Incremental Analysis**: Re-analyze only changed files\n- **Graph Management**: JSONL format for efficient updates\n- **Query Interface**: Fast lookups on function call graphs\n`;\n\n  mkdirSync('.llm-context/summaries', { recursive: true });\n  writeFileSync('.llm-context/summaries/L0-system.md', L0);\n  console.log(`    ✓ L0-system.md (${L0.length} chars, ~${Math.ceil(L0.length / 4)} tokens)`);\n\n  return L0;\n}"
+        },
+        "generateL1": {
+          "hash": "484234fdea30d0ab77a216eaf3365589",
+          "line": 107,
+          "endLine": 190,
+          "size": 2602,
+          "async": false,
+          "source": "function generateL1(functions, changedFiles = null) {\n  console.log('[2] Generating L1 (domain summaries)...');\n\n  // Group by file\n  const byFile = {};\n  functions.forEach(func => {\n    if (!byFile[func.file]) byFile[func.file] = [];\n    byFile[func.file].push(func);\n  });\n\n  // Group by domain\n  const byDomain = {};\n  Object.keys(byFile).forEach(file => {\n    const dir = dirname(file) || 'root';\n    const module = file.split('/').pop().replace('.js', '');\n\n    if (!byDomain[dir]) byDomain[dir] = {};\n    byDomain[dir][module] = byFile[file];\n  });\n\n  // Load existing L1 if available\n  let existingL1 = [];\n  if (existsSync('.llm-context/summaries/L1-domains.json')) {\n    existingL1 = JSON.parse(readFileSync('.llm-context/summaries/L1-domains.json', 'utf-8'));\n  }\n\n  // Determine which domains were affected\n  const affectedDomains = new Set();\n  if (changedFiles) {\n    changedFiles.forEach(file => {\n      const dir = dirname(file) || 'root';\n      affectedDomains.add(dir);\n    });\n  } else {\n    // If no changed files specified, regenerate all\n    Object.keys(byDomain).forEach(dir => affectedDomains.add(dir));\n  }\n\n  console.log(`    Affected domains: ${Array.from(affectedDomains).join(', ')}`);\n\n  // Build L1 summaries\n  const L1Summaries = [];\n\n  // Keep existing summaries for unchanged domains\n  if (changedFiles) {\n    existingL1.forEach(summary => {\n      if (!affectedDomains.has(summary.domain)) {\n        L1Summaries.push(summary);\n        console.log(`    ↻ Kept: ${summary.domain} (unchanged)`);\n      }\n    });\n  }\n\n  // Generate summaries for affected domains\n  Object.entries(byDomain).forEach(([domain, modules]) => {\n    if (!affectedDomains.has(domain) && changedFiles) return;\n\n    const domainFuncs = Object.values(modules).flat();\n    const funcCount = domainFuncs.length;\n    const moduleList = Object.keys(modules);\n\n    const domainEffects = new Set();\n    domainFuncs.forEach(f => f.effects.forEach(e => domainEffects.add(e)));\n\n    const summary = {\n      domain,\n      modules: moduleList,\n      functionCount: funcCount,\n      effects: Array.from(domainEffects),\n      keyFunctions: domainFuncs\n        .filter(f => f.calls.length > 3 || f.effects.length > 0)\n        .slice(0, 5)\n        .map(f => ({ name: f.name, file: f.file, line: f.line }))\n    };\n\n    L1Summaries.push(summary);\n    console.log(`    ✓ Updated: ${domain} (${funcCount} functions)`);\n  });\n\n  writeFileSync('.llm-context/summaries/L1-domains.json', JSON.stringify(L1Summaries, null, 2));\n  console.log(`    ✓ L1-domains.json (${L1Summaries.length} domains)`);\n\n  return L1Summaries;\n}"
+        },
+        "generateL2": {
+          "hash": "e70b198e3a1640d0136a606509a31d84",
+          "line": 195,
+          "endLine": 260,
+          "size": 2045,
+          "async": false,
+          "source": "function generateL2(functions, changedFiles = null) {\n  console.log('[3] Generating L2 (module summaries)...');\n\n  // Group by file\n  const byFile = {};\n  functions.forEach(func => {\n    if (!byFile[func.file]) byFile[func.file] = [];\n    byFile[func.file].push(func);\n  });\n\n  // Load existing L2 if available\n  let existingL2 = [];\n  if (existsSync('.llm-context/summaries/L2-modules.json')) {\n    existingL2 = JSON.parse(readFileSync('.llm-context/summaries/L2-modules.json', 'utf-8'));\n  }\n\n  // Determine which files were affected\n  const affectedFiles = changedFiles ? new Set(changedFiles) : new Set(Object.keys(byFile));\n\n  console.log(`    Affected modules: ${affectedFiles.size}`);\n\n  const L2Summaries = [];\n\n  // Keep existing summaries for unchanged files\n  if (changedFiles) {\n    existingL2.forEach(summary => {\n      if (!affectedFiles.has(summary.file)) {\n        L2Summaries.push(summary);\n        console.log(`    ↻ Kept: ${summary.module} (unchanged)`);\n      }\n    });\n  }\n\n  // Generate summaries for affected files\n  Object.entries(byFile).forEach(([file, funcs]) => {\n    if (!affectedFiles.has(file) && changedFiles) return;\n\n    const module = file.split('/').pop().replace('.js', '');\n    const exports = funcs.filter(f => f.calls.length > 5);\n    const effects = new Set();\n    funcs.forEach(f => f.effects.forEach(e => effects.add(e)));\n\n    const summary = {\n      file,\n      module,\n      functionCount: funcs.length,\n      exports: exports.map(f => f.name),\n      effects: Array.from(effects),\n      entryPoints: funcs\n        .filter(f => f.name && (\n          f.name.includes('main') ||\n          f.name.includes('process') ||\n          f.name.includes('init')\n        ))\n        .map(f => f.name)\n    };\n\n    L2Summaries.push(summary);\n    console.log(`    ✓ Updated: ${module} (${funcs.length} functions)`);\n  });\n\n  writeFileSync('.llm-context/summaries/L2-modules.json', JSON.stringify(L2Summaries, null, 2));\n  console.log(`    ✓ L2-modules.json (${L2Summaries.length} modules)`);\n\n  return L2Summaries;\n}"
+        },
+        "updateSummaries": {
+          "hash": "c6f949f4c669f04bd048ab3fa691da69",
+          "line": 266,
+          "endLine": 299,
+          "size": 1151,
+          "async": false,
+          "source": "function updateSummaries(changedFiles = null) {\n  const functions = loadGraph();\n\n  if (functions.length === 0) {\n    console.log('⚠ No functions in graph - nothing to summarize');\n    return;\n  }\n\n  console.log(`Loaded ${functions.length} functions from graph\\n`);\n\n  if (changedFiles && changedFiles.length > 0) {\n    console.log(`Incremental mode: ${changedFiles.length} files changed`);\n    console.log(`Changed files: ${changedFiles.join(', ')}\\n`);\n  } else {\n    console.log('Full regeneration mode\\n');\n  }\n\n  const L0 = generateL0(functions);\n  const L1 = generateL1(functions, changedFiles);\n  const L2 = generateL2(functions, changedFiles);\n\n  console.log('\\n=== Summary Update Complete ===');\n  console.log('Generated:');\n  console.log('  - L0-system.md');\n  console.log('  - L1-domains.json');\n  console.log('  - L2-modules.json');\n\n  if (changedFiles && changedFiles.length > 0) {\n    const domainsUpdated = new Set(changedFiles.map(f => dirname(f) || 'root')).size;\n    console.log(`\\nEfficiency:`);\n    console.log(`  - Domains regenerated: ${domainsUpdated}`);\n    console.log(`  - Modules regenerated: ${changedFiles.length}`);\n  }\n}"
+        }
+      }
+    },
+    "transformer.js": {
+      "hash": "fd75b4a2567e0044a0f178464d941828",
+      "size": 9079,
+      "lastModified": "2025-11-09T11:43:50.721Z",
+      "functions": [],
+      "analysisTime": null,
+      "functionHashes": {}
     }
   },
   "globalStats": {
-    "totalFunctions": 22,
-    "totalCalls": 161,
-    "totalFiles": 9,
-    "totalSize": 31979
+    "totalFunctions": 27,
+    "totalCalls": 177,
+    "totalFiles": 13,
+    "totalSize": 105919
   }
 }
