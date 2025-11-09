@@ -71,7 +71,7 @@ export function extractCurrentFunctions(filePath) {
  * @param {object} manifest - Manifest data
  * @returns {object} Change report with added, modified, deleted, unchanged functions
  */
-export function detectFunctionChanges(filePath, manifest) {
+export async function detectFunctionChanges(filePath, manifest) {
   const changes = {
     filePath,
     added: [],
@@ -141,14 +141,49 @@ export function detectFunctionChanges(filePath, manifest) {
   }
 
   // Detect potential renames (deleted + added with similar code)
-  // NOTE: Rename detection disabled for now since we don't store function source in manifest
-  // This could be added in future by storing source in manifest
-  // if (changes.deleted.length > 0 && changes.added.length > 0) {
-  //   const { detectRename } = await import('./function-source-extractor.js');
-  //   for (const deletedFunc of changes.deleted) {
-  //     ...
-  //   }
-  // }
+  if (changes.deleted.length > 0 && changes.added.length > 0) {
+    const config = loadConfig();
+    const detectRenames = config.incremental?.detectRenames || false;
+
+    if (detectRenames && fileEntry.functionHashes) {
+      // Check if we have source stored for similarity comparison
+      const hasStoredSource = Object.values(fileEntry.functionHashes).some(f => f.source);
+
+      if (hasStoredSource) {
+        const { computeSimilarity } = await import('./function-source-extractor.js');
+        const threshold = config.incremental?.similarityThreshold || 0.85;
+
+        for (const deletedFunc of changes.deleted) {
+          const oldSource = manifestFunctions[deletedFunc.name]?.source;
+
+          if (!oldSource) continue;
+
+          // Compare with each added function
+          for (const addedFunc of changes.added) {
+            const newMetadata = currentFunctions.get(addedFunc.name);
+            if (!newMetadata || !newMetadata.source) continue;
+
+            const similarity = computeSimilarity(oldSource, newMetadata.source);
+
+            if (similarity >= threshold) {
+              changes.renames.push({
+                from: deletedFunc.name,
+                to: addedFunc.name,
+                similarity: similarity.toFixed(3),
+                oldLine: deletedFunc.line,
+                newLine: addedFunc.line
+              });
+
+              // Remove from deleted and added since it's a rename
+              changes.deleted = changes.deleted.filter(f => f.name !== deletedFunc.name);
+              changes.added = changes.added.filter(f => f.name !== addedFunc.name);
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
 
   return changes;
 }
@@ -159,16 +194,17 @@ export function detectFunctionChanges(filePath, manifest) {
  * @param {object} manifest - Manifest data
  * @returns {Map} Map of file path to change report
  */
-export function detectAllFunctionChanges(changedFiles, manifest) {
+export async function detectAllFunctionChanges(changedFiles, manifest) {
   const allChanges = new Map();
 
   for (const filePath of changedFiles) {
-    const changes = detectFunctionChanges(filePath, manifest);
+    const changes = await detectFunctionChanges(filePath, manifest);
 
     // Only include files with actual function changes
     if (changes.added.length > 0 ||
         changes.modified.length > 0 ||
-        changes.deleted.length > 0) {
+        changes.deleted.length > 0 ||
+        (changes.renames && changes.renames.length > 0)) {
       allChanges.set(filePath, changes);
     }
   }
@@ -184,12 +220,21 @@ export function printFunctionChangeSummary(functionChanges) {
   let totalAdded = 0;
   let totalModified = 0;
   let totalDeleted = 0;
+  let totalRenamed = 0;
   let totalUnchanged = 0;
 
   console.log('\n=== Function-Level Changes ===\n');
 
   for (const [filePath, changes] of functionChanges) {
     console.log(`${filePath}:`);
+
+    if (changes.renames && changes.renames.length > 0) {
+      console.log(`  Renamed (${changes.renames.length}):`);
+      for (const rename of changes.renames) {
+        console.log(`    ≈ ${rename.from} → ${rename.to} (${(rename.similarity * 100).toFixed(1)}% similar, line ${rename.oldLine}→${rename.newLine})`);
+      }
+      totalRenamed += changes.renames.length;
+    }
 
     if (changes.added.length > 0) {
       console.log(`  Added (${changes.added.length}):`);
@@ -225,12 +270,15 @@ export function printFunctionChangeSummary(functionChanges) {
   }
 
   console.log('=== Summary ===');
+  if (totalRenamed > 0) {
+    console.log(`Total functions renamed: ${totalRenamed}`);
+  }
   console.log(`Total functions added: ${totalAdded}`);
   console.log(`Total functions modified: ${totalModified}`);
   console.log(`Total functions deleted: ${totalDeleted}`);
   console.log(`Total functions unchanged: ${totalUnchanged}`);
 
-  const totalChanged = totalAdded + totalModified + totalDeleted;
+  const totalChanged = totalAdded + totalModified + totalDeleted + totalRenamed;
   const totalFunctions = totalChanged + totalUnchanged;
   const percentUnchanged = totalFunctions > 0
     ? ((totalUnchanged / totalFunctions) * 100).toFixed(1)

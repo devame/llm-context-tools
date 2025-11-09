@@ -17,6 +17,7 @@ import traverse from '@babel/traverse';
 import { detectChanges } from './change-detector.js';
 import { detectAllFunctionChanges, printFunctionChangeSummary } from './function-change-detector.js';
 import { extractFunctionMetadata } from './function-source-extractor.js';
+import { analyzeImpact } from './dependency-analyzer.js';
 
 console.log('=== Incremental Analyzer ===\n');
 
@@ -488,7 +489,7 @@ async function mainFunctionLevel() {
   }
 
   console.log(`\n[2] Detecting function-level changes in ${changedFiles.length} files...`);
-  const functionChanges = detectAllFunctionChanges(changedFiles, changeReport.manifest);
+  const functionChanges = await detectAllFunctionChanges(changedFiles, changeReport.manifest);
 
   if (functionChanges.size === 0) {
     console.log('\n✓ No function-level changes detected!');
@@ -496,6 +497,27 @@ async function mainFunctionLevel() {
   }
 
   printFunctionChangeSummary(functionChanges);
+
+  // Impact analysis (if enabled)
+  const config = loadConfig();
+  if (config.analysis?.trackDependencies) {
+    const changedFunctionNames = [];
+    for (const [filePath, changes] of functionChanges) {
+      changedFunctionNames.push(...changes.modified.map(f => f.name));
+      changedFunctionNames.push(...changes.added.map(f => f.name));
+      if (changes.renames) {
+        changedFunctionNames.push(...changes.renames.map(r => r.to));
+      }
+    }
+
+    if (changedFunctionNames.length > 0) {
+      try {
+        analyzeImpact(changedFunctionNames);
+      } catch (error) {
+        console.log(`\nWarning: Impact analysis failed: ${error.message}`);
+      }
+    }
+  }
 
   console.log('\n[3] Re-analyzing changed/added functions...');
 
@@ -533,6 +555,7 @@ async function mainFunctionLevel() {
   // Update manifest (note: still need to update function hashes)
   console.log('\n[5] Updating manifest.json...');
   const manifest = changeReport.manifest;
+  const storeSource = config.incremental?.storeSource || false;
 
   for (const filePath of changedFiles) {
     const hash = computeFileHash(filePath);
@@ -540,7 +563,7 @@ async function mainFunctionLevel() {
 
     // Re-extract all function hashes for changed files
     const { extractFileFunctions } = await import('./manifest-generator.js');
-    const functionHashes = extractFileFunctions(filePath);
+    const functionHashes = extractFileFunctions(filePath, storeSource);
 
     if (manifest.files[filePath]) {
       manifest.files[filePath].hash = hash;

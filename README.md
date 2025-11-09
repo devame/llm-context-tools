@@ -97,16 +97,29 @@ Track changes at the function level, not just file level:
 
 # Configure in llm-context.config.json
 {
-  "granularity": "function"  // "file" or "function"
+  "granularity": "function",
+  "incremental": {
+    "storeSource": true,        // Enable rename detection
+    "detectRenames": true,
+    "similarityThreshold": 0.85
+  },
+  "analysis": {
+    "trackDependencies": true   // Enable impact analysis
+  }
 }
 ```
+
+**Advanced Features:**
+- **Rename Detection**: Detects function renames via similarity matching
+- **Impact Analysis**: Shows which functions are affected by changes
+- **Dependency Graphs**: Entry points, leaf functions, cycle detection
 
 Results:
 - Large files (50+ functions): **98% faster** when editing 1 function
 - Medium files (20-30 functions): **93% faster**
 - Perfect for utility files, generated code, and focused edits
 
-See [FUNCTION_LEVEL_GRANULARITY.md](FUNCTION_LEVEL_GRANULARITY.md) for details.
+See [FUNCTION_LEVEL_GRANULARITY.md](FUNCTION_LEVEL_GRANULARITY.md) for complete details.
 
 ### 3. Progressive Disclosure
 

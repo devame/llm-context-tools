@@ -7,15 +7,20 @@
   "analysis": {
     "detectSideEffects": true,
     "trackCallGraph": true,
+    "trackDependencies": true,
     "maxCallDepth": 10
   },
   "incremental": {
     "enabled": true,
     "hashAlgorithm": "md5",
-    "normalizeWhitespace": true
+    "normalizeWhitespace": true,
+    "storeSource": true,
+    "detectRenames": true,
+    "similarityThreshold": 0.85
   },
   "output": {
     "summaryLevels": ["L0", "L1", "L2"],
-    "includeSourceInGraph": false
+    "includeSourceInGraph": false,
+    "includeDependencyGraph": true
   }
 }

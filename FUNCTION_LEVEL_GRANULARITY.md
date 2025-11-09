@@ -405,15 +405,111 @@ function validateEmail(email) {
 Efficiency: 98% faster!
 ```
 
+## Advanced Features (NEW!)
+
+### 1. **Rename Detection** ✅
+
+Automatically detects when functions are renamed by comparing source code similarity:
+
+```bash
+=== Function-Level Changes ===
+
+auth.js:
+  Renamed (1):
+    ≈ authenticateUser → validateUser (92.5% similar, line 45→45)
+```
+
+**How it works:**
+- Stores function source in manifest when `incremental.storeSource: true`
+- Compares deleted vs added functions using Levenshtein-style similarity
+- Threshold configurable via `incremental.similarityThreshold` (default: 0.85)
+
+**Enable in config:**
+```json
+{
+  "incremental": {
+    "storeSource": true,
+    "detectRenames": true,
+    "similarityThreshold": 0.85
+  }
+}
+```
+
+### 2. **Cross-Function Dependency Analysis** ✅
+
+Tracks which functions depend on which, with impact analysis:
+
+```bash
+=== Impact Analysis ===
+
+hashFile:
+  Direct callers: 1
+  Total impacted: 3
+  Affected functions: detectChanges, main, analyzeChanges
+
+Total unique functions impacted: 3
+```
+
+**Features:**
+- Dependency graph (who calls what)
+- Reverse dependency graph (who calls me)
+- Impact sets (if I change, what's affected)
+- Entry point detection
+- Leaf function detection
+- Cycle detection
+
+**Enable in config:**
+```json
+{
+  "analysis": {
+    "trackDependencies": true,
+    "maxCallDepth": 10
+  }
+}
+```
+
+**Run manually:**
+```bash
+node dependency-analyzer.js
+# Generates: .llm-context/dependencies.json
+```
+
+### 3. **Function Source Storage** ✅
+
+Stores full function source in manifest for better diffs and rename detection:
+
+```json
+{
+  "functionHashes": {
+    "hashFile": {
+      "hash": "9e96f319...",
+      "line": 23,
+      "size": 152,
+      "source": "function hashFile(filePath) {...}"
+    }
+  }
+}
+```
+
+**Benefits:**
+- View exact code changes in manifest diffs
+- Enable rename detection
+- Better debugging (see what changed)
+- Source-level impact analysis
+
+**Trade-offs:**
+- ✅ Enables rename detection
+- ✅ Better visibility into changes
+- ❌ Larger manifest file size (~2-3x)
+- ❌ Manifest contains code (may want to gitignore)
+
 ## Future Enhancements
 
 ### Planned
 
-- [ ] Rename detection via similarity matching
-- [ ] Cross-function dependency analysis
 - [ ] Per-function watch mode
-- [ ] Function move detection
-- [ ] Store function source in manifest for better diffs
+- [ ] Function move detection (between files)
+- [ ] Semantic change detection (beyond textual)
 
 ### Research
 

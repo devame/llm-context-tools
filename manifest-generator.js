@@ -63,9 +63,10 @@ function getFileMetadata(filePath) {
 /**
  * Extract function-level metadata from a file
  * @param {string} filePath - Path to file
+ * @param {boolean} includeSource - Whether to include function source
  * @returns {object} Map of function name to metadata
  */
-export function extractFileFunctions(filePath) {
+export function extractFileFunctions(filePath, includeSource = false) {
   const functionMap = {};
 
   try {
@@ -81,26 +82,40 @@ export function extractFileFunctions(filePath) {
     traverse.default(ast, {
       FunctionDeclaration(path) {
         const metadata = extractFunctionMetadata(path, source, filePath);
-        functionMap[metadata.name] = {
+        const funcEntry = {
           hash: metadata.hash,
           line: metadata.line,
           endLine: metadata.endLine,
           size: metadata.size,
           async: metadata.isAsync
         };
+
+        // Optionally include source for rename detection and diffs
+        if (includeSource) {
+          funcEntry.source = metadata.source;
+        }
+
+        functionMap[metadata.name] = funcEntry;
       },
 
       VariableDeclarator(path) {
         if (path.node.init?.type === 'ArrowFunctionExpression' ||
             path.node.init?.type === 'FunctionExpression') {
           const metadata = extractFunctionMetadata(path, source, filePath);
-          functionMap[metadata.name] = {
+          const funcEntry = {
             hash: metadata.hash,
             line: metadata.line,
             endLine: metadata.endLine,
             size: metadata.size,
             async: metadata.isAsync
           };
+
+          // Optionally include source for rename detection and diffs
+          if (includeSource) {
+            funcEntry.source = metadata.source;
+          }
+
+          functionMap[metadata.name] = funcEntry;
         }
       }
     });
@@ -208,7 +223,8 @@ function generateManifest() {
 
       // Add function-level hashes if granularity is 'function'
       if (granularity === 'function') {
-        const functionMetadata = extractFileFunctions(filePath);
+        const storeSource = config.incremental?.storeSource || false;
+        const functionMetadata = extractFileFunctions(filePath, storeSource);
         fileEntry.functionHashes = functionMetadata;
 
         console.log(`    ${filePath}`);
