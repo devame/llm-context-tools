@@ -1,8 +1,22 @@
 {
-  "name": "llm-context-analyzer",
-  "version": "0.1.0",
-  "description": "LLM-optimized code analysis system - hybrid SCIP + custom semantic analysis",
+  "name": "llm-context",
+  "version": "0.2.0",
+  "description": "LLM-optimized code analysis system with incremental updates - generates compact, semantically-rich code context for AI assistants",
   "type": "module",
+  "bin": {
+    "llm-context": "./bin/llm-context.js"
+  },
+  "main": "analyze.js",
+  "files": [
+    "bin/",
+    "*.js",
+    "scip.proto",
+    ".claude/skills/llm-context-tools/",
+    "README.md",
+    "INCREMENTAL_UPDATES.md",
+    "DEMO.md",
+    "performance-comparison.md"
+  ],
   "scripts": {
     "analyze": "node analyze.js",
     "analyze:full": "rm -f .llm-context/manifest.json && node analyze.js",
@@ -14,15 +28,38 @@
   },
   "keywords": [
     "llm",
+    "ai",
     "code-analysis",
     "ast",
     "scip",
     "code-intelligence",
-    "semantic-analysis"
+    "semantic-analysis",
+    "incremental-updates",
+    "claude",
+    "chatgpt",
+    "copilot",
+    "developer-tools"
   ],
-  "author": "",
+  "author": "devame",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/devame/llm-context-tools.git"
+  },
+  "bugs": {
+    "url": "https://github.com/devame/llm-context-tools/issues"
+  },
+  "homepage": "https://github.com/devame/llm-context-tools#readme",
+  "engines": {
+    "node": ">=16.0.0"
+  },
   "devDependencies": {
+    "@babel/parser": "^7.28.5",
+    "@babel/traverse": "^7.28.5",
+    "@sourcegraph/scip-typescript": "^0.4.0",
+    "protobufjs": "^7.5.4"
+  },
+  "dependencies": {
     "@babel/parser": "^7.28.5",
     "@babel/traverse": "^7.28.5",
     "@sourcegraph/scip-typescript": "^0.4.0",
