@@ -1,0 +1,33 @@
+# Auto-commit example: Keep .llm-context/ in repository
+
+name: LLM Context (Auto-commit)
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Analyze and commit
+        uses: ./.github/actions/llm-context-action
+        with:
+          commit-changes: true
+          commit-message: 'chore: update LLM context [skip ci]'
+          upload-artifact: false
+
+      - name: Summary
+        run: |
+          echo "✅ Analysis complete!"
+          echo "💾 Changes committed to repository"
+          echo "⚠️ Note: [skip ci] prevents infinite loops"

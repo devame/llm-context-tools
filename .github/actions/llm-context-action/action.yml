@@ -1,0 +1,120 @@
+name: 'LLM Context Analyzer'
+description: 'Generate LLM-optimized context for your codebase with incremental updates and function-level granularity'
+author: 'devame'
+
+branding:
+  icon: 'git-branch'
+  color: 'blue'
+
+inputs:
+  config:
+    description: 'Path to llm-context.config.json'
+    required: false
+    default: 'llm-context.config.json'
+
+  working-directory:
+    description: 'Working directory to run analysis in'
+    required: false
+    default: '.'
+
+  commit-changes:
+    description: 'Whether to commit .llm-context/ back to the repo'
+    required: false
+    default: 'false'
+
+  commit-message:
+    description: 'Commit message for context updates'
+    required: false
+    default: 'chore: update LLM context'
+
+  upload-artifact:
+    description: 'Whether to upload .llm-context/ as an artifact'
+    required: false
+    default: 'true'
+
+  artifact-name:
+    description: 'Name of the artifact to upload'
+    required: false
+    default: 'llm-context'
+
+outputs:
+  context-path:
+    description: 'Path to generated .llm-context/ directory'
+    value: ${{ steps.analyze.outputs.context-path }}
+
+  total-functions:
+    description: 'Total number of functions analyzed'
+    value: ${{ steps.analyze.outputs.total-functions }}
+
+  total-files:
+    description: 'Total number of files analyzed'
+    value: ${{ steps.analyze.outputs.total-files }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install llm-context
+      shell: bash
+      run: |
+        npm install -g llm-context
+
+    - name: Run analysis
+      id: analyze
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        # Run manifest generation (initial or update)
+        if [ -f ".llm-context/manifest.json" ]; then
+          echo "Incremental update..."
+          node $(npm root -g)/llm-context/incremental-analyzer.js
+        else
+          echo "Initial analysis..."
+          node $(npm root -g)/llm-context/manifest-generator.js
+
+          # Run full analysis pipeline if needed
+          if [ ! -f ".llm-context/graph.jsonl" ]; then
+            echo "Running full analysis pipeline..."
+            # SCIP indexing
+            if command -v scip-typescript &> /dev/null; then
+              scip-typescript index
+            fi
+
+            # Transform and summarize
+            node $(npm root -g)/llm-context/transformer.js || echo "⚠ transformer.js not found or failed"
+            node $(npm root -g)/llm-context/summarizer.js || echo "⚠ summarizer.js not found or failed"
+          fi
+        fi
+
+        # Set outputs
+        echo "context-path=${{ inputs.working-directory }}/.llm-context" >> $GITHUB_OUTPUT
+
+        if [ -f ".llm-context/manifest.json" ]; then
+          TOTAL_FUNCTIONS=$(jq '.globalStats.totalFunctions' .llm-context/manifest.json)
+          TOTAL_FILES=$(jq '.globalStats.totalFiles' .llm-context/manifest.json)
+          echo "total-functions=$TOTAL_FUNCTIONS" >> $GITHUB_OUTPUT
+          echo "total-files=$TOTAL_FILES" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Upload artifact
+      if: inputs.upload-artifact == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.working-directory }}/.llm-context/
+        retention-days: 30
+
+    - name: Commit changes
+      if: inputs.commit-changes == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add .llm-context/
+        git diff --staged --quiet || git commit -m "${{ inputs.commit-message }}"
+        git push

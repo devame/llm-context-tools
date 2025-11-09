@@ -316,10 +316,54 @@ llm-context analyze
 git add .llm-context/
 ```
 
-### CI/CD
+### GitHub Action (Recommended)
+
+Use the included GitHub Action for automatic analysis in CI/CD:
 
 ```yaml
-# .github/workflows/analyze.yml
+# .github/workflows/llm-context.yml
+name: Update LLM Context
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Analyze codebase
+        uses: ./.github/actions/llm-context-action
+        with:
+          upload-artifact: true
+```
+
+**Features:**
+- ✅ Automatic incremental updates (99% faster on subsequent runs)
+- ✅ Upload artifacts for download
+- ✅ Auto-commit option to keep context in repo
+- ✅ PR comments with stats
+
+**Options:**
+
+```yaml
+- uses: ./.github/actions/llm-context-action
+  with:
+    config: 'llm-context.config.json'  # Config file path
+    commit-changes: true                # Commit .llm-context/ back
+    commit-message: 'chore: update context [skip ci]'
+    upload-artifact: true               # Upload as artifact
+    artifact-name: 'llm-context'        # Artifact name
+```
+
+See [GitHub Action README](.github/actions/llm-context-action/README.md) for complete documentation and examples.
+
+### Manual CI/CD
+
+```yaml
 - name: Install llm-context
   run: npm install -g llm-context
 
@@ -327,7 +371,7 @@ git add .llm-context/
   run: llm-context analyze
 
 - name: Upload artifacts
-  uses: actions/upload-artifact@v3
+  uses: actions/upload-artifact@v4
   with:
     name: llm-context
     path: .llm-context/
@@ -420,26 +464,24 @@ if (currentHash !== cachedHash) {
 - [x] Side effect detection
 - [x] Query interface
 - [x] **Function-level granularity** (98% faster for large files)
+- [x] **Advanced features**: Rename detection, dependency analysis, source storage
+- [x] **GitHub Action** (CI/CD integration)
 
 ### 🚧 In Progress
 
 - [ ] Watch mode (auto-analyze on file changes)
 - [ ] Multi-language support (Python, Go, Rust, Java)
-- [ ] LLM-powered summarization (using Haiku)
-- [ ] Vector embeddings for semantic search
-- [ ] Cross-file dependency tracking
 
 ### 📋 Planned
 
-- [ ] Parallel analysis
 - [ ] VS Code extension
-- [ ] GitHub Action
 
 ## Documentation
 
 - **[Installation Guide](CLI_INSTALLATION.md)** - Detailed setup instructions
 - **[Incremental Updates](INCREMENTAL_UPDATES.md)** - How incremental updates work
-- **[Function-Level Granularity](FUNCTION_LEVEL_GRANULARITY.md)** - Track changes at function level (NEW!)
+- **[Function-Level Granularity](FUNCTION_LEVEL_GRANULARITY.md)** - Track changes at function level
+- **[GitHub Action](.github/actions/llm-context-action/README.md)** - CI/CD integration (NEW!)
 - **[Demo](DEMO.md)** - Live demonstrations
 - **[Performance](performance-comparison.md)** - Benchmarks and projections
 - **[Proof of Concept](PROOF_OF_CONCEPT_RESULTS.md)** - Original research
