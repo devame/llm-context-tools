@@ -1,69 +1,65 @@
 [
   {
-    "domain": "root",
+    "domain": "bin",
     "modules": [
-      "query",
-      "scip-parser"
+      "llm-context"
     ],
-    "functionCount": 3,
+    "functionCount": 1,
     "effects": [
-      "database",
-      "file_io",
       "logging"
     ],
     "keyFunctions": [
       {
-        "name": "unknown",
-        "file": "query.js",
-        "line": 49
-      },
-      {
-        "name": "unknown",
-        "file": "query.js",
-        "line": 93
-      },
-      {
-        "name": "unknown",
-        "file": "scip-parser.js",
-        "line": 12
+        "file": "bin/llm-context.js",
+        "line": 23
       }
     ]
   },
   {
     "domain": ".",
     "modules": [
-      "scip-parser",
       "change-detector",
+      "dependency-analyzer",
+      "function-change-detector",
+      "function-source-extractor",
       "incremental-analyzer",
+      "language-detector",
+      "manifest-generator",
       "query",
-      "summary-updater"
+      "scip-parser",
+      "summary-updater",
+      "test-sample.py",
+      "transformer",
+      "tree-sitter-parser"
     ],
-    "functionCount": 22,
+    "functionCount": 82,
     "effects": [
       "file_io",
+      "database",
       "logging",
-      "database"
+      "network",
+      "state_mutation"
     ],
     "keyFunctions": [
       {
-        "file": "scip-parser.js",
-        "line": 12
+        "file": "change-detector.js",
+        "line": 23
       },
       {
         "file": "change-detector.js",
-        "line": 22
+        "line": 35
       },
       {
         "file": "change-detector.js",
-        "line": 33
+        "line": 38
       },
       {
         "file": "change-detector.js",
-        "line": 36
+        "line": 65
       },
       {
         "file": "change-detector.js",
-        "line": 63
+        "line": 80
       }
     ]
   }

@@ -5,13 +5,14 @@
 **Architecture**: JavaScript modules with incremental update support
 
 ## Statistics
-- **Files**: 5 modules
-- **Functions**: 22 total
-- **Call relationships**: 161
-- **Side effects**: file_io, logging, database
+- **Files**: 14 modules
+- **Functions**: 83 total
+- **Call relationships**: 447
+- **Side effects**: logging, file_io, database, network, state_mutation
 
 ## Key Components
-- **.**: scip-parser, change-detector, incremental-analyzer, query, summary-updater
+- **bin**: llm-context
+- **.**: change-detector, dependency-analyzer, function-change-detector, function-source-extractor, incremental-analyzer, language-detector, manifest-generator, query, scip-parser, summary-updater, test-sample.py, transformer, tree-sitter-parser
 
 ## Entry Points
 - None detected

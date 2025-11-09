@@ -1,13 +1,12 @@
 [
   {
-    "file": "scip-parser.js",
-    "module": "scip-parser",
+    "file": "bin/llm-context.js",
+    "module": "llm-context",
     "functionCount": 1,
     "exports": [
-      "line12"
+      null
     ],
     "effects": [
-      "file_io",
       "logging"
     ],
     "entryPoints": []
@@ -29,9 +28,81 @@
     "entryPoints": []
   },
   {
+    "file": "dependency-analyzer.js",
+    "module": "dependency-analyzer",
+    "functionCount": 12,
+    "exports": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "effects": [
+      "file_io",
+      "database",
+      "logging"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "function-change-detector.js",
+    "module": "function-change-detector",
+    "functionCount": 5,
+    "exports": [
+      null,
+      null
+    ],
+    "effects": [
+      "file_io",
+      "logging"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "function-source-extractor.js",
+    "module": "function-source-extractor",
+    "functionCount": 6,
+    "exports": [],
+    "effects": [
+      "database"
+    ],
+    "entryPoints": []
+  },
+  {
     "file": "incremental-analyzer.js",
     "module": "incremental-analyzer",
-    "functionCount": 7,
+    "functionCount": 12,
+    "exports": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "effects": [
+      "file_io",
+      "database",
+      "logging"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "language-detector.js",
+    "module": "language-detector",
+    "functionCount": 5,
+    "exports": [],
+    "effects": [],
+    "entryPoints": []
+  },
+  {
+    "file": "manifest-generator.js",
+    "module": "manifest-generator",
+    "functionCount": 10,
     "exports": [
       null,
       null,
@@ -60,6 +131,19 @@
     "entryPoints": []
   },
   {
+    "file": "scip-parser.js",
+    "module": "scip-parser",
+    "functionCount": 1,
+    "exports": [
+      null
+    ],
+    "effects": [
+      "file_io",
+      "logging"
+    ],
+    "entryPoints": []
+  },
+  {
     "file": "summary-updater.js",
     "module": "summary-updater",
     "functionCount": 5,
@@ -73,6 +157,48 @@
     "effects": [
       "logging",
       "file_io"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "test-sample.py",
+    "module": "test-sample.py",
+    "functionCount": 8,
+    "exports": [],
+    "effects": [
+      "file_io",
+      "network",
+      "logging",
+      "database",
+      "state_mutation"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "transformer.js",
+    "module": "transformer",
+    "functionCount": 2,
+    "exports": [
+      null,
+      null
+    ],
+    "effects": [
+      "file_io"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "tree-sitter-parser.js",
+    "module": "tree-sitter-parser",
+    "functionCount": 7,
+    "exports": [
+      null,
+      null
+    ],
+    "effects": [
+      "file_io",
+      "logging",
+      "database"
     ],
     "entryPoints": []
   }
