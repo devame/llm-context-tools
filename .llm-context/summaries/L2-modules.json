@@ -1,0 +1,28 @@
+[
+  {
+    "file": "query.js",
+    "module": "query",
+    "functionCount": 2,
+    "exports": [
+      "line49",
+      "line93"
+    ],
+    "effects": [
+      "database"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "scip-parser.js",
+    "module": "scip-parser",
+    "functionCount": 1,
+    "exports": [
+      "line12"
+    ],
+    "effects": [
+      "file_io",
+      "logging"
+    ],
+    "entryPoints": []
+  }
+]
