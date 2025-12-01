@@ -89,11 +89,11 @@ if (!manifestExists || !graphExists) {
 
   // Run incremental analyzer
   const startTime = Date.now();
-  execSync('node incremental-analyzer.js', { stdio: 'inherit' });
+  execSync(`node "${join(__dirname, 'incremental-analyzer.js')}"`, { stdio: 'inherit' });
 
   // Update summaries
   console.log('');
-  execSync(`node summary-updater.js ${changedFiles.join(' ')}`, { stdio: 'inherit' });
+  execSync(`node "${join(__dirname, 'summary-updater.js')}" ${changedFiles.join(' ')}`, { stdio: 'inherit' });
 
   const totalTime = Date.now() - startTime;
 
