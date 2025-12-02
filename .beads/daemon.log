@@ -43,3 +43,21 @@
 [2025-12-01 11:30:19] Starting RPC server: /mnt/d/Github/llm-context-tools/.beads/bd.sock
 [2025-12-01 11:30:19] RPC server error: failed to initialize RPC listener: listen unix /mnt/d/Github/llm-context-tools/.beads/bd.sock: bind: operation not supported
 [2025-12-01 11:30:19] RPC server failed to start: failed to initialize RPC listener: listen unix /mnt/d/Github/llm-context-tools/.beads/bd.sock: bind: operation not supported
+[2025-12-02 06:07:14] Daemon started (interval: 5s, auto-commit: false, auto-push: false)
+[2025-12-02 06:07:14] Using database: /mnt/d/Github/llm-context-tools/.beads/beads.db
+[2025-12-02 06:07:14] Database opened: /mnt/d/Github/llm-context-tools/.beads/beads.db
+[2025-12-02 06:07:14] Upgrading .beads/.gitignore...
+[2025-12-02 06:07:14] Warning: failed to upgrade .gitignore: open .beads/.gitignore: no such file or directory
+[2025-12-02 06:07:14] Repository fingerprint validated: 630f0e3c
+[2025-12-02 06:07:14] Starting RPC server: /mnt/d/Github/llm-context-tools/.beads/bd.sock
+[2025-12-02 06:07:14] RPC server error: failed to initialize RPC listener: listen unix /mnt/d/Github/llm-context-tools/.beads/bd.sock: bind: operation not supported
+[2025-12-02 06:07:14] RPC server failed to start: failed to initialize RPC listener: listen unix /mnt/d/Github/llm-context-tools/.beads/bd.sock: bind: operation not supported
+[2025-12-02 06:07:48] Daemon started (interval: 5s, auto-commit: false, auto-push: false)
+[2025-12-02 06:07:48] Using database: /mnt/d/Github/llm-context-tools/.beads/beads.db
+[2025-12-02 06:07:48] Database opened: /mnt/d/Github/llm-context-tools/.beads/beads.db
+[2025-12-02 06:07:48] Upgrading .beads/.gitignore...
+[2025-12-02 06:07:48] Warning: failed to upgrade .gitignore: open .beads/.gitignore: no such file or directory
+[2025-12-02 06:07:48] Repository fingerprint validated: 630f0e3c
+[2025-12-02 06:07:48] Starting RPC server: /mnt/d/Github/llm-context-tools/.beads/bd.sock
+[2025-12-02 06:07:48] RPC server error: failed to initialize RPC listener: listen unix /mnt/d/Github/llm-context-tools/.beads/bd.sock: bind: operation not supported
+[2025-12-02 06:07:48] RPC server failed to start: failed to initialize RPC listener: listen unix /mnt/d/Github/llm-context-tools/.beads/bd.sock: bind: operation not supported
