@@ -1,8 +1,11 @@
 {
   "name": "llm-context-analyzer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "LLM-optimized code analysis system - hybrid SCIP + custom semantic analysis",
   "type": "module",
+  "bin": {
+    "llm-context": "./cli.js"
+  },
   "scripts": {
     "analyze": "node analyze.js",
     "analyze:full": "rm -f .llm-context/manifest.json && node analyze.js",
@@ -10,7 +13,8 @@
     "check-changes": "node change-detector.js",
     "parse-scip": "node scip-parser.js",
     "transform": "node transformer.js",
-    "summarize": "node summary-updater.js"
+    "summarize": "node summary-updater.js",
+    "grep": "node grep.js"
   },
   "keywords": [
     "llm",
