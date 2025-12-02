@@ -1,20 +1,30 @@
-# LLM-Optimized Code Context - Proof of Concept
+# LLM-Optimized Code Context
 
-This directory contains a working prototype of an **LLM-optimized code analysis system** that combines SCIP (Sourcegraph Code Intelligence Protocol) with custom semantic analysis.
+An **LLM-optimized code analysis system** that combines semantic analysis with powerful code search capabilities.
+
+## Features
+
+- 📊 **Semantic Analysis**: Function call graphs, side effects, entry points
+- 🔍 **Content Search**: grep-style code searching with context
+- 📈 **Multi-level Summaries**: System, domain, and module-level overviews
+- ⚡ **Incremental Updates**: Only re-analyze changed files
+- 🎯 **Query Interface**: Fast lookups on function relationships
 
 ## Quick Start
 
 ```bash
-# 1. Generate the graph (already done)
-node .llm-context/transformer.js
+# Install globally
+npm link
 
-# 2. Generate summaries (already done)
-node .llm-context/summarizer.js
+# Search code
+llm-context grep "pattern" -C 5
 
-# 3. Query the graph
-node .llm-context/query.js stats
-node .llm-context/query.js side-effects
-node .llm-context/query.js entry-points
+# Analyze codebase
+llm-context analyze
+
+# Query the graph
+llm-context stats
+llm-context entry-points
 ```
 
 ## What's Here
@@ -34,6 +44,25 @@ node .llm-context/query.js entry-points
 - **`query.js`** - Query interface for the graph
 
 ## Usage Examples
+
+### Content Search (NEW!)
+
+```bash
+# Search for a pattern
+llm-context grep "qualified name"
+
+# Search with context lines
+llm-context grep "parsePrimary" -C 5
+
+# Case-insensitive search
+llm-context grep "error" -i
+
+# Search in specific files
+llm-context grep "TokenType" --files "parser.js"
+
+# Search with regex
+llm-context grep "Token.*SLASH"
+```
 
 ### Query Interface
 
