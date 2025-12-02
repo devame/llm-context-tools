@@ -15,8 +15,14 @@
 
 import { existsSync } from 'fs';
 import { execSync } from 'child_process';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import { detectChanges } from './change-detector.js';
 import { updateSummaries } from './summary-updater.js';
+
+// Get package directory
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 console.log('=== LLM Context Analyzer ===\n');
 
@@ -42,7 +48,7 @@ if (!manifestExists || !graphExists) {
   console.log('\n[3/5] Parsing SCIP data...');
   if (existsSync('.llm-context/index.scip')) {
     try {
-      execSync('cp scip.proto .llm-context/ && node scip-parser.js', { stdio: 'inherit' });
+      execSync(`cp "${join(__dirname, 'scip.proto')}" .llm-context/ && node "${join(__dirname, 'scip-parser.js')}"`, { stdio: 'inherit' });
     } catch (error) {
       console.log('  ⚠ SCIP parsing failed');
     }
@@ -52,15 +58,15 @@ if (!manifestExists || !graphExists) {
 
   // Step 4: Run full transformer
   console.log('\n[4/5] Running full analysis...');
-  execSync('node transformer.js', { stdio: 'inherit' });
+  execSync(`node "${join(__dirname, 'transformer.js')}"`, { stdio: 'inherit' });
 
   // Step 5: Generate initial manifest
   console.log('\n[5/5] Generating manifest...');
-  execSync('node manifest-generator.js', { stdio: 'inherit' });
+  execSync(`node "${join(__dirname, 'manifest-generator.js')}"`, { stdio: 'inherit' });
 
   // Step 6: Generate summaries
   console.log('\n[6/6] Generating summaries...');
-  execSync('node summary-updater.js', { stdio: 'inherit' });
+  execSync(`node "${join(__dirname, 'summary-updater.js')}"`, { stdio: 'inherit' });
 
   console.log('\n✅ Initial analysis complete!');
   console.log('\nNext steps:');
@@ -83,11 +89,11 @@ if (!manifestExists || !graphExists) {
 
   // Run incremental analyzer
   const startTime = Date.now();
-  execSync('node incremental-analyzer.js', { stdio: 'inherit' });
+  execSync(`node "${join(__dirname, 'incremental-analyzer.js')}"`, { stdio: 'inherit' });
 
   // Update summaries
   console.log('');
-  execSync(`node summary-updater.js ${changedFiles.join(' ')}`, { stdio: 'inherit' });
+  execSync(`node "${join(__dirname, 'summary-updater.js')}" ${changedFiles.join(' ')}`, { stdio: 'inherit' });
 
   const totalTime = Date.now() - startTime;
 
