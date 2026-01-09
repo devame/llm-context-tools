@@ -1,6 +1,6 @@
 {
   "name": "llm-context",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "LLM-optimized code analysis system with incremental updates - generates compact, semantically-rich code context for AI assistants",
   "type": "module",
   "bin": {
@@ -15,7 +15,8 @@
     "README.md",
     "INCREMENTAL_UPDATES.md",
     "DEMO.md",
-    "performance-comparison.md"
+    "performance-comparison.md",
+    "claude-setup.js"
   ],
   "scripts": {
     "analyze": "node analyze.js",

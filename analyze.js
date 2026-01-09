@@ -19,6 +19,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { detectChanges } from './change-detector.js';
 import { updateSummaries } from './summary-updater.js';
+import { setupClaudeIntegration } from './claude-setup.js';
 
 // Get package directory
 const __filename = fileURLToPath(import.meta.url);
@@ -68,6 +69,10 @@ if (!manifestExists || !graphExists) {
   console.log('\n[6/6] Generating summaries...');
   execSync(`node "${join(__dirname, 'summary-updater.js')}"`, { stdio: 'inherit' });
 
+  // Step 7: Setup Claude Code integration
+  console.log('\n[7/7] Setting up Claude Code integration...');
+  setupClaudeIntegration();
+
   console.log('\n✅ Initial analysis complete!');
   console.log('\nNext steps:');
   console.log('  - Run "node query.js stats" to see statistics');
@@ -94,6 +99,9 @@ if (!manifestExists || !graphExists) {
   // Update summaries
   console.log('');
   execSync(`node "${join(__dirname, 'summary-updater.js')}" ${changedFiles.join(' ')}`, { stdio: 'inherit' });
+
+  // Ensure Claude Code integration exists
+  setupClaudeIntegration();
 
   const totalTime = Date.now() - startTime;
 

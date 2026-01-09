@@ -85,6 +85,9 @@ const commands = {
     runScript('analyze.js');
 
     console.log('\n✅ Initialization complete!');
+    console.log('\nGenerated files:');
+    console.log('  - .llm-context/       → Analysis results');
+    console.log('  - .claude/CLAUDE.md   → Claude Code instructions');
     console.log('\nNext steps:');
     console.log('  - Run "llm-context query stats" to see statistics');
     console.log('  - Check .llm-context/ directory for generated files');
@@ -96,6 +99,15 @@ const commands = {
   'entry-points': () => runScript('query.js', ['entry-points']),
 
   'side-effects': () => runScript('query.js', ['side-effects']),
+
+  'setup-claude': async () => {
+    console.log('🔧 Setting up Claude Code integration...\n');
+    const { setupClaudeIntegration } = await import('../claude-setup.js');
+    const force = process.argv.includes('--force');
+    setupClaudeIntegration({ force });
+    console.log('\n✅ Setup complete!');
+    console.log('   Claude Code will now see query instructions in .claude/CLAUDE.md');
+  },
 
   version: () => {
     const packageJson = JSON.parse(
@@ -129,6 +141,7 @@ COMMANDS
 
   Setup:
     init                 Initialize LLM context tools in current project
+    setup-claude         Generate .claude/CLAUDE.md with query instructions
     version              Show version
     help                 Show this help
 
@@ -162,6 +175,10 @@ EXAMPLES
   # Force full re-analysis
   llm-context analyze:full
 
+  # Setup Claude Code integration
+  llm-context setup-claude         # Generate .claude/CLAUDE.md
+  llm-context setup-claude --force # Overwrite existing
+
 GENERATED FILES
 
   .llm-context/
@@ -181,9 +198,15 @@ DOCUMENTATION
   }
 };
 
-// Execute command
+// Execute command (handle async commands)
 if (commands[command]) {
-  commands[command]();
+  const result = commands[command]();
+  if (result instanceof Promise) {
+    result.catch(err => {
+      console.error('❌ Error:', err.message);
+      process.exit(1);
+    });
+  }
 } else {
   console.error(`❌ Unknown command: ${command}`);
   console.error('   Run "llm-context help" for usage\n');
