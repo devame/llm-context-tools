@@ -157,6 +157,46 @@ function analyzeSpecificFunctions(sourcePath, targetFunctions = null) {
       return acc;
     }, new Map());
 
+    // Detect code patterns
+    const patterns = [];
+    const source = metadata.source || '';
+
+    // Parsing patterns
+    if (calls.some(c => c === 'parse' || c.includes('parse'))) {
+      patterns.push({
+        type: 'parsing',
+        tool: calls.find(c => c.includes('babel') || c.includes('parser')) ? 'babel' : 'unknown',
+        description: 'Parses source code into AST'
+      });
+    }
+
+    // Hash/crypto patterns
+    if (calls.some(c => /hash|md5|sha|digest|crypto/i.test(c))) {
+      patterns.push({
+        type: 'hashing',
+        method: calls.find(c => /md5|sha/i.test(c)) || 'hash',
+        description: 'Computes file/content hash for change detection'
+      });
+    }
+
+    // Side effect detection patterns
+    if (source.includes('/read|write|') || source.includes('/fetch|request|')) {
+      patterns.push({
+        type: 'side-effect-detection',
+        method: 'regex-matching',
+        description: 'Detects side effects via regex pattern matching'
+      });
+    }
+
+    // Graph manipulation
+    if (calls.some(c => /map|filter|reduce|forEach/i.test(c)) &&
+        calls.some(c => /graph|entries|functions/i.test(c))) {
+      patterns.push({
+        type: 'graph-transformation',
+        description: 'Transforms or filters call graph data'
+      });
+    }
+
     results.push({
       id: metadata.name,
       type: 'function',
@@ -166,6 +206,7 @@ function analyzeSpecificFunctions(sourcePath, targetFunctions = null) {
       async: metadata.isAsync,
       calls: uniqueCalls.slice(0, 10),
       effects: Array.from(uniqueEffects.values()).map(e => e.type),
+      patterns: patterns.length > 0 ? patterns : undefined,  // Only include if patterns found
       scipDoc: '',
       functionHash: metadata.hash  // Include for reference
     });

@@ -23,7 +23,37 @@
     ],
     "effects": [
       "file_io",
-      "database",
+      "logging",
+      "database"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "summary-updater.js",
+    "module": "summary-updater",
+    "functionCount": 5,
+    "exports": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "effects": [
+      "logging",
+      "file_io"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "function-change-detector.js",
+    "module": "function-change-detector",
+    "functionCount": 5,
+    "exports": [
+      null
+    ],
+    "effects": [
+      "file_io",
       "logging"
     ],
     "entryPoints": []
@@ -31,8 +61,9 @@
   {
     "file": "incremental-analyzer.js",
     "module": "incremental-analyzer",
-    "functionCount": 7,
+    "functionCount": 8,
     "exports": [
+      null,
       null,
       null,
       null,
@@ -56,23 +87,6 @@
     ],
     "effects": [
       "database"
-    ],
-    "entryPoints": []
-  },
-  {
-    "file": "summary-updater.js",
-    "module": "summary-updater",
-    "functionCount": 5,
-    "exports": [
-      null,
-      null,
-      null,
-      null,
-      null
-    ],
-    "effects": [
-      "logging",
-      "file_io"
     ],
     "entryPoints": []
   }

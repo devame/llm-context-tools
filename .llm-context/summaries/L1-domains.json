@@ -36,9 +36,10 @@
       "change-detector",
       "incremental-analyzer",
       "query",
-      "summary-updater"
+      "summary-updater",
+      "function-change-detector"
     ],
-    "functionCount": 22,
+    "functionCount": 28,
     "effects": [
       "file_io",
       "logging",
@@ -51,10 +52,6 @@
       },
       {
         "file": "change-detector.js",
-        "line": 22
-      },
-      {
-        "file": "change-detector.js",
         "line": 33
       },
       {
@@ -64,6 +61,10 @@
       {
         "file": "change-detector.js",
         "line": 63
+      },
+      {
+        "file": "change-detector.js",
+        "line": 157
       }
     ]
   }

@@ -147,6 +147,12 @@ if (Array.isArray(result)) {
       if (item.effects && item.effects.length > 0) {
         console.log(`     Effects: ${item.effects.join(', ')}`);
       }
+      if (item.patterns && item.patterns.length > 0) {
+        console.log(`     Patterns:`);
+        item.patterns.forEach(p => {
+          console.log(`       • ${p.type}: ${p.description}${p.tool ? ` (${p.tool})` : ''}${p.method ? ` [${p.method}]` : ''}`);
+        });
+      }
     }
   });
   if (result.length > 20) {
