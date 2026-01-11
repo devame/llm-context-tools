@@ -1,12 +1,12 @@
 {
   "version": "2.0.0",
   "granularity": "function",
-  "generated": "2026-01-11T06:04:45.290Z",
+  "generated": "2026-01-11T06:17:28.561Z",
   "files": {
     "analyze.js": {
-      "hash": "b038fbe60a05ad3a456a6228701e3e5e",
-      "size": 4330,
-      "lastModified": "2026-01-09T05:35:09.165Z",
+      "hash": "f8b3f5f58c09a23305f77fed2eaeb7d9",
+      "size": 4349,
+      "lastModified": "2026-01-11T06:14:58.263Z",
       "functions": [],
       "analysisTime": null,
       "functionHashes": {}
@@ -15,7 +15,19 @@
       "hash": "913072c80dba7e7cee448dd5d448a40f",
       "size": 8514,
       "lastModified": "2026-01-11T05:43:54.798Z",
-      "functions": [],
+      "functions": [
+        "constructor",
+        "extractFunctions",
+        "extractFunctionMetadata",
+        "extractCallGraph",
+        "extractImports",
+        "isAsyncFunction",
+        "isGeneratorFunction",
+        "hashFunctionSource",
+        "extractFunctionsWithNodes",
+        "extractSourceByLines",
+        "createAdapter"
+      ],
       "analysisTime": null,
       "functionHashes": {
         "constructor": {
@@ -123,7 +135,9 @@
       "hash": "d3385d7e23f11ae62886e11dacd126c5",
       "size": 6966,
       "lastModified": "2026-01-09T05:35:54.772Z",
-      "functions": [],
+      "functions": [
+        "runScript"
+      ],
       "analysisTime": null,
       "functionHashes": {
         "runScript": {
@@ -142,13 +156,13 @@
       "size": 5929,
       "lastModified": "2025-12-02T06:19:35.953Z",
       "functions": [
+        "hashFile",
         "findJsFiles",
         "walk",
         "loadManifest",
+        "detectChanges",
         "printSummary",
-        "main",
-        "hashFile",
-        "detectChanges"
+        "main"
       ],
       "analysisTime": null,
       "functionHashes": {
@@ -221,7 +235,10 @@
       "hash": "842459cd5f63a09856235e5e0178472c",
       "size": 5762,
       "lastModified": "2026-01-09T05:34:48.075Z",
-      "functions": [],
+      "functions": [
+        "setupClaudeIntegration",
+        "generateClaudeMd"
+      ],
       "analysisTime": null,
       "functionHashes": {
         "setupClaudeIntegration": {
@@ -248,7 +265,20 @@
       "hash": "ba4d56e44a040a06c18f3bdc18d18c13",
       "size": 10937,
       "lastModified": "2025-12-02T06:19:35.953Z",
-      "functions": [],
+      "functions": [
+        "loadConfig",
+        "loadGraph",
+        "buildDependencyGraph",
+        "computeImpactSet",
+        "findEntryPoints",
+        "findLeafFunctions",
+        "detectCycles",
+        "dfs",
+        "computeDependencyDepth",
+        "dfs",
+        "analyzeDependencies",
+        "analyzeImpact"
+      ],
       "analysisTime": null,
       "functionHashes": {
         "loadConfig": {
@@ -352,6 +382,66 @@
         }
       }
     },
+    "full-analysis.js": {
+      "hash": "9acf3f950b8f08783b1ab979f55de10f",
+      "size": 5033,
+      "lastModified": "2026-01-11T06:16:59.381Z",
+      "functions": [
+        "loadConfig",
+        "findSourceFiles",
+        "walk",
+        "analyzeFile",
+        "main"
+      ],
+      "analysisTime": null,
+      "functionHashes": {
+        "loadConfig": {
+          "hash": "5bd1d5303e5baafca2e385e9cd481f96",
+          "line": 20,
+          "endLine": 26,
+          "size": 276,
+          "async": false,
+          "language": "javascript",
+          "source": "function loadConfig() {\r\n  const configPath = './llm-context.config.json';\r\n  if (!existsSync(configPath)) {\r\n    return { patterns: { include: ['**/*.js'], exclude: ['node_modules', '.git', '.llm-context'] } };\r\n  }\r\n  return JSON.parse(readFileSync(configPath, 'utf-8'));\r\n}"
+        },
+        "findSourceFiles": {
+          "hash": "5fa6747835a9130689633f4b6b3f3134",
+          "line": 31,
+          "endLine": 83,
+          "size": 1426,
+          "async": false,
+          "language": "javascript",
+          "source": "function findSourceFiles() {\r\n  const config = loadConfig();\r\n  const files = [];\r\n\r\n  // Extensions to include based on config\r\n  const extensions = new Set();\r\n  for (const pattern of config.patterns.include) {\r\n    const match = pattern.match(/\\*\\.(\\w+)$/);\r\n    if (match) {\r\n      extensions.add('.' + match[1]);\r\n    }\r\n  }\r\n\r\n  function walk(dir) {\r\n    try {\r\n      const entries = readdirSync(dir);\r\n\r\n      for (const entry of entries) {\r\n        const fullPath = join(dir, entry);\r\n\r\n        // Skip excluded directories/files\r\n        const isExcluded = config.patterns.exclude.some(pattern => {\r\n          return fullPath.includes('/' + pattern + '/') ||\r\n                 fullPath.includes('\\\\' + pattern + '\\\\') ||\r\n                 fullPath.endsWith('/' + pattern) ||\r\n                 fullPath.endsWith('\\\\' + pattern) ||\r\n                 entry === pattern;\r\n        });\r\n\r\n        if (isExcluded) {\r\n          continue;\r\n        }\r\n\r\n        const stat = statSync(fullPath);\r\n\r\n        if (stat.isDirectory()) {\r\n          walk(fullPath);\r\n        } else if (stat.isFile()) {\r\n          // Check if file has matching extension\r\n          const ext = entry.substring(entry.lastIndexOf('.'));\r\n          if (extensions.has(ext)) {\r\n            files.push(fullPath);\r\n          }\r\n        }\r\n      }\r\n    } catch (error) {\r\n      // Skip inaccessible directories\r\n    }\r\n  }\r\n\r\n  walk('.');\r\n  return files;\r\n}"
+        },
+        "walk": {
+          "hash": "522a948964b04a588eb5968c1cc0ac9b",
+          "line": 44,
+          "endLine": 79,
+          "size": 1055,
+          "async": false,
+          "language": "javascript",
+          "source": "function walk(dir) {\r\n    try {\r\n      const entries = readdirSync(dir);\r\n\r\n      for (const entry of entries) {\r\n        const fullPath = join(dir, entry);\r\n\r\n        // Skip excluded directories/files\r\n        const isExcluded = config.patterns.exclude.some(pattern => {\r\n          return fullPath.includes('/' + pattern + '/') ||\r\n                 fullPath.includes('\\\\' + pattern + '\\\\') ||\r\n                 fullPath.endsWith('/' + pattern) ||\r\n                 fullPath.endsWith('\\\\' + pattern) ||\r\n                 entry === pattern;\r\n        });\r\n\r\n        if (isExcluded) {\r\n          continue;\r\n        }\r\n\r\n        const stat = statSync(fullPath);\r\n\r\n        if (stat.isDirectory()) {\r\n          walk(fullPath);\r\n        } else if (stat.isFile()) {\r\n          // Check if file has matching extension\r\n          const ext = entry.substring(entry.lastIndexOf('.'));\r\n          if (extensions.has(ext)) {\r\n            files.push(fullPath);\r\n          }\r\n        }\r\n      }\r\n    } catch (error) {\r\n      // Skip inaccessible directories\r\n    }\r\n  }"
+        },
+        "analyzeFile": {
+          "hash": "5338e82eb2c87564e79ce2438134463e",
+          "line": 88,
+          "endLine": 143,
+          "size": 1762,
+          "async": true,
+          "language": "javascript",
+          "source": "async function analyzeFile(filePath) {\r\n  try {\r\n    const source = readFileSync(filePath, 'utf-8');\r\n\r\n    // Detect language\r\n    const language = ParserFactory.detectLanguage(filePath);\r\n    if (!language) {\r\n      console.log(`  ⚠ Skipping ${filePath} (unsupported language)`);\r\n      return [];\r\n    }\r\n\r\n    // Parse\r\n    const { tree } = await ParserFactory.parseFile(filePath);\r\n    const adapter = createAdapter(tree, language, source, filePath);\r\n\r\n    // Extract functions\r\n    const functions = adapter.extractFunctionsWithNodes();\r\n    if (functions.length === 0) {\r\n      return [];\r\n    }\r\n\r\n    // Extract imports\r\n    const imports = adapter.extractImports();\r\n    const sideEffectAnalyzer = createAnalyzer(language, imports);\r\n\r\n    // Build graph entries\r\n    const entries = functions.map(({ metadata }) => {\r\n      const calls = adapter.extractCallGraph(metadata);\r\n      const uniqueCalls = [...new Set(calls)].filter(c => c !== metadata.name);\r\n\r\n      // Analyze side effects\r\n      const effectsWithConfidence = sideEffectAnalyzer.analyze(uniqueCalls, metadata.source);\r\n      const uniqueEffects = [...new Set(effectsWithConfidence.map(e => e.type))];\r\n\r\n      return {\r\n        id: metadata.name,\r\n        type: 'function',\r\n        file: filePath,\r\n        line: metadata.line,\r\n        sig: `(${metadata.isAsync ? 'async ' : ''}${metadata.params || ''})`,\r\n        async: metadata.isAsync || false,\r\n        calls: uniqueCalls.slice(0, 10),\r\n        effects: uniqueEffects,\r\n        scipDoc: '',\r\n        language: language\r\n      };\r\n    });\r\n\r\n    console.log(`  ✓ ${filePath}: ${entries.length} functions`);\r\n    return entries;\r\n\r\n  } catch (error) {\r\n    console.log(`  ✗ ${filePath}: ${error.message}`);\r\n    return [];\r\n  }\r\n}"
+        },
+        "main": {
+          "hash": "b8dc1af7f6b3330d4acd3f87a0ea6314",
+          "line": 148,
+          "endLine": 169,
+          "size": 756,
+          "async": true,
+          "language": "javascript",
+          "source": "async function main() {\r\n  console.log('[1] Finding source files...');\r\n  const files = findSourceFiles();\r\n  console.log(`    Found ${files.length} files\\n`);\r\n\r\n  console.log('[2] Analyzing files...');\r\n  const allEntries = [];\r\n\r\n  for (const file of files) {\r\n    const entries = await analyzeFile(file);\r\n    allEntries.push(...entries);\r\n  }\r\n\r\n  console.log(`\\n[3] Writing graph.jsonl...`);\r\n  const jsonlContent = allEntries.map(entry => JSON.stringify(entry)).join('\\n');\r\n  writeFileSync('.llm-context/graph.jsonl', jsonlContent);\r\n\r\n  console.log(`\\n✅ Analysis complete!`);\r\n  console.log(`   Files analyzed: ${files.length}`);\r\n  console.log(`   Functions found: ${allEntries.length}`);\r\n  console.log(`   Output: .llm-context/graph.jsonl`);\r\n}"
+        }
+      }
+    },
     "function-change-detector.js": {
       "hash": "40df00767b5fb3cb4880d60231a56ea6",
       "size": 9067,
@@ -416,7 +506,14 @@
       "hash": "23baae78c3f55d92987c5763c0c6fb00",
       "size": 4877,
       "lastModified": "2025-12-02T06:19:35.964Z",
-      "functions": [],
+      "functions": [
+        "extractFunctionSource",
+        "hashFunctionSource",
+        "generateFunctionId",
+        "extractFunctionMetadata",
+        "computeSimilarity",
+        "detectRename"
+      ],
       "analysisTime": null,
       "functionHashes": {
         "extractFunctionSource": {
@@ -480,14 +577,18 @@
       "size": 18880,
       "lastModified": "2026-01-11T04:28:37.982Z",
       "functions": [
+        "loadConfig",
         "computeFileHash",
         "getFileMetadata",
+        "analyzeSpecificFunctions",
         "analyzeSingleFile",
         "loadGraph",
+        "updateGraphFunctionLevel",
         "updateGraph",
         "updateManifest",
-        "main",
-        "analyzeSpecificFunctions"
+        "mainFunctionLevel",
+        "mainFileLevel",
+        "main"
       ],
       "analysisTime": null,
       "functionHashes": {
@@ -605,7 +706,12 @@
       "hash": "fa616ce6612f6dc6b166b2298139b4a1",
       "size": 9091,
       "lastModified": "2026-01-11T06:04:22.516Z",
-      "functions": [],
+      "functions": [
+        "getQueries",
+        "getFunctionQuery",
+        "getCallQuery",
+        "getImportQuery"
+      ],
       "analysisTime": null,
       "functionHashes": {
         "getQueries": {
@@ -650,7 +756,18 @@
       "hash": "835f457efd0448d4eb1aebafb698bbe3",
       "size": 8812,
       "lastModified": "2026-01-11T04:31:13.915Z",
-      "functions": [],
+      "functions": [
+        "loadConfig",
+        "computeFileHash",
+        "getFileMetadata",
+        "extractFileFunctions",
+        "findJsFiles",
+        "walk",
+        "loadGraphData",
+        "generateManifest",
+        "saveManifest",
+        "main"
+      ],
       "analysisTime": null,
       "functionHashes": {
         "loadConfig": {
@@ -749,7 +866,16 @@
       "hash": "f5382c0df692e7728f4d59b84546ce75",
       "size": 5590,
       "lastModified": "2026-01-11T05:43:06.525Z",
-      "functions": [],
+      "functions": [
+        "initializeParser",
+        "createParser",
+        "detectLanguage",
+        "getSupportedLanguages",
+        "isLanguageSupported",
+        "parse",
+        "parseFile",
+        "clearCache"
+      ],
       "analysisTime": null,
       "functionHashes": {
         "initializeParser": {
@@ -880,7 +1006,22 @@
       "hash": "d6a231c8d9cac115dc58a819c7cc466a",
       "size": 8996,
       "lastModified": "2026-01-11T04:25:40.974Z",
-      "functions": [],
+      "functions": [
+        "constructor",
+        "analyze",
+        "analyzeCall",
+        "detectEffect",
+        "hasImport",
+        "matchesCall",
+        "matchesPattern",
+        "deduplicateEffects",
+        "addImport",
+        "getEffectTypes",
+        "filterByConfidence",
+        "formatForOutput",
+        "createAnalyzer",
+        "analyzeSideEffects"
+      ],
       "analysisTime": null,
       "functionHashes": {
         "constructor": {
@@ -1025,10 +1166,10 @@
       "lastModified": "2026-01-09T05:17:51.983Z",
       "functions": [
         "loadGraph",
+        "generateL0",
         "generateL1",
         "generateL2",
-        "updateSummaries",
-        "generateL0"
+        "updateSummaries"
       ],
       "analysisTime": null,
       "functionHashes": {
@@ -1079,19 +1220,15 @@
         }
       }
     },
-    "test-parser.js": {
-      "hash": "18f8e4de6f5ad8a4353cdba36c3a958c",
-      "size": 540,
-      "lastModified": "2026-01-11T06:04:00.046Z",
-      "functions": [],
-      "analysisTime": null,
-      "functionHashes": {}
-    },
     "transformer.js": {
       "hash": "fd75b4a2567e0044a0f178464d941828",
       "size": 9079,
       "lastModified": "2025-11-09T04:20:42.000Z",
-      "functions": [],
+      "functions": [
+        "FunctionDeclaration",
+        "VariableDeclarator",
+        "CallExpression"
+      ],
       "analysisTime": null,
       "functionHashes": {
         "FunctionDeclaration": {
@@ -1125,9 +1262,9 @@
     }
   },
   "globalStats": {
-    "totalFunctions": 28,
-    "totalCalls": 187,
+    "totalFunctions": 108,
+    "totalCalls": 516,
     "totalFiles": 19,
-    "totalSize": 146194
+    "totalSize": 150706
   }
 }

@@ -1,10 +1,26 @@
 [
   {
-    "file": "scip-parser.js",
-    "module": "scip-parser",
+    "file": "ast-adapter.js",
+    "module": "ast-adapter",
+    "functionCount": 11,
+    "exports": [
+      null,
+      null,
+      null
+    ],
+    "effects": [
+      "network",
+      "database",
+      "logging"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "bin/llm-context.js",
+    "module": "llm-context",
     "functionCount": 1,
     "exports": [
-      "line12"
+      null
     ],
     "effects": [
       "file_io",
@@ -23,8 +39,193 @@
     ],
     "effects": [
       "file_io",
+      "database",
+      "logging"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "claude-setup.js",
+    "module": "claude-setup",
+    "functionCount": 2,
+    "exports": [
+      null
+    ],
+    "effects": [
+      "file_io",
+      "logging"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "dependency-analyzer.js",
+    "module": "dependency-analyzer",
+    "functionCount": 12,
+    "exports": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "effects": [
+      "file_io",
+      "network",
+      "database",
+      "logging"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "full-analysis.js",
+    "module": "full-analysis",
+    "functionCount": 5,
+    "exports": [
+      null,
+      null,
+      null,
+      null
+    ],
+    "effects": [
+      "file_io",
       "logging",
-      "database"
+      "database",
+      "dom"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "function-change-detector.js",
+    "module": "function-change-detector",
+    "functionCount": 5,
+    "exports": [
+      null,
+      null
+    ],
+    "effects": [
+      "file_io",
+      "logging",
+      "database",
+      "network"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "function-source-extractor.js",
+    "module": "function-source-extractor",
+    "functionCount": 6,
+    "exports": [],
+    "effects": [
+      "database",
+      "network"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "incremental-analyzer.js",
+    "module": "incremental-analyzer",
+    "functionCount": 12,
+    "exports": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "effects": [
+      "file_io",
+      "database",
+      "logging",
+      "dom",
+      "network"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "language-queries.js",
+    "module": "language-queries",
+    "functionCount": 4,
+    "exports": [],
+    "effects": [
+      "network"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "manifest-generator.js",
+    "module": "manifest-generator",
+    "functionCount": 10,
+    "exports": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "effects": [
+      "file_io",
+      "database",
+      "logging",
+      "network"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "parser-factory.js",
+    "module": "parser-factory",
+    "functionCount": 8,
+    "exports": [
+      null
+    ],
+    "effects": [
+      "network",
+      "database",
+      "file_io"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "query.js",
+    "module": "query",
+    "functionCount": 2,
+    "exports": [
+      null,
+      null
+    ],
+    "effects": [
+      "network",
+      "database",
+      "logging"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "scip-parser.js",
+    "module": "scip-parser",
+    "functionCount": 1,
+    "exports": [
+      null
+    ],
+    "effects": [
+      "dom",
+      "file_io",
+      "logging"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "side-effects-analyzer.js",
+    "module": "side-effects-analyzer",
+    "functionCount": 14,
+    "exports": [
+      null
+    ],
+    "effects": [
+      "logging",
+      "network"
     ],
     "entryPoints": []
   },
@@ -40,53 +241,18 @@
       null
     ],
     "effects": [
-      "logging",
-      "file_io"
-    ],
-    "entryPoints": []
-  },
-  {
-    "file": "function-change-detector.js",
-    "module": "function-change-detector",
-    "functionCount": 5,
-    "exports": [
-      null
-    ],
-    "effects": [
       "file_io",
       "logging"
     ],
     "entryPoints": []
   },
   {
-    "file": "incremental-analyzer.js",
-    "module": "incremental-analyzer",
-    "functionCount": 8,
-    "exports": [
-      null,
-      null,
-      null,
-      null,
-      null,
-      null
-    ],
+    "file": "transformer.js",
+    "module": "transformer",
+    "functionCount": 3,
+    "exports": [],
     "effects": [
-      "file_io",
-      "database",
-      "logging"
-    ],
-    "entryPoints": []
-  },
-  {
-    "file": "query.js",
-    "module": "query",
-    "functionCount": 2,
-    "exports": [
-      null,
-      null
-    ],
-    "effects": [
-      "database"
+      "network"
     ],
     "entryPoints": []
   }

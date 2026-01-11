@@ -57,16 +57,16 @@ if (!manifestExists || !graphExists) {
     console.log('  ⚠ No SCIP data to parse');
   }
 
-  // Step 4: Run full transformer
-  console.log('\n[4/5] Running full analysis...');
-  execSync(`node "${join(__dirname, 'transformer.js')}"`, { stdio: 'inherit' });
+  // Step 4: Run full analysis (Tree-sitter based)
+  console.log('\n[4/6] Running full analysis...');
+  execSync(`node "${join(__dirname, 'full-analysis.js')}"`, { stdio: 'inherit' });
 
   // Step 5: Generate initial manifest
-  console.log('\n[5/5] Generating manifest...');
+  console.log('\n[5/6] Generating manifest...');
   execSync(`node "${join(__dirname, 'manifest-generator.js')}"`, { stdio: 'inherit' });
 
   // Step 6: Generate summaries
-  console.log('\n[6/6] Generating summaries...');
+  console.log('\n[6/7] Generating summaries...');
   execSync(`node "${join(__dirname, 'summary-updater.js')}"`, { stdio: 'inherit' });
 
   // Step 7: Setup Claude Code integration
