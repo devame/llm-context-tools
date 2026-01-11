@@ -4,6 +4,7 @@
  *
  * Usage:
  *   node analyze.js          - Initial full analysis
+ *   node analyze.js --quiet  - Suppress non-error output
  *   node analyze.js --watch  - Watch mode (future enhancement)
  *
  * This script orchestrates the complete analysis pipeline:
@@ -25,89 +26,100 @@ import { setupClaudeIntegration } from './claude-setup.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-console.log('=== LLM Context Analyzer ===\n');
+// Check for --quiet flag
+const isQuiet = process.argv.includes('--quiet');
+const stdio = isQuiet ? 'ignore' : 'inherit';
+
+// Logging helper
+function log(...args) {
+  if (!isQuiet) {
+    log(...args);
+  }
+}
+
+log('=== LLM Context Analyzer ===\n');
 
 const manifestExists = existsSync('.llm-context/manifest.json');
 const graphExists = existsSync('.llm-context/graph.jsonl');
 
 if (!manifestExists || !graphExists) {
-  console.log('🔍 No previous analysis found - running initial full analysis...\n');
+  log('🔍 No previous analysis found - running initial full analysis...\n');
 
   // Step 1: Create .llm-context directory
-  console.log('[1/5] Setting up analysis directory...');
-  execSync('mkdir -p .llm-context', { stdio: 'inherit' });
+  log('[1/5] Setting up analysis directory...');
+  execSync('mkdir -p .llm-context', { stdio });
 
   // Step 2: Run SCIP indexer (if needed for typed languages)
-  console.log('\n[2/5] Running SCIP indexer...');
+  log('\n[2/5] Running SCIP indexer...');
   try {
-    execSync('npx scip-typescript index --infer-tsconfig --output .llm-context/index.scip 2>/dev/null || echo "SCIP indexing skipped"', { stdio: 'inherit' });
+    execSync('npx scip-typescript index --infer-tsconfig --output .llm-context/index.scip 2>/dev/null || echo "SCIP indexing skipped"', { stdio });
   } catch (error) {
-    console.log('  ⚠ SCIP indexing failed (continuing with custom analysis only)');
+    log('  ⚠ SCIP indexing failed (continuing with custom analysis only)');
   }
 
   // Step 3: Parse SCIP output (if available)
-  console.log('\n[3/5] Parsing SCIP data...');
+  log('\n[3/5] Parsing SCIP data...');
   if (existsSync('.llm-context/index.scip')) {
     try {
-      execSync(`cp "${join(__dirname, 'scip.proto')}" .llm-context/ && node "${join(__dirname, 'scip-parser.js')}"`, { stdio: 'inherit' });
+      execSync(`cp "${join(__dirname, 'scip.proto')}" .llm-context/ && node "${join(__dirname, 'scip-parser.js')}"`, { stdio });
     } catch (error) {
-      console.log('  ⚠ SCIP parsing failed');
+      log('  ⚠ SCIP parsing failed');
     }
   } else {
-    console.log('  ⚠ No SCIP data to parse');
+    log('  ⚠ No SCIP data to parse');
   }
 
   // Step 4: Run full analysis (Tree-sitter based)
-  console.log('\n[4/6] Running full analysis...');
-  execSync(`node "${join(__dirname, 'full-analysis.js')}"`, { stdio: 'inherit' });
+  log('\n[4/6] Running full analysis...');
+  execSync(`node "${join(__dirname, 'full-analysis.js')}"`, { stdio });
 
   // Step 5: Generate initial manifest
-  console.log('\n[5/6] Generating manifest...');
-  execSync(`node "${join(__dirname, 'manifest-generator.js')}"`, { stdio: 'inherit' });
+  log('\n[5/6] Generating manifest...');
+  execSync(`node "${join(__dirname, 'manifest-generator.js')}"`, { stdio });
 
   // Step 6: Generate summaries
-  console.log('\n[6/7] Generating summaries...');
-  execSync(`node "${join(__dirname, 'summary-updater.js')}"`, { stdio: 'inherit' });
+  log('\n[6/7] Generating summaries...');
+  execSync(`node "${join(__dirname, 'summary-updater.js')}"`, { stdio });
 
   // Step 7: Setup Claude Code integration
-  console.log('\n[7/7] Setting up Claude Code integration...');
+  log('\n[7/7] Setting up Claude Code integration...');
   setupClaudeIntegration();
 
-  console.log('\n✅ Initial analysis complete!');
-  console.log('\nNext steps:');
-  console.log('  - Run "node query.js stats" to see statistics');
-  console.log('  - Edit files and run "node analyze.js" again for incremental updates');
+  log('\n✅ Initial analysis complete!');
+  log('\nNext steps:');
+  log('  - Run "node query.js stats" to see statistics');
+  log('  - Edit files and run "node analyze.js" again for incremental updates');
 
 } else {
-  console.log('🔍 Existing analysis found - checking for changes...\n');
+  log('🔍 Existing analysis found - checking for changes...\n');
 
   const changeReport = detectChanges();
 
   const changedFiles = [...changeReport.added, ...changeReport.modified];
 
   if (changedFiles.length === 0) {
-    console.log('\n✅ All files up to date - no analysis needed!');
+    log('\n✅ All files up to date - no analysis needed!');
     process.exit(0);
   }
 
-  console.log(`\n📝 Detected ${changedFiles.length} changed files - running incremental analysis...\n`);
+  log(`\n📝 Detected ${changedFiles.length} changed files - running incremental analysis...\n`);
 
   // Run incremental analyzer
   const startTime = Date.now();
-  execSync(`node "${join(__dirname, 'incremental-analyzer.js')}"`, { stdio: 'inherit' });
+  execSync(`node "${join(__dirname, 'incremental-analyzer.js')}"`, { stdio });
 
   // Update summaries
-  console.log('');
-  execSync(`node "${join(__dirname, 'summary-updater.js')}" ${changedFiles.join(' ')}`, { stdio: 'inherit' });
+  log('');
+  execSync(`node "${join(__dirname, 'summary-updater.js')}" ${changedFiles.join(' ')}`, { stdio });
 
   // Ensure Claude Code integration exists
   setupClaudeIntegration();
 
   const totalTime = Date.now() - startTime;
 
-  console.log(`\n✅ Incremental analysis complete in ${totalTime}ms!`);
-  console.log(`\nEfficiency:`);
-  console.log(`  - Files analyzed: ${changedFiles.length}`);
-  console.log(`  - Files skipped: ${changeReport.unchanged.length}`);
-  console.log(`  - Time saved: ~${(changeReport.unchanged.length * 28).toFixed(0)}ms`);
+  log(`\n✅ Incremental analysis complete in ${totalTime}ms!`);
+  log(`\nEfficiency:`);
+  log(`  - Files analyzed: ${changedFiles.length}`);
+  log(`  - Files skipped: ${changeReport.unchanged.length}`);
+  log(`  - Time saved: ~${(changeReport.unchanged.length * 28).toFixed(0)}ms`);
 }

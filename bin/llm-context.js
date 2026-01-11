@@ -101,12 +101,40 @@ const commands = {
   'side-effects': () => runScript('query.js', ['side-effects']),
 
   'setup-claude': async () => {
-    console.log('🔧 Setting up Claude Code integration...\n');
-    const { setupClaudeIntegration } = await import('../claude-setup.js');
-    const force = process.argv.includes('--force');
-    setupClaudeIntegration({ force });
-    console.log('\n✅ Setup complete!');
-    console.log('   Claude Code will now see query instructions in .claude/CLAUDE.md');
+    const hasCheck = commandArgs.includes('--check');
+    const hasRemove = commandArgs.includes('--remove');
+    const hasForce = commandArgs.includes('--force');
+    const hasHooksOnly = commandArgs.includes('--hooks-only');
+    const hasDocsOnly = commandArgs.includes('--docs-only');
+
+    if (hasCheck || hasRemove || hasHooksOnly) {
+      // Run hooks setup
+      runScript('setup-claude.js', commandArgs);
+    } else if (hasDocsOnly) {
+      // Only generate .claude/CLAUDE.md
+      console.log('🔧 Setting up Claude Code documentation...\n');
+      const { setupClaudeIntegration } = await import('../claude-setup.js');
+      setupClaudeIntegration({ force: hasForce });
+      console.log('\n✅ Setup complete!');
+      console.log('   Claude Code will see query instructions in .claude/CLAUDE.md');
+    } else {
+      // Full setup: both docs and hooks
+      console.log('🔧 Setting up Claude Code integration...\n');
+
+      // 1. Generate .claude/CLAUDE.md
+      console.log('[1/2] Generating .claude/CLAUDE.md...');
+      const { setupClaudeIntegration } = await import('../claude-setup.js');
+      setupClaudeIntegration({ force: hasForce });
+
+      // 2. Install hooks
+      console.log('\n[2/2] Installing Claude Code hooks...');
+      runScript('setup-claude.js', hasForce ? ['--force'] : []);
+    }
+  },
+
+  prime: () => {
+    // Inject context at session start (called by SessionStart hook)
+    runScript('prime.js');
   },
 
   version: () => {
@@ -141,7 +169,8 @@ COMMANDS
 
   Setup:
     init                 Initialize LLM context tools in current project
-    setup-claude         Generate .claude/CLAUDE.md with query instructions
+    setup-claude         Setup Claude Code integration (docs + hooks)
+    prime                Inject context at session start (used by hooks)
     version              Show version
     help                 Show this help
 
@@ -176,8 +205,12 @@ EXAMPLES
   llm-context analyze:full
 
   # Setup Claude Code integration
-  llm-context setup-claude         # Generate .claude/CLAUDE.md
-  llm-context setup-claude --force # Overwrite existing
+  llm-context setup-claude                  # Full setup (docs + hooks)
+  llm-context setup-claude --docs-only      # Only .claude/CLAUDE.md
+  llm-context setup-claude --hooks-only     # Only install hooks
+  llm-context setup-claude --check          # Verify hooks installed
+  llm-context setup-claude --remove         # Uninstall hooks
+  llm-context setup-claude --force          # Overwrite existing
 
 GENERATED FILES
 
