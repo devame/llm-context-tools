@@ -1,21 +1,41 @@
-# LLM Context - Code Analysis for AI Assistants
+# LLM Context Tools - Multi-Language Code Analysis for AI
 
-Generate compact, semantically-rich code context optimized for LLM consumption with **99%+ faster incremental updates**.
+Generate compact, semantically-rich code context optimized for LLM consumption with **99%+ faster incremental updates** across **11+ programming languages**.
 
 [![npm version](https://img.shields.io/npm/v/llm-context.svg)](https://www.npmjs.com/package/llm-context)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## What Is This?
 
-A tool that transforms raw source code into LLM-optimized context, enabling AI assistants like Claude, ChatGPT, and Copilot to understand your codebase with **80-95% fewer tokens**.
+A multi-language code analysis tool that transforms raw source code into LLM-optimized context, enabling AI assistants like Claude, ChatGPT, and Copilot to understand your codebase with **80-95% fewer tokens**.
 
 **Key Features:**
-- 🔍 **Function call graphs** with side effect detection
+- 🌍 **Multi-language support** (JavaScript, TypeScript, Python, Go, Rust, Java, C, C++, Ruby, PHP, Bash)
+- 🔍 **Function call graphs** with AST-based side effect detection
 - 📊 **Multi-level summaries** (System → Domain → Module)
 - ⚡ **Incremental updates** (99%+ faster than full re-analysis)
 - 🔐 **Hash-based change tracking** (only re-analyze what changed)
 - 🎯 **Query interface** for instant lookups
-- 🤖 **Claude Code skill** included
+- 🪝 **Claude Code hooks** for automatic context injection
+- 🌳 **Tree-sitter powered** (robust parsing, 50+ languages available)
+
+## Supported Languages
+
+| Language | Extensions | Features |
+|----------|-----------|----------|
+| **JavaScript** | `.js`, `.mjs`, `.cjs`, `.jsx` | Full support |
+| **TypeScript** | `.ts`, `.tsx` | Full support (no SCIP needed) |
+| **Python** | `.py` | Full support |
+| **Go** | `.go` | Full support |
+| **Rust** | `.rs` | Full support |
+| **Java** | `.java` | Full support |
+| **C** | `.c`, `.h` | Full support |
+| **C++** | `.cpp`, `.hpp` | Full support |
+| **Ruby** | `.rb` | Full support |
+| **PHP** | `.php` | Full support |
+| **Bash** | `.sh`, `.bash` | Full support |
+
+**More languages coming:** Any language with a [Tree-sitter grammar](https://tree-sitter.github.io/tree-sitter/#available-parsers) can be added.
 
 ## Quick Start
 
@@ -32,7 +52,7 @@ npx llm-context analyze
 ### Usage
 
 ```bash
-# Analyze your codebase
+# Analyze your codebase (auto-detects languages)
 cd ~/my-project
 llm-context analyze
 
@@ -41,13 +61,34 @@ llm-context stats
 llm-context entry-points
 llm-context side-effects
 
-# Use with LLMs
-# Share .llm-context/ directory with AI assistants
+# Setup Claude Code integration (hooks + docs)
+llm-context setup-claude
 ```
 
-**🎉 NEW: Automatic Claude Code Integration**
+## New: Claude Code Hooks Integration
 
-When you run `llm-context analyze` or `llm-context init`, the tool automatically generates `.claude/CLAUDE.md` with query-first instructions. This ensures Claude Code (and other LLM assistants) use queries instead of grep/bash when exploring your code.
+Automatic context injection and incremental analysis (similar to [beads](https://github.com/steveyegge/beads)):
+
+```bash
+# Install hooks + documentation
+llm-context setup-claude
+
+# What gets installed:
+# 1. SessionStart hook → runs `llm-context prime` at session start
+# 2. PreCompact hook → runs `llm-context analyze --quiet` before compaction
+# 3. .claude/CLAUDE.md → query-first instructions
+```
+
+**What happens automatically:**
+- 📊 **Session Start**: Claude Code injects 1-2k tokens of context (L0 summary, stats, entry points)
+- 🔄 **Before Compaction**: Analysis auto-updates to ensure context is current
+- 🤖 **Zero Manual Work**: Everything happens in the background
+
+**Verify installation:**
+```bash
+llm-context setup-claude --check   # Verify hooks installed
+llm-context setup-claude --remove  # Uninstall hooks
+```
 
 ## Why Use This?
 
@@ -64,14 +105,70 @@ Missing: Call graphs, side effects, architecture
 ```
 LLM: "Help me debug this codebase"
 [Reads L0 + L1 + Graph = 500-2,000 tokens]
-Includes: Complete call graph, side effects, entry points
+Includes: Complete call graph, side effects, entry points, language info
 ```
 
 **Result:** 80-95% token savings + better understanding
 
 ## Features
 
-### 1. Incremental Updates (99%+ Faster)
+### 1. Multi-Language Support (NEW!)
+
+Powered by [Tree-sitter](https://tree-sitter.github.io/) for robust, multi-language parsing:
+
+```bash
+# Analyzes all supported languages in your project
+llm-context analyze
+
+# Configure languages in llm-context.config.json
+{
+  "parser": "tree-sitter",
+  "languages": {
+    "enabled": ["javascript", "typescript", "python", "go", "rust"],
+    "autoDetect": true
+  },
+  "patterns": {
+    "include": [
+      "**/*.js", "**/*.ts", "**/*.py", "**/*.go", "**/*.rs"
+    ]
+  }
+}
+```
+
+**Graph output includes language:**
+```json
+{
+  "id": "validateInput",
+  "file": "validator.py",
+  "line": 42,
+  "language": "python",
+  "calls": ["sanitize", "checkType"],
+  "effects": ["logging"]
+}
+```
+
+### 2. Enhanced Side Effect Detection
+
+AST-based analysis with import tracking (replaces fragile regex):
+
+**Before (Regex-based):**
+- ❌ False positives (`myreadFunc` detected as file I/O)
+- ❌ No import tracking
+- ❌ Language-specific patterns hardcoded
+
+**After (Tree-sitter AST + Import Tracking):**
+- ✅ Import-aware: knows if `fs` is actually imported
+- ✅ Confidence scoring: high/medium/low
+- ✅ Language-specific patterns for Python, Go, Rust, etc.
+
+**Detected categories:**
+- `file_io` - File operations
+- `network` - HTTP requests
+- `database` - DB queries
+- `logging` - Console output
+- `dom` - Browser DOM manipulation
+
+### 3. Incremental Updates (99%+ Faster)
 
 Only re-analyzes files that changed:
 
@@ -90,7 +187,7 @@ Performance at scale:
 - 1,000 files: 30-60s → 200-500ms (99% faster)
 - 10,000 files: 5-15min → 500ms-2s (99.7% faster)
 
-### 2. Function-Level Granularity (NEW!)
+### 4. Function-Level Granularity
 
 Track changes at the function level, not just file level:
 
@@ -125,7 +222,7 @@ Results:
 
 See [FUNCTION_LEVEL_GRANULARITY.md](FUNCTION_LEVEL_GRANULARITY.md) for complete details.
 
-### 3. Progressive Disclosure
+### 5. Progressive Disclosure
 
 Read only what you need:
 
@@ -135,16 +232,7 @@ Read only what you need:
 4. **Graph** (variable) - Function specifics
 5. **Source** (as needed) - Targeted file reading
 
-### 4. Side Effect Detection
-
-Automatically identifies:
-- `file_io` - File operations
-- `network` - HTTP requests
-- `database` - DB queries
-- `logging` - Console output
-- `dom` - Browser DOM manipulation
-
-### 5. Query Interface
+### 6. Query Interface
 
 ```bash
 # Find function
@@ -160,32 +248,6 @@ llm-context query trace processPayment
 llm-context side-effects | grep network
 ```
 
-## Installation & Setup
-
-### Global Installation (Recommended)
-
-```bash
-npm install -g llm-context
-cd ~/any-project
-llm-context analyze
-```
-
-### Project-Specific Installation
-
-```bash
-cd ~/my-project
-npm install --save-dev llm-context
-npx llm-context analyze
-```
-
-### Initialize New Project
-
-```bash
-cd ~/my-project
-llm-context init
-# Installs dependencies and runs first analysis
-```
-
 ## CLI Commands
 
 ### Analysis
@@ -193,6 +255,7 @@ llm-context init
 ```bash
 llm-context analyze              # Auto-detect full/incremental
 llm-context analyze:full         # Force full re-analysis
+llm-context analyze --quiet      # Suppress output (for hooks)
 llm-context check-changes        # Preview changes without analyzing
 ```
 
@@ -203,6 +266,19 @@ llm-context stats                # Show statistics
 llm-context entry-points         # Find entry points
 llm-context side-effects         # Functions with side effects
 llm-context query <cmd> [args]   # Custom queries
+```
+
+### Claude Code Integration
+
+```bash
+llm-context setup-claude                  # Full setup (docs + hooks)
+llm-context setup-claude --docs-only      # Only .claude/CLAUDE.md
+llm-context setup-claude --hooks-only     # Only install hooks
+llm-context setup-claude --check          # Verify hooks installed
+llm-context setup-claude --remove         # Uninstall hooks
+llm-context setup-claude --force          # Overwrite existing
+
+llm-context prime                         # Inject context (called by hook)
 ```
 
 ### Utilities
@@ -239,41 +315,15 @@ Each line in `graph.jsonl`:
 ```json
 {
   "id": "authenticateUser",
-  "file": "src/auth.js",
+  "type": "function",
+  "file": "src/auth.py",
   "line": 45,
-  "sig": "(credentials)",
+  "language": "python",
+  "sig": "(async credentials)",
   "async": true,
   "calls": ["validateCredentials", "createSession"],
   "effects": ["database", "logging"]
 }
-```
-
-## Claude Code Integration
-
-This package includes **automatic Claude Code integration** that ensures Claude uses queries instead of grep/bash.
-
-**What gets generated:**
-1. **`.claude/CLAUDE.md`** (auto-generated during `analyze`/`init`)
-   - Project-level instructions reminding Claude to use queries
-   - Examples of query-first workflow
-   - Explains why queries > grep
-
-2. **`.claude/skills/analyzing-codebases/`** (ships with npm package)
-   - Teaches Claude the progressive disclosure strategy
-   - Defines required workflow (L0 → L1 → L2 → Graph → Source)
-   - Lists all available query commands
-
-**How it works:**
-1. Run `llm-context analyze` → automatically generates `.claude/CLAUDE.md`
-2. Claude reads `.claude/CLAUDE.md` → sees query instructions
-3. Claude reads `.llm-context/summaries/L0-system.md` → sees query reminders
-4. Claude uses queries first, grep only when needed
-5. Result: 80-95% token savings + better context
-
-**Manual setup (if needed):**
-```bash
-llm-context setup-claude         # Generate .claude/CLAUDE.md
-llm-context setup-claude --force # Overwrite existing
 ```
 
 ## Usage Examples
@@ -287,16 +337,16 @@ llm-context stats
 llm-context entry-points
 ```
 
-**With Claude:**
+**With Claude (automatic):**
 ```
-You: "Analyze this codebase"
-
-Claude: [Runs llm-context analyze, reads L0]
-"This is a web application with 156 functions across 47 files.
+[Session starts]
+Claude: [Reads llm-context prime output automatically]
+"I can see this is a multi-language project with Python and JavaScript.
+ 156 functions across 47 files.
  Key domains: auth (12 functions), users (23), api (34)
  Entry points: main(), handleRequest()
 
- Would you like me to explain a specific module?"
+ How can I help?"
 ```
 
 ### Daily Development
@@ -308,9 +358,9 @@ llm-context check-changes
 llm-context analyze
 
 # Edit code
-vim src/feature.js
+vim src/feature.py
 
-# Quick re-analysis (only feature.js)
+# Quick re-analysis (only feature.py)
 llm-context analyze  # ~30ms
 ```
 
@@ -323,16 +373,36 @@ llm-context query trace buggyFunc
 llm-context side-effects | grep buggy
 ```
 
-### Code Review
+### Multi-Language Projects
 
 ```bash
-git checkout feature/new-auth
+# Analyze Python + JavaScript project
 llm-context analyze
+
+# Stats show both languages
 llm-context stats
-llm-context side-effects | grep auth
+# Output:
+#   Total Functions: 234
+#   Languages: python (156), javascript (78)
+#   Files: 45
+
+# Query specific language
+llm-context query find-function validateInput
+# Shows language field: "language": "python"
 ```
 
 ## Integration
+
+### Claude Code Hooks (Recommended)
+
+```bash
+# One-time setup
+llm-context setup-claude
+
+# Hooks install to ~/.claude/hooks/
+# - session-start.sh → runs `llm-context prime`
+# - pre-compact.sh → runs `llm-context analyze --quiet`
+```
 
 ### Pre-commit Hook
 
@@ -370,100 +440,71 @@ jobs:
 
 **Features:**
 - ✅ Automatic incremental updates (99% faster on subsequent runs)
+- ✅ Multi-language support
 - ✅ Upload artifacts for download
 - ✅ Auto-commit option to keep context in repo
 - ✅ PR comments with stats
 
-**Options:**
-
-```yaml
-- uses: ./.github/actions/llm-context-action
-  with:
-    config: 'llm-context.config.json'  # Config file path
-    commit-changes: true                # Commit .llm-context/ back
-    commit-message: 'chore: update context [skip ci]'
-    upload-artifact: true               # Upload as artifact
-    artifact-name: 'llm-context'        # Artifact name
-```
-
-See [GitHub Action README](.github/actions/llm-context-action/README.md) for complete documentation and examples.
-
-### Manual CI/CD
-
-```yaml
-- name: Install llm-context
-  run: npm install -g llm-context
-
-- name: Analyze codebase
-  run: llm-context analyze
-
-- name: Upload artifacts
-  uses: actions/upload-artifact@v4
-  with:
-    name: llm-context
-    path: .llm-context/
-```
-
-### Watch Mode (Coming Soon)
-
-```bash
-llm-context watch  # Auto-analyze on file changes
-```
-
-## Performance Benchmarks
-
-### Token Efficiency
-
-| Approach | Tokens | Includes |
-|----------|--------|----------|
-| Read 10 raw files | 10,000 | Syntax only |
-| LLM-Context | 500-2,000 | Call graph + semantics |
-| **Savings** | **80-95%** | **Better understanding** |
-
-### Incremental Updates
-
-| Codebase Size | Files Changed | Full Analysis | Incremental | Savings |
-|---------------|---------------|---------------|-------------|---------|
-| 500 files | 5 | 14s | 140ms | **99.0%** |
-| 5,000 files | 10 | 2.3min | 280ms | **99.8%** |
-| 50,000 files | 20 | 23min | 560ms | **99.996%** |
+See [GitHub Action README](.github/actions/llm-context-action/README.md) for complete documentation.
 
 ## How It Works
 
-### 1. SCIP Indexing (Optional)
-
-```bash
-scip-typescript index --infer-tsconfig
-```
-- Uses TypeScript compiler for symbol extraction
-- Captures references and types
-- Falls back to Babel for JavaScript
-
-### 2. Custom Analysis
+### 1. Tree-sitter Parsing
 
 ```javascript
-// Parse with Babel
-const ast = parse(sourceCode);
+// Language-agnostic parser with lazy loading
+const parser = await ParserFactory.createParser('python');
+const tree = parser.parse(sourceCode);
 
-// Extract functions, calls, side effects
-traverse(ast, {
-  FunctionDeclaration(path) {
-    // Analyze function
+// Unified AST adapter
+const adapter = createAdapter(tree, 'python', sourceCode, filePath);
+const functions = adapter.extractFunctions();
+```
+
+**Key advantages:**
+- 🌍 Supports 11+ languages (50+ available)
+- 🚀 WASM-based (fast, runs in Node.js)
+- 🛡️ Handles partial/invalid syntax better than Babel
+- 🔄 Lazy loading (only load grammars when needed)
+
+### 2. Enhanced Side Effect Analysis
+
+```javascript
+// Import-aware AST-based analysis
+const imports = adapter.extractImports();
+const analyzer = createAnalyzer('python', imports);
+
+const effects = analyzer.analyze(calls, functionSource);
+// Returns: [{ type: 'file_io', at: 'open', confidence: 'high' }]
+```
+
+**Pattern matching (per language):**
+```json
+{
+  "python": {
+    "file_io": {
+      "imports": ["os", "pathlib", "shutil"],
+      "calls": ["open", "read", "write"],
+      "builtin": ["open"]
+    }
   }
-});
+}
 ```
 
-### 3. Graph Generation
+### 3. Function Extraction
 
 ```javascript
-// Combine SCIP + custom analysis
-const node = {
-  id: func.name,
-  calls: extractCalls(func),
-  effects: detectSideEffects(func)
-};
+// Tree-sitter queries (language-specific)
+const query = `
+  (function_definition
+    name: (identifier) @name
+    parameters: (parameters) @params
+    body: (block) @body) @function
+`;
 
-// Write as JSONL (one function per line)
+// Extract metadata
+const functions = adapter.extractFunctions();
+// Returns: [{name, line, params, calls, effects, language}]
 ```
 
 ### 4. Incremental Updates
@@ -475,8 +516,86 @@ const cachedHash = manifest.files[file].hash;
 
 if (currentHash !== cachedHash) {
   // Re-analyze only this file
-  analyze(file);
+  const results = await analyzeFile(file);
   updateGraph(file, results);
+  manifest.files[file].hash = currentHash;
+}
+```
+
+### 5. Graph Generation
+
+```javascript
+// JSONL format (one function per line)
+const entry = {
+  id: func.name,
+  file: filePath,
+  line: func.line,
+  language: 'python',
+  calls: extractCalls(func),
+  effects: detectSideEffects(func)
+};
+
+fs.appendFileSync('graph.jsonl', JSON.stringify(entry) + '\n');
+```
+
+## Performance Benchmarks
+
+### Token Efficiency
+
+| Approach | Tokens | Includes |
+|----------|--------|----------|
+| Read 10 raw files | 10,000 | Syntax only |
+| LLM-Context | 500-2,000 | Call graph + semantics + language info |
+| **Savings** | **80-95%** | **Better understanding** |
+
+### Incremental Updates
+
+| Codebase Size | Files Changed | Full Analysis | Incremental | Savings |
+|---------------|---------------|---------------|-------------|---------|
+| 500 files | 5 | 14s | 140ms | **99.0%** |
+| 5,000 files | 10 | 2.3min | 280ms | **99.8%** |
+| 50,000 files | 20 | 23min | 560ms | **99.996%** |
+
+### Multi-Language Performance
+
+Tree-sitter is typically **faster** than Babel:
+- Python: ~2x faster than traditional Python AST
+- Go: ~3x faster than go/parser
+- TypeScript: No SCIP needed (SCIP was slow)
+
+## Configuration
+
+### llm-context.config.json
+
+```json
+{
+  "parser": "tree-sitter",
+  "languages": {
+    "enabled": ["javascript", "typescript", "python", "go", "rust"],
+    "autoDetect": true,
+    "fallback": "skip"
+  },
+  "patterns": {
+    "include": [
+      "**/*.js", "**/*.ts", "**/*.jsx", "**/*.tsx",
+      "**/*.py",
+      "**/*.go",
+      "**/*.rs",
+      "**/*.java"
+    ],
+    "exclude": ["node_modules", ".git", ".llm-context", "dist", "build"]
+  },
+  "analysis": {
+    "useASTAnalysis": true,
+    "trackCallGraph": true,
+    "detectSideEffects": true
+  },
+  "granularity": "function",
+  "incremental": {
+    "storeSource": true,
+    "detectRenames": true,
+    "similarityThreshold": 0.85
+  }
 }
 ```
 
@@ -490,34 +609,40 @@ if (currentHash !== cachedHash) {
 - [x] Multi-level summaries
 - [x] Side effect detection
 - [x] Query interface
-- [x] **Function-level granularity** (98% faster for large files)
-- [x] **Advanced features**: Rename detection, dependency analysis, source storage
-- [x] **GitHub Action** (CI/CD integration)
+- [x] Function-level granularity (98% faster for large files)
+- [x] Advanced features: Rename detection, dependency analysis
+- [x] GitHub Action (CI/CD integration)
+- [x] **Multi-language support (11+ languages via Tree-sitter)**
+- [x] **Enhanced AST-based side effect analysis**
+- [x] **Claude Code hooks integration**
 
 ### 🚧 In Progress
 
 - [ ] Watch mode (auto-analyze on file changes)
-- [ ] Multi-language support (Python, Go, Rust, Java)
+- [ ] More languages (expand to 20+)
 
 ### 📋 Planned
 
 - [ ] VS Code extension
+- [ ] Cross-language call detection
+- [ ] Local LLM semantic analysis integration
+- [ ] MCP server (like RepoPrompt)
 
 ## Documentation
 
 - **[Installation Guide](CLI_INSTALLATION.md)** - Detailed setup instructions
 - **[Incremental Updates](INCREMENTAL_UPDATES.md)** - How incremental updates work
 - **[Function-Level Granularity](FUNCTION_LEVEL_GRANULARITY.md)** - Track changes at function level
-- **[GitHub Action](.github/actions/llm-context-action/README.md)** - CI/CD integration (NEW!)
+- **[GitHub Action](.github/actions/llm-context-action/README.md)** - CI/CD integration
 - **[Demo](DEMO.md)** - Live demonstrations
 - **[Performance](performance-comparison.md)** - Benchmarks and projections
 - **[Proof of Concept](PROOF_OF_CONCEPT_RESULTS.md)** - Original research
 
 ## Requirements
 
-- Node.js ≥ 16.0.0
-- JavaScript or TypeScript project
-- Works on Linux, macOS, Windows
+- Node.js ≥ 16.0.0 (for Tree-sitter WASM support)
+- Any supported language project (JavaScript, TypeScript, Python, Go, Rust, Java, C, C++, Ruby, PHP, Bash)
+- Works on Linux, macOS, Windows (WSL recommended on Windows)
 
 ## Contributing
 
@@ -528,6 +653,12 @@ Contributions welcome! Please:
 3. Make your changes
 4. Add tests if applicable
 5. Submit a pull request
+
+**Areas where help is needed:**
+- Adding more language support (Tree-sitter grammars)
+- Improving side effect pattern detection
+- Performance optimizations
+- Documentation improvements
 
 ## License
 
@@ -541,27 +672,30 @@ MIT - See [LICENSE](LICENSE) file
 
 ## Related Projects
 
+- **[Tree-sitter](https://tree-sitter.github.io/)** - Multi-language parser
 - **[SCIP](https://github.com/sourcegraph/scip)** - Code Intelligence Protocol
-- **[Babel](https://babeljs.io/)** - JavaScript parser
 - **[Claude Code](https://claude.ai/code)** - AI pair programming
+- **[Beads](https://github.com/steveyegge/beads)** - Git-based issue tracking (hooks inspiration)
+- **[RepoPrompt](https://repoprompt.com/)** - MCP server for codebase context
 
 ## Acknowledgments
 
 Built with:
-- `@babel/parser` - JavaScript parsing
-- `@babel/traverse` - AST traversal
-- `@sourcegraph/scip-typescript` - SCIP indexing
-- `protobufjs` - Protocol buffer parsing
+- **[web-tree-sitter](https://github.com/tree-sitter/tree-sitter)** - WASM-based parser runtime
+- **Tree-sitter grammars**: javascript, typescript, python, go, rust, java, c, cpp, ruby, php, bash, json
+- **[protobufjs](https://github.com/protobufjs/protobuf.js)** - Protocol buffer parsing (for SCIP fallback)
 
 ## Citation
 
 If you use this tool in research, please cite:
 
 ```
-LLM Context Tools - Code Analysis for AI Assistants
+LLM Context Tools - Multi-Language Code Analysis for AI
 https://github.com/devame/llm-context-tools
 ```
 
 ---
 
 **Made with ❤️ for AI-assisted development**
+
+**Powered by Tree-sitter 🌳**
