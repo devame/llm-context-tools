@@ -17,9 +17,12 @@
       "scip-parser",
       "side-effects-analyzer",
       "summary-updater",
-      "transformer"
+      "transformer",
+      "prime",
+      "setup-claude",
+      "analyze"
     ],
-    "functionCount": 107,
+    "functionCount": 118,
     "effects": [
       "network",
       "database",

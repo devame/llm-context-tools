@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(llm-context stats:*)",
+      "Bash(llm-context:*)",
+      "Bash(bd create:*)",
+      "Bash(bd list:*)",
+      "Bash(cat:*)",
+      "Bash(find:*)",
+      "Bash(bd sync:*)",
+      "Bash(bd update:*)",
+      "Bash(bd close llm-context-tools-3ay --reason=\"Enhanced skill with prominent warning at top and required workflow section\")",
+      "Bash(bd close:*)",
+      "Bash(git add:*)",
+      "Bash(git push)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nAuto-generate .claude/CLAUDE.md for all users\n\n## Problem\nPrevious improvements only helped the llm-context-tools project itself.\nUsers of the npm package wouldn''t get the query-first reminders unless\nthey manually created .claude/CLAUDE.md in their projects.\n\n## Solution: Auto-Generation for All Users\n\n### 1. Created claude-setup.js Module\n- Generates .claude/CLAUDE.md with project instructions\n- Detects project name from package.json\n- Supports --force flag to overwrite existing\n- Can be used standalone or imported\n\n### 2. Integrated into analyze.js\n- Runs setupClaudeIntegration() during initial analysis\n- Runs during incremental analysis (ensures it exists)\n- Silent if file already exists (non-intrusive)\n\n### 3. Added setup-claude Command\n```bash\nllm-context setup-claude         # Generate .claude/CLAUDE.md\nllm-context setup-claude --force # Overwrite existing\n```\n\n### 4. Updated package.json\n- Version bump: 0.2.0 → 0.3.0\n- Added claude-setup.js to \"files\" array (ships with npm)\n\n### 5. Enhanced README Documentation\n- Added \"Automatic Claude Code Integration\" section\n- Explains what gets generated and why\n- Shows manual setup command\n- Updated \"Generated Files\" section\n\n## Impact\n\n**Before:**\n- Skill ships with package ✓\n- But no project-level .claude/CLAUDE.md ✗\n- Users must manually create instructions ✗\n\n**After:**\n```bash\n# Any user anywhere:\ncd ~/their-project\nnpm install -g llm-context\nllm-context analyze\n\n# Auto-generates:\n# - .llm-context/ → analysis results\n# - .claude/CLAUDE.md → Claude Code instructions ← NEW!\n```\n\n**Every user now gets:**\n1. .claude/CLAUDE.md with query-first workflow\n2. L0 summary with query reminders\n3. Skill shipped with npm package\n4. Enhanced query output with patterns\n\n**Full integration chain:**\n```\nUser runs: llm-context analyze\n  ↓\nAuto-generates: .claude/CLAUDE.md\n  ↓\nClaude reads: .claude/CLAUDE.md\n  ↓\nSees: 🚨 MANDATORY: Query-First Exploration\n  ↓\nReads: L0 with ⚡ Quick Queries section\n  ↓\nUses: queries instead of grep\n  ↓\nResult: 80-95% token savings for ALL users\n```\n\n## Files Changed\n- claude-setup.js (NEW) - Generation module\n- analyze.js - Auto-call setupClaudeIntegration()\n- bin/llm-context.js - Add setup-claude command\n- package.json - Version 0.3.0, add claude-setup.js to files\n- README.md - Document auto-generation feature\n\n## Testing\n- setupClaudeIntegration() exported for programmatic use\n- Async command handler supports setup-claude\n- File already exists in this project from earlier work\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(bd show:*)",
+      "Bash(llm-context query:*)",
+      "Bash(grep:*)",
+      "Bash(git checkout:*)",
+      "Bash(npm install:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(node manifest-generator.js:*)",
+      "Bash(ls:*)",
+      "Bash(node test-parser.js:*)",
+      "Bash(node analyze.js:*)",
+      "Bash(node full-analysis.js:*)",
+      "WebFetch(domain:repoprompt.com)",
+      "WebSearch",
+      "Bash(gh pr create:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:steveyegge.github.io)",
+      "Bash(chmod:*)",
+      "Bash(node bin/llm-context.js:*)",
+      "Bash(echo:*)"
+    ]
+  }
+}

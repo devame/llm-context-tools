@@ -16,19 +16,6 @@
     "entryPoints": []
   },
   {
-    "file": "bin/llm-context.js",
-    "module": "llm-context",
-    "functionCount": 1,
-    "exports": [
-      null
-    ],
-    "effects": [
-      "file_io",
-      "logging"
-    ],
-    "entryPoints": []
-  },
-  {
     "file": "change-detector.js",
     "module": "change-detector",
     "functionCount": 7,
@@ -254,6 +241,56 @@
     "effects": [
       "network"
     ],
+    "entryPoints": []
+  },
+  {
+    "file": "bin/llm-context.js",
+    "module": "llm-context",
+    "functionCount": 1,
+    "exports": [
+      null
+    ],
+    "effects": [
+      "file_io",
+      "logging"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "prime.js",
+    "module": "prime",
+    "functionCount": 6,
+    "exports": [
+      null,
+      null,
+      null
+    ],
+    "effects": [
+      "file_io",
+      "logging",
+      "network",
+      "dom",
+      "database"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "setup-claude.js",
+    "module": "setup-claude",
+    "functionCount": 4,
+    "exports": [],
+    "effects": [
+      "file_io",
+      "logging"
+    ],
+    "entryPoints": []
+  },
+  {
+    "file": "analyze.js",
+    "module": "analyze",
+    "functionCount": 1,
+    "exports": [],
+    "effects": [],
     "entryPoints": []
   }
 ]

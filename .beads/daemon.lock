@@ -1,7 +1,7 @@
 {
-  "pid": 271737,
-  "parent_pid": 271721,
+  "pid": 283234,
+  "parent_pid": 283216,
   "database": "/mnt/d/github/llm-context-tools/.beads/beads.db",
   "version": "0.27.2",
-  "started_at": "2026-01-11T06:05:21.800729053Z"
+  "started_at": "2026-01-11T10:30:34.684565185Z"
 }

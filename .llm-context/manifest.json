@@ -1,15 +1,27 @@
 {
   "version": "2.0.0",
   "granularity": "function",
-  "generated": "2026-01-11T06:17:28.561Z",
+  "generated": "2026-01-11T10:28:52.132Z",
   "files": {
     "analyze.js": {
-      "hash": "f8b3f5f58c09a23305f77fed2eaeb7d9",
-      "size": 4349,
-      "lastModified": "2026-01-11T06:14:58.263Z",
-      "functions": [],
+      "hash": "08cebe7e77fa38e0d12678332d21eef9",
+      "size": 4339,
+      "lastModified": "2026-01-11T10:25:28.358Z",
+      "functions": [
+        "log"
+      ],
       "analysisTime": null,
-      "functionHashes": {}
+      "functionHashes": {
+        "log": {
+          "hash": "cf3d4cf4e962f4b8853ed2321b3bd8fa",
+          "line": 34,
+          "endLine": 38,
+          "size": 69,
+          "async": false,
+          "language": "javascript",
+          "source": "function log(...args) {\r\n  if (!isQuiet) {\r\n    log(...args);\r\n  }\r\n}"
+        }
+      }
     },
     "ast-adapter.js": {
       "hash": "913072c80dba7e7cee448dd5d448a40f",
@@ -132,9 +144,9 @@
       }
     },
     "bin/llm-context.js": {
-      "hash": "d3385d7e23f11ae62886e11dacd126c5",
-      "size": 6966,
-      "lastModified": "2026-01-09T05:35:54.772Z",
+      "hash": "f3d4dea776f3cf55e39eab93a4a83687",
+      "size": 8425,
+      "lastModified": "2026-01-11T10:24:37.617Z",
       "functions": [
         "runScript"
       ],
@@ -952,6 +964,76 @@
         }
       }
     },
+    "prime.js": {
+      "hash": "79018d7e0036afe3e3a3ff90c581045c",
+      "size": 5840,
+      "lastModified": "2026-01-11T10:25:04.421Z",
+      "functions": [
+        "checkInitialized",
+        "loadSystemSummary",
+        "loadStatistics",
+        "findEntryPoints",
+        "generatePrimeOutput",
+        "main"
+      ],
+      "analysisTime": null,
+      "functionHashes": {
+        "checkInitialized": {
+          "hash": "58326b4c6e7ffa839946dd1a9950915e",
+          "line": 21,
+          "endLine": 29,
+          "size": 295,
+          "async": false,
+          "language": "javascript",
+          "source": "function checkInitialized() {\r\n  const llmContextDir = join(process.cwd(), '.llm-context');\r\n  if (!existsSync(llmContextDir)) {\r\n    console.log('📊 LLM Context Tools: Not initialized in this project');\r\n    console.log('   Run: llm-context analyze');\r\n    return false;\r\n  }\r\n  return true;\r\n}"
+        },
+        "loadSystemSummary": {
+          "hash": "da8e580afc16ae90ae878ae96605063e",
+          "line": 34,
+          "endLine": 40,
+          "size": 226,
+          "async": false,
+          "language": "javascript",
+          "source": "function loadSystemSummary() {\r\n  const summaryPath = join(process.cwd(), '.llm-context', 'summaries', 'L0-system.md');\r\n  if (!existsSync(summaryPath)) {\r\n    return null;\r\n  }\r\n  return readFileSync(summaryPath, 'utf-8');\r\n}"
+        },
+        "loadStatistics": {
+          "hash": "8c08a00dc12ca1d7f8193472257f7af2",
+          "line": 45,
+          "endLine": 86,
+          "size": 1053,
+          "async": false,
+          "language": "javascript",
+          "source": "function loadStatistics() {\r\n  const graphPath = join(process.cwd(), '.llm-context', 'graph.jsonl');\r\n  if (!existsSync(graphPath)) {\r\n    return null;\r\n  }\r\n\r\n  const lines = readFileSync(graphPath, 'utf-8').trim().split('\\n');\r\n  const entries = lines.map(line => JSON.parse(line));\r\n\r\n  const stats = {\r\n    totalFunctions: entries.length,\r\n    languages: new Set(),\r\n    files: new Set(),\r\n    async: 0,\r\n    sideEffects: {\r\n      file_io: 0,\r\n      network: 0,\r\n      database: 0,\r\n      logging: 0,\r\n      dom: 0\r\n    }\r\n  };\r\n\r\n  for (const entry of entries) {\r\n    if (entry.language) stats.languages.add(entry.language);\r\n    if (entry.file) stats.files.add(entry.file);\r\n    if (entry.async) stats.async++;\r\n    if (entry.effects) {\r\n      for (const effect of entry.effects) {\r\n        if (stats.sideEffects.hasOwnProperty(effect)) {\r\n          stats.sideEffects[effect]++;\r\n        }\r\n      }\r\n    }\r\n  }\r\n\r\n  stats.languages = Array.from(stats.languages);\r\n  stats.totalFiles = stats.files.size;\r\n  delete stats.files;\r\n\r\n  return stats;\r\n}"
+        },
+        "findEntryPoints": {
+          "hash": "a6e4a6732076daaa5e08779ac5baff97",
+          "line": 91,
+          "endLine": 126,
+          "size": 1024,
+          "async": false,
+          "language": "javascript",
+          "source": "function findEntryPoints() {\r\n  const graphPath = join(process.cwd(), '.llm-context', 'graph.jsonl');\r\n  if (!existsSync(graphPath)) {\r\n    return [];\r\n  }\r\n\r\n  const lines = readFileSync(graphPath, 'utf-8').trim().split('\\n');\r\n  const entries = lines.map(line => JSON.parse(line));\r\n\r\n  // Build caller map\r\n  const callers = new Map();\r\n  for (const entry of entries) {\r\n    if (!callers.has(entry.id)) {\r\n      callers.set(entry.id, 0);\r\n    }\r\n    if (entry.calls) {\r\n      for (const call of entry.calls) {\r\n        callers.set(call, (callers.get(call) || 0) + 1);\r\n      }\r\n    }\r\n  }\r\n\r\n  // Find entry points (has side effects, not called by others)\r\n  const entryPoints = entries.filter(entry => {\r\n    const hasSideEffects = entry.effects && entry.effects.length > 0;\r\n    const notCalled = (callers.get(entry.id) || 0) === 0;\r\n    return hasSideEffects && notCalled;\r\n  });\r\n\r\n  return entryPoints.slice(0, 10).map(e => ({\r\n    name: e.id,\r\n    file: e.file,\r\n    line: e.line,\r\n    effects: e.effects\r\n  }));\r\n}"
+        },
+        "generatePrimeOutput": {
+          "hash": "6b58c7659af25b6d7f3961b340b76aab",
+          "line": 131,
+          "endLine": 185,
+          "size": 2114,
+          "async": false,
+          "language": "javascript",
+          "source": "function generatePrimeOutput() {\r\n  console.log('\\n╔═══════════════════════════════════════════════════════════════╗');\r\n  console.log('║                 LLM Context Tools - Primed                    ║');\r\n  console.log('╚═══════════════════════════════════════════════════════════════╝\\n');\r\n\r\n  // Load L0 summary\r\n  const systemSummary = loadSystemSummary();\r\n  if (systemSummary) {\r\n    console.log('## System Overview\\n');\r\n    console.log(systemSummary);\r\n    console.log('\\n---\\n');\r\n  }\r\n\r\n  // Load statistics\r\n  const stats = loadStatistics();\r\n  if (stats) {\r\n    console.log('## Statistics\\n');\r\n    console.log(`**Total Functions:** ${stats.totalFunctions}`);\r\n    console.log(`**Files Analyzed:** ${stats.totalFiles}`);\r\n    console.log(`**Languages:** ${stats.languages.join(', ')}`);\r\n    console.log(`**Async Functions:** ${stats.async}`);\r\n    console.log('\\n**Side Effects:**');\r\n    for (const [effect, count] of Object.entries(stats.sideEffects)) {\r\n      if (count > 0) {\r\n        console.log(`  - ${effect}: ${count} functions`);\r\n      }\r\n    }\r\n    console.log('\\n---\\n');\r\n  }\r\n\r\n  // Find entry points\r\n  const entryPoints = findEntryPoints();\r\n  if (entryPoints.length > 0) {\r\n    console.log('## Entry Points (Top 10)\\n');\r\n    for (const ep of entryPoints) {\r\n      console.log(`**${ep.name}** (${ep.file}:${ep.line})`);\r\n      console.log(`  Effects: ${ep.effects.join(', ')}`);\r\n      console.log();\r\n    }\r\n    console.log('---\\n');\r\n  }\r\n\r\n  // Usage instructions\r\n  console.log('## Quick Commands\\n');\r\n  console.log('```bash');\r\n  console.log('llm-context query find-function <name>  # Find function');\r\n  console.log('llm-context query calls-to <name>       # Who calls this?');\r\n  console.log('llm-context query trace <name>          # Call tree');\r\n  console.log('llm-context stats                       # Full statistics');\r\n  console.log('llm-context entry-points                # All entry points');\r\n  console.log('llm-context side-effects                # Side effects report');\r\n  console.log('```\\n');\r\n\r\n  console.log('📚 Full documentation: .claude/CLAUDE.md\\n');\r\n}"
+        },
+        "main": {
+          "hash": "cadb2be27299261bbaa79cb28bd1271d",
+          "line": 190,
+          "endLine": 196,
+          "size": 96,
+          "async": false,
+          "language": "javascript",
+          "source": "function main() {\r\n  if (!checkInitialized()) {\r\n    return;\r\n  }\r\n\r\n  generatePrimeOutput();\r\n}"
+        }
+      }
+    },
     "query.js": {
       "hash": "33d36537181105026b872c30b8b79c0c",
       "size": 5288,
@@ -999,6 +1081,56 @@
           "async": true,
           "language": "javascript",
           "source": "async function parseScip() {\n  try {\n    // Load the protobuf schema\n    const root = await protobuf.load(protoFile);\n    const Index = root.lookupType('scip.Index');\n\n    // Read and decode the SCIP file\n    const buffer = readFileSync(scipFile);\n    const index = Index.decode(buffer);\n\n    const indexObj = Index.toObject(index, {\n      longs: String,\n      enums: String,\n      bytes: String,\n    });\n\n    console.log('=== SCIP Index Summary ===\\n');\n\n    const metadata = indexObj.metadata || {};\n    console.log('Metadata:');\n    console.log('  Tool:', metadata.toolInfo?.name || 'N/A', metadata.toolInfo?.version || '');\n    console.log('  Project Root:', metadata.projectRoot || 'N/A');\n\n    const documents = indexObj.documents || [];\n    console.log('\\nDocuments indexed:', documents.length);\n\n    // Group files by directory\n    const byDir = {};\n    documents.forEach(doc => {\n      const dir = doc.relativePath.split('/').slice(0, -1).join('/') || '.';\n      byDir[dir] = (byDir[dir] || 0) + 1;\n    });\n\n    console.log('\\nFiles by directory:');\n    Object.entries(byDir).slice(0, 10).forEach(([dir, count]) => {\n      console.log(`  ${dir}: ${count} files`);\n    });\n\n    // Analyze first few documents in detail\n    console.log('\\n=== Sample Documents (first 3) ===\\n');\n\n    documents.slice(0, 3).forEach((doc, idx) => {\n      console.log(`\\n[${idx + 1}] ${doc.relativePath}`);\n      console.log(`    Language: ${doc.language || 'unknown'}`);\n\n      const occurrences = doc.occurrences || [];\n      const symbols = doc.symbols || [];\n\n      console.log(`    Occurrences: ${occurrences.length}`);\n      console.log(`    Symbols defined: ${symbols.length}`);\n\n      // Show first few symbols\n      if (symbols.length > 0) {\n        console.log('\\n    Symbol Details:');\n        symbols.slice(0, 5).forEach(sym => {\n          const symStr = sym.symbol || '';\n          const kind = sym.kind || 0;\n          const docs = sym.documentation || [];\n          const sig = sym.signatureDocumentation?.text || '';\n\n          // Parse symbol to get just the name\n          const parts = symStr.split('/');\n          const name = parts[parts.length - 1]?.replace(/[.`]/g, '') || symStr;\n\n          const kindNames = {\n            1: 'Unknown',\n            6: 'Class',\n            8: 'Method',\n            9: 'Function',\n            10: 'Property',\n            12: 'Variable',\n          };\n\n          console.log(`      - ${name}`);\n          console.log(`        Kind: ${kindNames[kind] || kind}`);\n          if (sig) {\n            console.log(`        Sig: ${sig.substring(0, 60)}${sig.length > 60 ? '...' : ''}`);\n          }\n          if (docs.length > 0) {\n            const docText = docs[0];\n            console.log(`        Doc: ${docText.substring(0, 60)}${docText.length > 60 ? '...' : ''}`);\n          }\n        });\n      }\n\n      // Show sample occurrences (function calls/references)\n      if (occurrences.length > 0) {\n        console.log('\\n    Sample Occurrences (first 5):');\n        occurrences.slice(0, 5).forEach(occ => {\n          const range = occ.range || [];\n          const symbol = occ.symbol || '';\n          const roles = occ.symbolRoles || 0;\n\n          // Parse symbol to get readable name\n          const parts = symbol.split('/');\n          const name = parts[parts.length - 1]?.replace(/[.`]/g, '') || symbol;\n\n          const roleNames = {\n            1: 'Definition',\n            2: 'Import',\n            4: 'Reference',\n            8: 'WriteAccess',\n            16: 'ReadAccess',\n          };\n\n          console.log(`      - ${name}`);\n          console.log(`        Line: ${range[0] || 0}, Roles: ${roleNames[roles] || roles}`);\n        });\n      }\n    });\n\n    // Global statistics\n    console.log('\\n\\n=== Global Statistics ===\\n');\n\n    let totalOccurrences = 0;\n    let totalSymbols = 0;\n    let symbolsByKind = {};\n    let functionSymbols = [];\n\n    documents.forEach(doc => {\n      const symbols = doc.symbols || [];\n      const occurrences = doc.occurrences || [];\n\n      totalSymbols += symbols.length;\n      totalOccurrences += occurrences.length;\n\n      symbols.forEach(sym => {\n        const kind = sym.kind || 0;\n        symbolsByKind[kind] = (symbolsByKind[kind] || 0) + 1;\n\n        // Collect function symbols for later analysis\n        if (kind === 9 || kind === 8) { // Function or Method\n          functionSymbols.push({\n            name: sym.symbol,\n            file: doc.relativePath,\n            sig: sym.signatureDocumentation?.text || '',\n            doc: (sym.documentation || [])[0] || ''\n          });\n        }\n      });\n    });\n\n    console.log('Total Symbols:', totalSymbols);\n    console.log('Total Occurrences:', totalOccurrences);\n    console.log('\\nSymbols by Kind:');\n\n    const kindNames = {\n      1: 'Unknown',\n      2: 'Namespace',\n      3: 'Type',\n      6: 'Class',\n      8: 'Method',\n      9: 'Function',\n      10: 'Property',\n      12: 'Variable',\n      13: 'Constant',\n    };\n\n    Object.entries(symbolsByKind)\n      .sort((a, b) => b[1] - a[1])\n      .forEach(([kind, count]) => {\n        console.log(`  ${kindNames[kind] || kind}: ${count}`);\n      });\n\n    console.log('\\nFunctions/Methods found:', functionSymbols.length);\n    console.log('Sample functions:');\n    functionSymbols.slice(0, 10).forEach(fn => {\n      const name = fn.name.split('/').pop().replace(/[.`]/g, '');\n      console.log(`  ${name} (${fn.file})`);\n      if (fn.sig) {\n        console.log(`    Signature: ${fn.sig.substring(0, 70)}`);\n      }\n    });\n\n    // Save full data for transformer\n    console.log('\\n\\n=== Saving parsed data for transformer ===');\n    const fs = await import('fs');\n    fs.writeFileSync('.llm-context/scip-parsed.json', JSON.stringify(indexObj, null, 2));\n    console.log('Saved to .llm-context/scip-parsed.json');\n\n  } catch (error) {\n    console.error('Error parsing SCIP file:', error.message);\n    console.error(error.stack);\n  }\n}"
+        }
+      }
+    },
+    "setup-claude.js": {
+      "hash": "aae545beb7f4785618769687d761d2cf",
+      "size": 6049,
+      "lastModified": "2026-01-11T10:20:56.981Z",
+      "functions": [
+        "checkInstallation",
+        "installHooks",
+        "removeHooks",
+        "main"
+      ],
+      "analysisTime": null,
+      "functionHashes": {
+        "checkInstallation": {
+          "hash": "25c5d8b3915e51e09d430ff62b7814ab",
+          "line": 48,
+          "endLine": 77,
+          "size": 1141,
+          "async": false,
+          "language": "javascript",
+          "source": "function checkInstallation() {\r\n  const sessionStartExists = existsSync(SESSION_START_HOOK);\r\n  const preCompactExists = existsSync(PRE_COMPACT_HOOK);\r\n\r\n  console.log('\\\\n=== llm-context-tools Claude Code Integration ===\\\\n');\r\n\r\n  if (sessionStartExists && preCompactExists) {\r\n    console.log('✅ Hooks installed correctly');\r\n    console.log('   SessionStart:', SESSION_START_HOOK);\r\n    console.log('   PreCompact:', PRE_COMPACT_HOOK);\r\n\r\n    // Check if they contain our content\r\n    const sessionContent = readFileSync(SESSION_START_HOOK, 'utf-8');\r\n    const compactContent = readFileSync(PRE_COMPACT_HOOK, 'utf-8');\r\n\r\n    if (sessionContent.includes('llm-context prime') &&\r\n        compactContent.includes('llm-context analyze')) {\r\n      console.log('\\\\n✅ Hook contents verified');\r\n      return true;\r\n    } else {\r\n      console.log('\\\\n⚠️  Hook files exist but have different content');\r\n      console.log('   Run: llm-context setup-claude --force to overwrite');\r\n      return false;\r\n    }\r\n  } else {\r\n    console.log('❌ Hooks not installed');\r\n    console.log('   Run: llm-context setup-claude');\r\n    return false;\r\n  }\r\n}"
+        },
+        "installHooks": {
+          "hash": "504759c400218962069d718bd41b8262",
+          "line": 82,
+          "endLine": 127,
+          "size": 1802,
+          "async": false,
+          "language": "javascript",
+          "source": "function installHooks(force = false) {\r\n  console.log('\\\\n=== Installing Claude Code Hooks ===\\\\n');\r\n\r\n  // Create hooks directory if needed\r\n  if (!existsSync(HOOKS_DIR)) {\r\n    console.log('Creating hooks directory:', HOOKS_DIR);\r\n    mkdirSync(HOOKS_DIR, { recursive: true });\r\n  }\r\n\r\n  // Check if hooks already exist\r\n  if ((existsSync(SESSION_START_HOOK) || existsSync(PRE_COMPACT_HOOK)) && !force) {\r\n    console.log('⚠️  Hooks already exist. Options:');\r\n    console.log('   1. Run with --force to overwrite');\r\n    console.log('   2. Run with --check to verify installation');\r\n    console.log('   3. Manually merge with existing hooks');\r\n    console.log('\\\\nExisting hooks:');\r\n    if (existsSync(SESSION_START_HOOK)) {\r\n      console.log('   -', SESSION_START_HOOK);\r\n    }\r\n    if (existsSync(PRE_COMPACT_HOOK)) {\r\n      console.log('   -', PRE_COMPACT_HOOK);\r\n    }\r\n    return false;\r\n  }\r\n\r\n  // Install SessionStart hook\r\n  console.log('Installing SessionStart hook...');\r\n  writeFileSync(SESSION_START_HOOK, SESSION_START_CONTENT, { mode: 0o755 });\r\n  console.log('✅', SESSION_START_HOOK);\r\n\r\n  // Install PreCompact hook\r\n  console.log('Installing PreCompact hook...');\r\n  writeFileSync(PRE_COMPACT_HOOK, PRE_COMPACT_CONTENT, { mode: 0o755 });\r\n  console.log('✅', PRE_COMPACT_HOOK);\r\n\r\n  console.log('\\\\n✅ Claude Code integration installed!\\\\n');\r\n  console.log('What happens now:');\r\n  console.log('  • SessionStart: Injects .llm-context/ summary at session start');\r\n  console.log('  • PreCompact: Runs incremental analysis before compaction');\r\n  console.log('\\\\nNext steps:');\r\n  console.log('  1. Run: llm-context analyze (in your project)');\r\n  console.log('  2. Restart Claude Code');\r\n  console.log('  3. Context will auto-inject on session start!\\\\n');\r\n\r\n  return true;\r\n}"
+        },
+        "removeHooks": {
+          "hash": "706971ccc17cbb4828053e404aa54e43",
+          "line": 132,
+          "endLine": 166,
+          "size": 1123,
+          "async": false,
+          "language": "javascript",
+          "source": "function removeHooks() {\r\n  console.log('\\\\n=== Removing Claude Code Hooks ===\\\\n');\r\n\r\n  let removed = false;\r\n\r\n  if (existsSync(SESSION_START_HOOK)) {\r\n    const content = readFileSync(SESSION_START_HOOK, 'utf-8');\r\n    if (content.includes('llm-context prime')) {\r\n      unlinkSync(SESSION_START_HOOK);\r\n      console.log('✅ Removed:', SESSION_START_HOOK);\r\n      removed = true;\r\n    } else {\r\n      console.log('⚠️  SessionStart hook exists but is not from llm-context-tools');\r\n      console.log('   Skipping removal (manual cleanup required)');\r\n    }\r\n  }\r\n\r\n  if (existsSync(PRE_COMPACT_HOOK)) {\r\n    const content = readFileSync(PRE_COMPACT_HOOK, 'utf-8');\r\n    if (content.includes('llm-context analyze')) {\r\n      unlinkSync(PRE_COMPACT_HOOK);\r\n      console.log('✅ Removed:', PRE_COMPACT_HOOK);\r\n      removed = true;\r\n    } else {\r\n      console.log('⚠️  PreCompact hook exists but is not from llm-context-tools');\r\n      console.log('   Skipping removal (manual cleanup required)');\r\n    }\r\n  }\r\n\r\n  if (!removed) {\r\n    console.log('No llm-context-tools hooks found to remove');\r\n  }\r\n\r\n  console.log();\r\n}"
+        },
+        "main": {
+          "hash": "c672d50644a9bf7f72bb2f4c9a069ae3",
+          "line": 171,
+          "endLine": 184,
+          "size": 339,
+          "async": false,
+          "language": "javascript",
+          "source": "function main() {\r\n  const args = process.argv.slice(2);\r\n  const hasCheck = args.includes('--check');\r\n  const hasRemove = args.includes('--remove');\r\n  const hasForce = args.includes('--force');\r\n\r\n  if (hasCheck) {\r\n    checkInstallation();\r\n  } else if (hasRemove) {\r\n    removeHooks();\r\n  } else {\r\n    installHooks(hasForce);\r\n  }\r\n}"
         }
       }
     },
@@ -1262,9 +1394,9 @@
     }
   },
   "globalStats": {
-    "totalFunctions": 108,
-    "totalCalls": 516,
-    "totalFiles": 19,
-    "totalSize": 150706
+    "totalFunctions": 119,
+    "totalCalls": 570,
+    "totalFiles": 21,
+    "totalSize": 164044
   }
 }
