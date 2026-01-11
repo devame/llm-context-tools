@@ -1,0 +1,243 @@
+{
+  "javascript": {
+    "file_io": {
+      "imports": ["fs", "fs/promises", "node:fs", "fs-extra"],
+      "calls": ["readFile", "writeFile", "appendFile", "unlink", "mkdir", "rmdir", "readFileSync", "writeFileSync", "existsSync", "statSync", "readdirSync", "createReadStream", "createWriteStream"],
+      "patterns": ["fs\\..*", ".*File.*", ".*Dir.*"],
+      "namespaces": ["fs"]
+    },
+    "network": {
+      "imports": ["axios", "node-fetch", "fetch", "http", "https", "net", "request", "superagent", "got"],
+      "calls": ["fetch", "get", "post", "put", "delete", "request", "send", "connect", "listen"],
+      "patterns": [".*[Rr]equest.*", ".*[Ff]etch.*"],
+      "globals": ["XMLHttpRequest", "WebSocket", "fetch"]
+    },
+    "logging": {
+      "imports": ["winston", "bunyan", "pino", "log4js"],
+      "calls": ["log", "info", "warn", "error", "debug", "trace"],
+      "patterns": ["console\\..*", "logger\\..*", "log\\..*"],
+      "namespaces": ["console"]
+    },
+    "database": {
+      "imports": ["mongoose", "sequelize", "typeorm", "prisma", "mongodb", "mysql", "pg", "redis", "knex"],
+      "calls": ["query", "execute", "find", "findOne", "findMany", "save", "insert", "update", "delete", "create", "drop", "connect", "collection"],
+      "patterns": [".*[Qq]uery.*", ".*[Dd]atabase.*", "db\\..*"],
+      "namespaces": ["db"]
+    },
+    "dom": {
+      "imports": [],
+      "calls": ["querySelector", "querySelectorAll", "getElementById", "getElementsByClassName", "createElement", "appendChild", "removeChild", "insertBefore", "setAttribute", "addEventListener"],
+      "patterns": [".*Element.*", ".*Node.*"],
+      "globals": ["document", "window"]
+    }
+  },
+  "typescript": {
+    "file_io": {
+      "imports": ["fs", "fs/promises", "node:fs", "fs-extra"],
+      "calls": ["readFile", "writeFile", "appendFile", "unlink", "mkdir", "rmdir", "readFileSync", "writeFileSync", "existsSync"],
+      "patterns": ["fs\\..*", ".*File.*"],
+      "namespaces": ["fs"]
+    },
+    "network": {
+      "imports": ["axios", "node-fetch", "http", "https", "net"],
+      "calls": ["fetch", "get", "post", "put", "delete", "request"],
+      "patterns": [".*[Rr]equest.*", ".*[Ff]etch.*"],
+      "globals": ["fetch"]
+    },
+    "logging": {
+      "imports": ["winston", "pino"],
+      "calls": ["log", "info", "warn", "error", "debug"],
+      "patterns": ["console\\..*", "logger\\..*"],
+      "namespaces": ["console"]
+    },
+    "database": {
+      "imports": ["typeorm", "prisma", "pg", "mongodb"],
+      "calls": ["query", "execute", "find", "save", "insert", "update", "delete"],
+      "patterns": [".*[Qq]uery.*", "db\\..*"],
+      "namespaces": ["db"]
+    },
+    "dom": {
+      "imports": [],
+      "calls": ["querySelector", "getElementById", "createElement", "appendChild"],
+      "patterns": [".*Element.*"],
+      "globals": ["document", "window"]
+    }
+  },
+  "python": {
+    "file_io": {
+      "imports": ["os", "pathlib", "shutil", "io"],
+      "calls": ["open", "read", "write", "close", "remove", "mkdir", "rmdir", "listdir", "chmod"],
+      "patterns": [".*[Ff]ile.*", ".*[Pp]ath.*"],
+      "builtins": ["open"]
+    },
+    "network": {
+      "imports": ["requests", "urllib", "http.client", "socket", "aiohttp", "httpx"],
+      "calls": ["get", "post", "put", "delete", "request", "urlopen", "connect", "send", "recv"],
+      "patterns": [".*[Rr]equest.*", ".*[Uu]rl.*"]
+    },
+    "logging": {
+      "imports": ["logging"],
+      "calls": ["log", "info", "warning", "error", "debug", "critical"],
+      "patterns": ["log\\..*", "logger\\..*"]
+    },
+    "database": {
+      "imports": ["sqlite3", "psycopg2", "pymongo", "sqlalchemy", "django.db", "mysql.connector"],
+      "calls": ["execute", "fetchone", "fetchall", "commit", "find", "insert", "update", "delete"],
+      "patterns": [".*[Qq]uery.*", ".*[Dd]atabase.*"]
+    }
+  },
+  "go": {
+    "file_io": {
+      "imports": ["os", "io/ioutil", "bufio", "io"],
+      "calls": ["Open", "Create", "Read", "Write", "Close", "Remove", "Mkdir", "ReadFile", "WriteFile"],
+      "patterns": [".*File.*", ".*Dir.*"]
+    },
+    "network": {
+      "imports": ["net/http", "net", "net/url"],
+      "calls": ["Get", "Post", "Do", "ListenAndServe", "Dial", "Listen"],
+      "patterns": [".*[Hh]ttp.*", ".*[Nn]et.*"]
+    },
+    "logging": {
+      "imports": ["log", "fmt"],
+      "calls": ["Print", "Println", "Printf", "Fatal", "Panic"],
+      "patterns": ["log\\..*", "fmt\\..*"]
+    },
+    "database": {
+      "imports": ["database/sql", "go.mongodb.org/mongo-driver"],
+      "calls": ["Query", "Exec", "QueryRow", "Find", "Insert", "Update", "Delete"],
+      "patterns": [".*[Qq]uery.*", ".*[Dd]atabase.*"]
+    }
+  },
+  "rust": {
+    "file_io": {
+      "imports": ["std::fs", "std::io", "tokio::fs"],
+      "calls": ["read_to_string", "write", "create", "remove_file", "create_dir", "remove_dir", "read", "open"],
+      "patterns": [".*file.*", ".*dir.*", "fs::.*"]
+    },
+    "network": {
+      "imports": ["reqwest", "hyper", "std::net", "tokio::net"],
+      "calls": ["get", "post", "request", "connect", "listen", "TcpStream", "TcpListener"],
+      "patterns": [".*http.*", ".*net.*", ".*tcp.*"]
+    },
+    "logging": {
+      "imports": ["log", "env_logger", "tracing"],
+      "calls": ["debug", "info", "warn", "error", "trace"],
+      "patterns": ["log::.*", "println!"]
+    },
+    "database": {
+      "imports": ["diesel", "sqlx", "mongodb"],
+      "calls": ["execute", "query", "fetch", "insert", "update", "delete"],
+      "patterns": [".*query.*", ".*sql.*"]
+    }
+  },
+  "java": {
+    "file_io": {
+      "imports": ["java.io", "java.nio"],
+      "calls": ["read", "write", "open", "close", "delete", "mkdir", "createNewFile"],
+      "patterns": [".*File.*", ".*Stream.*", ".*Reader.*", ".*Writer.*"]
+    },
+    "network": {
+      "imports": ["java.net", "org.apache.http"],
+      "calls": ["connect", "get", "post", "send", "receive", "openConnection"],
+      "patterns": [".*Http.*", ".*Socket.*", ".*Url.*"]
+    },
+    "logging": {
+      "imports": ["java.util.logging", "org.slf4j", "log4j"],
+      "calls": ["log", "info", "warning", "severe", "debug", "error"],
+      "patterns": [".*[Ll]og.*"]
+    },
+    "database": {
+      "imports": ["java.sql", "javax.persistence", "org.hibernate"],
+      "calls": ["executeQuery", "executeUpdate", "createQuery", "find", "persist", "merge"],
+      "patterns": [".*Query.*", ".*Statement.*"]
+    }
+  },
+  "c": {
+    "file_io": {
+      "includes": ["stdio.h", "fcntl.h", "unistd.h"],
+      "calls": ["fopen", "fclose", "fread", "fwrite", "open", "close", "read", "write", "remove", "mkdir"],
+      "patterns": [".*file.*", "f.*"]
+    },
+    "network": {
+      "includes": ["sys/socket.h", "netinet/in.h", "arpa/inet.h"],
+      "calls": ["socket", "connect", "bind", "listen", "accept", "send", "recv"],
+      "patterns": [".*sock.*", ".*net.*"]
+    },
+    "logging": {
+      "includes": ["stdio.h"],
+      "calls": ["printf", "fprintf", "perror"],
+      "patterns": [".*printf.*", ".*print.*"]
+    }
+  },
+  "cpp": {
+    "file_io": {
+      "includes": ["fstream", "iostream", "cstdio"],
+      "calls": ["open", "close", "read", "write", "remove", "fopen", "fclose"],
+      "patterns": [".*fstream.*", ".*file.*"]
+    },
+    "network": {
+      "includes": ["sys/socket.h", "netinet/in.h"],
+      "calls": ["socket", "connect", "bind", "listen", "send", "recv"],
+      "patterns": [".*sock.*", ".*net.*"]
+    },
+    "logging": {
+      "includes": ["iostream"],
+      "calls": ["cout", "cerr", "clog", "printf"],
+      "patterns": ["std::cout", "std::cerr", ".*printf.*"]
+    }
+  },
+  "ruby": {
+    "file_io": {
+      "requires": ["fileutils"],
+      "calls": ["open", "read", "write", "close", "delete", "mkdir", "rm", "cp"],
+      "patterns": [".*[Ff]ile.*", "File\\..*"]
+    },
+    "network": {
+      "requires": ["net/http", "socket"],
+      "calls": ["get", "post", "request", "connect", "send"],
+      "patterns": [".*[Hh]ttp.*", ".*[Nn]et.*"]
+    },
+    "logging": {
+      "requires": ["logger"],
+      "calls": ["puts", "print", "p", "log", "info", "warn", "error"],
+      "patterns": [".*log.*", "puts", "print"]
+    },
+    "database": {
+      "requires": ["active_record", "sequel"],
+      "calls": ["find", "where", "create", "update", "delete", "execute"],
+      "patterns": [".*[Qq]uery.*", ".*find.*"]
+    }
+  },
+  "php": {
+    "file_io": {
+      "calls": ["fopen", "fclose", "fread", "fwrite", "file_get_contents", "file_put_contents", "unlink", "mkdir"],
+      "patterns": [".*file.*", "f.*"]
+    },
+    "network": {
+      "calls": ["curl_exec", "file_get_contents", "fopen", "fsockopen"],
+      "patterns": [".*curl.*", ".*http.*", ".*socket.*"]
+    },
+    "logging": {
+      "calls": ["error_log", "syslog", "echo", "print", "var_dump"],
+      "patterns": [".*log.*", "echo", "print"]
+    },
+    "database": {
+      "calls": ["mysql_query", "mysqli_query", "pg_query", "execute", "query"],
+      "patterns": [".*query.*", ".*sql.*"]
+    }
+  },
+  "bash": {
+    "file_io": {
+      "commands": ["cat", "echo", "tee", "touch", "rm", "mkdir", "cp", "mv", "ln"],
+      "patterns": [".*file.*"]
+    },
+    "network": {
+      "commands": ["curl", "wget", "nc", "telnet", "ssh", "scp"],
+      "patterns": [".*curl.*", ".*wget.*", ".*ssh.*"]
+    },
+    "logging": {
+      "commands": ["echo", "printf", "logger"],
+      "patterns": ["echo", "printf"]
+    }
+  }
+}
