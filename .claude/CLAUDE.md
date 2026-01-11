@@ -1,0 +1,121 @@
+# LLM Context Tools - Project Instructions
+
+## 🚨 MANDATORY: Query-First Exploration
+
+**This codebase has llm-context analysis available.**
+
+### BEFORE using Grep/Bash/Read for code exploration:
+
+1. **Check if `.llm-context/` exists** (it does in this project)
+2. **Use queries FIRST**:
+   ```bash
+   llm-context query find-function <name>     # Find & describe function
+   llm-context query calls-to <name>          # Who calls this?
+   llm-context query trace <name>             # Full call tree
+   llm-context side-effects                   # Functions with I/O
+   llm-context entry-points                   # Entry points
+   ```
+3. **Only use grep/read** if queries insufficient
+
+### Why This Matters
+
+**Grep/Bash limitations:**
+- ❌ Shows only text matches
+- ❌ Misses call relationships
+- ❌ Doesn't show side effects
+- ❌ No architectural context
+
+**Query advantages:**
+- ✅ Shows semantic relationships
+- ✅ Includes call graphs
+- ✅ Detects side effects (file_io, network, database)
+- ✅ Identifies entry points
+- ✅ 80-95% fewer tokens
+
+### Examples
+
+**❌ Anti-pattern (what NOT to do):**
+```bash
+# DON'T: Use grep when queries exist
+grep -r "analyzeSingleFile" --include="*.js"
+```
+
+**✅ Correct pattern:**
+```bash
+# DO: Use queries first
+llm-context query find-function analyzeSingleFile
+# Shows: signature, calls, side effects, line number
+
+# Then if needed:
+llm-context query calls-to analyzeSingleFile
+# Shows: which functions call it
+
+# Only read source for implementation details:
+cat incremental-analyzer.js | sed -n '43,190p'
+```
+
+## Development Workflow
+
+### Understanding Codebase (First Time)
+```bash
+# 1. Read progressive disclosure
+cat .llm-context/summaries/L0-system.md  # System overview
+cat .llm-context/summaries/L1-domains.json  # Domain boundaries
+llm-context stats  # Statistics
+
+# 2. Explore specific areas
+llm-context entry-points  # Where does execution start?
+llm-context side-effects  # What does I/O?
+
+# 3. Deep dive with queries
+llm-context query trace <entry-point>  # Understand flow
+```
+
+### After Code Changes
+```bash
+# Incremental analysis (99% faster)
+llm-context analyze
+
+# Check what changed
+llm-context check-changes
+```
+
+### Debugging
+```bash
+# Find function and understand context
+llm-context query find-function <buggy-func>
+llm-context query calls-to <buggy-func>  # Who calls it?
+llm-context query trace <buggy-func>     # Full call path
+
+# Check for side effects
+llm-context side-effects | grep <buggy-func>
+```
+
+## Architecture Notes
+
+- **Type**: Code analysis tool for generating LLM-optimized context
+- **Core modules**: change-detector, incremental-analyzer, query, summary-updater
+- **Key feature**: 99%+ faster incremental updates via MD5 hash-based change detection
+- **Output format**: JSONL (one function per line) for efficient partial updates
+- **Parser**: Currently uses Babel (JavaScript/TypeScript only)
+
+## Common Tasks
+
+| Task | Command |
+|------|---------|
+| Analyze codebase | `llm-context analyze` |
+| Find function | `llm-context query find-function <name>` |
+| Find callers | `llm-context query calls-to <name>` |
+| Trace calls | `llm-context query trace <name>` |
+| Side effects | `llm-context side-effects` |
+| Statistics | `llm-context stats` |
+| Entry points | `llm-context entry-points` |
+
+## Success Indicators
+
+You're using this tool correctly when:
+1. ✅ You read L0 summary before exploring code
+2. ✅ You use queries instead of grep for function lookups
+3. ✅ You mention side effects when discussing functions
+4. ✅ You run incremental analysis after changes
+5. ✅ Your token usage is 50-95% lower than raw file reading

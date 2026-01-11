@@ -4,14 +4,41 @@
 **Purpose**: Generate compact, semantically-rich code representations for LLM consumption
 **Architecture**: JavaScript modules with incremental update support
 
+## ⚡ Quick Queries (USE THESE before grep/read)
+
+**To understand this codebase, try these queries FIRST:**
+
+```bash
+# Find any function
+llm-context query find-function <name>
+
+# Understand dependencies
+llm-context query calls-to <name>      # Who calls this?
+llm-context query trace <name>         # Full call tree
+
+# Discover patterns
+llm-context entry-points               # 0 entry points
+llm-context side-effects               # Functions with I/O
+
+# Statistics
+llm-context stats                      # Full statistics
+```
+
+**Why queries > grep:**
+- ✅ Show call relationships (grep can't)
+- ✅ Detect side effects (grep misses these)
+- ✅ Trace call trees (grep shows only text matches)
+- ✅ 80-95% fewer tokens needed
+
 ## Statistics
-- **Files**: 5 modules
-- **Functions**: 22 total
-- **Call relationships**: 161
-- **Side effects**: file_io, logging, database
+- **Files**: 20 modules
+- **Functions**: 119 total
+- **Call relationships**: 570
+- **Side effects**: network, database, logging, file_io, dom
 
 ## Key Components
-- **.**: scip-parser, change-detector, incremental-analyzer, query, summary-updater
+- **.**: ast-adapter, change-detector, claude-setup, dependency-analyzer, full-analysis, function-change-detector, function-source-extractor, incremental-analyzer, language-queries, manifest-generator, parser-factory, query, scip-parser, side-effects-analyzer, summary-updater, transformer, prime, setup-claude, analyze
+- **bin**: llm-context
 
 ## Entry Points
 - None detected

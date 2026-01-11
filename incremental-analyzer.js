@@ -12,11 +12,11 @@
 
 import { readFileSync, writeFileSync, existsSync, statSync } from 'fs';
 import { createHash } from 'crypto';
-import { parse } from '@babel/parser';
-import traverse from '@babel/traverse';
+import { ParserFactory } from './parser-factory.js';
+import { createAdapter } from './ast-adapter.js';
+import { createAnalyzer } from './side-effects-analyzer.js';
 import { detectChanges } from './change-detector.js';
 import { detectAllFunctionChanges, printFunctionChangeSummary } from './function-change-detector.js';
-import { extractFunctionMetadata } from './function-source-extractor.js';
 import { analyzeImpact } from './dependency-analyzer.js';
 
 console.log('=== Incremental Analyzer ===\n');
@@ -57,117 +57,98 @@ function getFileMetadata(filePath) {
  * Analyze specific functions in a file
  * @param {string} sourcePath - Path to file
  * @param {string[]} targetFunctions - Function names to analyze (null = all)
- * @returns {object} Analysis results
+ * @returns {Promise<object>} Analysis results
  */
-function analyzeSpecificFunctions(sourcePath, targetFunctions = null) {
+async function analyzeSpecificFunctions(sourcePath, targetFunctions = null) {
   const startTime = Date.now();
   const source = readFileSync(sourcePath, 'utf-8');
 
-  // Parse with Babel
-  const ast = parse(source, {
-    sourceType: 'module',
-    plugins: []
-  });
+  // Detect language and parse with Tree-sitter
+  const language = ParserFactory.detectLanguage(sourcePath);
+  if (!language) {
+    console.warn(`Unsupported file type: ${sourcePath}`);
+    return { entries: [], analysisTime: 0, totalFunctions: 0, analyzedFunctions: 0 };
+  }
 
-  const allFunctions = [];
-  const callGraph = new Map();
-  const sideEffects = new Map();
+  const { tree } = await ParserFactory.parseFile(sourcePath);
+  const adapter = createAdapter(tree, language, source, sourcePath);
 
-  // First pass: collect all functions
-  traverse.default(ast, {
-    FunctionDeclaration(path) {
-      const metadata = extractFunctionMetadata(path, source, sourcePath);
-      allFunctions.push({ metadata, path });
-    },
-
-    VariableDeclarator(path) {
-      if (path.node.init?.type === 'ArrowFunctionExpression' ||
-          path.node.init?.type === 'FunctionExpression') {
-        const metadata = extractFunctionMetadata(path, source, sourcePath);
-        allFunctions.push({ metadata, path });
-      }
-    }
-  });
+  // Extract all functions
+  const allFunctions = adapter.extractFunctionsWithNodes();
 
   // Filter to target functions if specified
   const functionsToAnalyze = targetFunctions
     ? allFunctions.filter(f => targetFunctions.includes(f.metadata.name))
     : allFunctions;
 
-  // Second pass: analyze function bodies
+  // Extract imports for side effect analysis
+  const imports = adapter.extractImports();
+  const sideEffectAnalyzer = createAnalyzer(language, imports);
+
+  // Analyze each function
   const results = [];
 
-  for (const { metadata, path } of functionsToAnalyze) {
-    const funcId = metadata.id;
-    callGraph.set(funcId, []);
-    sideEffects.set(funcId, []);
-
-    // Analyze calls and side effects
-    path.traverse({
-      CallExpression(callPath) {
-        const callee = callPath.node.callee;
-        let calledName = '';
-
-        if (callee.type === 'Identifier') {
-          calledName = callee.name;
-        } else if (callee.type === 'MemberExpression') {
-          const obj = callee.object.name || '';
-          const prop = callee.property.name || '';
-          calledName = obj ? `${obj}.${prop}` : prop;
-        }
-
-        if (calledName) {
-          const calls = callGraph.get(funcId) || [];
-          calls.push(calledName);
-          callGraph.set(funcId, calls);
-
-          // Detect side effects
-          const effects = sideEffects.get(funcId) || [];
-
-          if (/read|write|append|unlink|mkdir|rmdir|fs\./i.test(calledName)) {
-            effects.push({ type: 'file_io', at: calledName });
-          }
-          if (/fetch|request|axios|http|socket/i.test(calledName)) {
-            effects.push({ type: 'network', at: calledName });
-          }
-          if (/console\.|log\.|logger\.|debug|info|warn|error/i.test(calledName)) {
-            effects.push({ type: 'logging', at: calledName });
-          }
-          if (/query|execute|find|findOne|save|insert|update|delete|collection|db\./i.test(calledName)) {
-            effects.push({ type: 'database', at: calledName });
-          }
-          if (/querySelector|getElementById|createElement|appendChild|innerHTML|textContent/i.test(calledName)) {
-            effects.push({ type: 'dom', at: calledName });
-          }
-
-          sideEffects.set(funcId, effects);
-        }
-      }
-    });
-
-    // Build entry
-    const calls = callGraph.get(funcId) || [];
-    const effects = sideEffects.get(funcId) || [];
+  for (const { metadata } of functionsToAnalyze) {
+    // Extract call graph
+    const calls = adapter.extractCallGraph(metadata);
     const uniqueCalls = [...new Set(calls)].filter(c => c !== metadata.name);
-    const uniqueEffects = effects.reduce((acc, e) => {
-      const key = `${e.type}:${e.at}`;
-      if (!acc.has(key)) {
-        acc.set(key, e);
-      }
-      return acc;
-    }, new Map());
+
+    // Analyze side effects (AST-based, not regex!)
+    const effectsWithConfidence = sideEffectAnalyzer.analyze(uniqueCalls, metadata.source);
+    const uniqueEffects = [...new Set(effectsWithConfidence.map(e => e.type))];
+
+    // Detect code patterns
+    const patterns = [];
+
+    // Parsing patterns
+    if (uniqueCalls.some(c => c === 'parse' || c.includes('parse'))) {
+      patterns.push({
+        type: 'parsing',
+        tool: uniqueCalls.find(c => c.includes('tree-sitter') || c.includes('parser')) ? 'tree-sitter' : 'unknown',
+        description: 'Parses source code into AST'
+      });
+    }
+
+    // Hash/crypto patterns
+    if (uniqueCalls.some(c => /hash|md5|sha|digest|crypto/i.test(c))) {
+      patterns.push({
+        type: 'hashing',
+        method: uniqueCalls.find(c => /md5|sha/i.test(c)) || 'hash',
+        description: 'Computes file/content hash for change detection'
+      });
+    }
+
+    // Side effect detection patterns (now AST-based!)
+    if (effectsWithConfidence.length > 0) {
+      patterns.push({
+        type: 'side-effect-detection',
+        method: 'ast-analysis',
+        description: 'Detects side effects via AST analysis with import tracking'
+      });
+    }
+
+    // Graph manipulation
+    if (uniqueCalls.some(c => /map|filter|reduce|forEach/i.test(c)) &&
+        uniqueCalls.some(c => /graph|entries|functions/i.test(c))) {
+      patterns.push({
+        type: 'graph-transformation',
+        description: 'Transforms or filters call graph data'
+      });
+    }
 
     results.push({
       id: metadata.name,
       type: 'function',
       file: sourcePath,
       line: metadata.line,
-      sig: `(${metadata.isAsync ? 'async ' : ''})`,
+      sig: `(${metadata.isAsync ? 'async ' : ''}${metadata.params || ''})`,
       async: metadata.isAsync,
       calls: uniqueCalls.slice(0, 10),
-      effects: Array.from(uniqueEffects.values()).map(e => e.type),
+      effects: uniqueEffects,
+      patterns: patterns.length > 0 ? patterns : undefined,
       scipDoc: '',
-      functionHash: metadata.hash  // Include for reference
+      functionHash: metadata.hash,
+      language: language  // NEW: Include language
     });
   }
 
@@ -180,151 +161,59 @@ function analyzeSpecificFunctions(sourcePath, targetFunctions = null) {
 }
 
 /**
- * Analyze a single file using Babel AST parsing
+ * Analyze a single file using Tree-sitter AST parsing
  * @param {string} sourcePath - Path to file
- * @returns {Array} Array of function entries for graph
+ * @returns {Promise<object>} Analysis results {entries, analysisTime}
  */
-function analyzeSingleFile(sourcePath) {
+async function analyzeSingleFile(sourcePath) {
   const startTime = Date.now();
-  const functions = [];
 
   try {
     const source = readFileSync(sourcePath, 'utf-8');
 
-    // Parse with Babel
-    const ast = parse(source, {
-      sourceType: 'module',
-      plugins: []
-    });
+    // Detect language and parse with Tree-sitter
+    const language = ParserFactory.detectLanguage(sourcePath);
+    if (!language) {
+      console.warn(`Unsupported file type: ${sourcePath}`);
+      return { entries: [], analysisTime: Date.now() - startTime };
+    }
 
-    const callGraph = new Map();
-    const sideEffects = new Map();
+    const { tree } = await ParserFactory.parseFile(sourcePath);
+    const adapter = createAdapter(tree, language, source, sourcePath);
 
-    // First pass: collect all functions
-    traverse.default(ast, {
-      FunctionDeclaration(path) {
-        const funcName = path.node.id?.name || 'anonymous';
-        const funcId = `${sourcePath}#${funcName}`;
+    // Extract all functions
+    const allFunctions = adapter.extractFunctionsWithNodes();
 
-        functions.push({
-          id: funcId,
-          name: funcName,
-          type: 'function',
-          file: sourcePath,
-          line: path.node.loc?.start.line || 0,
-          params: path.node.params.map(p => p.name || '?').join(', '),
-          async: path.node.async,
-          path: path
-        });
-
-        callGraph.set(funcId, []);
-        sideEffects.set(funcId, []);
-      },
-
-      VariableDeclarator(path) {
-        if (path.node.init?.type === 'ArrowFunctionExpression' ||
-            path.node.init?.type === 'FunctionExpression') {
-          const funcName = path.node.id?.name || 'anonymous';
-          const funcId = `${sourcePath}#${funcName}`;
-
-          functions.push({
-            id: funcId,
-            name: funcName,
-            type: 'function',
-            file: sourcePath,
-            line: path.node.loc?.start.line || 0,
-            params: path.node.init.params.map(p => p.name || '?').join(', '),
-            async: path.node.init.async,
-            path: path
-          });
-
-          callGraph.set(funcId, []);
-          sideEffects.set(funcId, []);
-        }
-      }
-    });
-
-    // Second pass: analyze each function's body
-    functions.forEach(func => {
-      if (!func.path) return;
-
-      const funcId = func.id;
-
-      func.path.traverse({
-        CallExpression(path) {
-          const callee = path.node.callee;
-          let calledName = '';
-
-          if (callee.type === 'Identifier') {
-            calledName = callee.name;
-          } else if (callee.type === 'MemberExpression') {
-            const obj = callee.object.name || '';
-            const prop = callee.property.name || '';
-            calledName = obj ? `${obj}.${prop}` : prop;
-          }
-
-          if (calledName) {
-            const calls = callGraph.get(funcId) || [];
-            calls.push(calledName);
-            callGraph.set(funcId, calls);
-
-            // Detect side effects
-            const effects = sideEffects.get(funcId) || [];
-
-            if (/read|write|append|unlink|mkdir|rmdir|fs\./i.test(calledName)) {
-              effects.push({ type: 'file_io', at: calledName });
-            }
-            if (/fetch|request|axios|http|socket/i.test(calledName)) {
-              effects.push({ type: 'network', at: calledName });
-            }
-            if (/console\.|log\.|logger\.|debug|info|warn|error/i.test(calledName)) {
-              effects.push({ type: 'logging', at: calledName });
-            }
-            if (/query|execute|find|findOne|save|insert|update|delete|collection|db\./i.test(calledName)) {
-              effects.push({ type: 'database', at: calledName });
-            }
-            if (/querySelector|getElementById|createElement|appendChild|innerHTML|textContent/i.test(calledName)) {
-              effects.push({ type: 'dom', at: calledName });
-            }
-
-            sideEffects.set(funcId, effects);
-          }
-        }
-      });
-
-      // Clean up
-      delete func.path;
-    });
+    // Extract imports for side effect analysis
+    const imports = adapter.extractImports();
+    const sideEffectAnalyzer = createAnalyzer(language, imports);
 
     // Build output
-    const result = functions.map(func => {
-      const calls = callGraph.get(func.id) || [];
-      const effects = sideEffects.get(func.id) || [];
+    const result = allFunctions.map(({ metadata }) => {
+      // Extract call graph
+      const calls = adapter.extractCallGraph(metadata);
+      const uniqueCalls = [...new Set(calls)].filter(c => c !== metadata.name);
 
-      const uniqueCalls = [...new Set(calls)].filter(c => c !== func.name);
-      const uniqueEffects = effects.reduce((acc, e) => {
-        const key = `${e.type}:${e.at}`;
-        if (!acc.has(key)) {
-          acc.set(key, e);
-        }
-        return acc;
-      }, new Map());
+      // Analyze side effects (AST-based!)
+      const effectsWithConfidence = sideEffectAnalyzer.analyze(uniqueCalls, metadata.source);
+      const uniqueEffects = [...new Set(effectsWithConfidence.map(e => e.type))];
 
       return {
-        id: func.name,
-        type: func.type,
-        file: func.file,
-        line: func.line,
-        sig: `(${func.params})`,
-        async: func.async || false,
+        id: metadata.name,
+        type: 'function',
+        file: sourcePath,
+        line: metadata.line,
+        sig: `(${metadata.isAsync ? 'async ' : ''}${metadata.params || ''})`,
+        async: metadata.isAsync || false,
         calls: uniqueCalls.slice(0, 10),
-        effects: Array.from(uniqueEffects.values()).map(e => e.type),
-        scipDoc: ''
+        effects: uniqueEffects,
+        scipDoc: '',
+        language: language  // NEW: Include language
       };
     });
 
     const analysisTime = Date.now() - startTime;
-    console.log(`      Analysis complete: ${functions.length} functions, ${analysisTime}ms`);
+    console.log(`      Analysis complete: ${allFunctions.length} functions, ${analysisTime}ms`);
 
     return { entries: result, analysisTime };
 
@@ -538,7 +427,7 @@ async function mainFunctionLevel() {
     console.log(`    ${filePath}: analyzing ${targetFunctions.length} functions`);
 
     try {
-      const result = analyzeSpecificFunctions(filePath, targetFunctions);
+      const result = await analyzeSpecificFunctions(filePath, targetFunctions);
       analysisResults.set(filePath, result);
       allNewEntries.push(...result.entries);
 
@@ -618,7 +507,7 @@ async function mainFileLevel() {
 
   for (const filePath of changedFiles) {
     console.log(`    Analyzing: ${filePath}`);
-    const result = analyzeSingleFile(filePath);
+    const result = await analyzeSingleFile(filePath);
     analysisResults.set(filePath, result);
     allNewEntries.push(...result.entries);
   }

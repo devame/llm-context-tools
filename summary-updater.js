@@ -72,6 +72,32 @@ function generateL0(functions) {
 **Purpose**: Generate compact, semantically-rich code representations for LLM consumption
 **Architecture**: JavaScript modules with incremental update support
 
+## ⚡ Quick Queries (USE THESE before grep/read)
+
+**To understand this codebase, try these queries FIRST:**
+
+\`\`\`bash
+# Find any function
+llm-context query find-function <name>
+
+# Understand dependencies
+llm-context query calls-to <name>      # Who calls this?
+llm-context query trace <name>         # Full call tree
+
+# Discover patterns
+llm-context entry-points               # ${entryPoints.length} entry points
+llm-context side-effects               # Functions with I/O
+
+# Statistics
+llm-context stats                      # Full statistics
+\`\`\`
+
+**Why queries > grep:**
+- ✅ Show call relationships (grep can't)
+- ✅ Detect side effects (grep misses these)
+- ✅ Trace call trees (grep shows only text matches)
+- ✅ 80-95% fewer tokens needed
+
 ## Statistics
 - **Files**: ${Object.keys(byFile).length} modules
 - **Functions**: ${totalFuncs} total

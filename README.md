@@ -45,6 +45,10 @@ llm-context side-effects
 # Share .llm-context/ directory with AI assistants
 ```
 
+**🎉 NEW: Automatic Claude Code Integration**
+
+When you run `llm-context analyze` or `llm-context init`, the tool automatically generates `.claude/CLAUDE.md` with query-first instructions. This ensures Claude Code (and other LLM assistants) use queries instead of grep/bash when exploring your code.
+
 ## Why Use This?
 
 ### Traditional Approach: Read Raw Files
@@ -216,9 +220,16 @@ llm-context help                 # Show help
 ├── graph.jsonl           # Function call graph (JSONL format)
 ├── manifest.json         # Change tracking (MD5 hashes)
 └── summaries/
-    ├── L0-system.md      # System overview (~200 tokens)
+    ├── L0-system.md      # System overview (~200 tokens) + query reminders
     ├── L1-domains.json   # Domain summaries
     └── L2-modules.json   # Module summaries
+
+.claude/
+├── CLAUDE.md             # Auto-generated Claude Code instructions
+└── skills/               # Ships with npm package
+    └── analyzing-codebases/
+        ├── SKILL.md      # Main skill file
+        └── ...           # Reference docs
 ```
 
 ### Graph Format
@@ -237,17 +248,33 @@ Each line in `graph.jsonl`:
 }
 ```
 
-## Claude Code Skill
+## Claude Code Integration
 
-This package includes a Claude Code skill that teaches Claude how to use the tool effectively.
+This package includes **automatic Claude Code integration** that ensures Claude uses queries instead of grep/bash.
 
-**Location:** `.claude/skills/analyzing-codebases/`
+**What gets generated:**
+1. **`.claude/CLAUDE.md`** (auto-generated during `analyze`/`init`)
+   - Project-level instructions reminding Claude to use queries
+   - Examples of query-first workflow
+   - Explains why queries > grep
+
+2. **`.claude/skills/analyzing-codebases/`** (ships with npm package)
+   - Teaches Claude the progressive disclosure strategy
+   - Defines required workflow (L0 → L1 → L2 → Graph → Source)
+   - Lists all available query commands
 
 **How it works:**
-1. Claude automatically detects the skill when analyzing codebases
-2. Knows to read L0 → L1 → L2 → Graph → Source (in order)
-3. Uses queries instead of grepping files
-4. Achieves 80-95% token savings
+1. Run `llm-context analyze` → automatically generates `.claude/CLAUDE.md`
+2. Claude reads `.claude/CLAUDE.md` → sees query instructions
+3. Claude reads `.llm-context/summaries/L0-system.md` → sees query reminders
+4. Claude uses queries first, grep only when needed
+5. Result: 80-95% token savings + better context
+
+**Manual setup (if needed):**
+```bash
+llm-context setup-claude         # Generate .claude/CLAUDE.md
+llm-context setup-claude --force # Overwrite existing
+```
 
 ## Usage Examples
 

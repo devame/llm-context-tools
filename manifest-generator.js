@@ -13,9 +13,8 @@
 import { readFileSync, writeFileSync, existsSync, statSync, readdirSync } from 'fs';
 import { createHash } from 'crypto';
 import { join, relative } from 'path';
-import { parse } from '@babel/parser';
-import traverse from '@babel/traverse';
-import { extractFunctionMetadata } from './function-source-extractor.js';
+import { ParserFactory } from './parser-factory.js';
+import { createAdapter } from './ast-adapter.js';
 
 console.log('=== Manifest Generator ===\n');
 
@@ -66,59 +65,43 @@ function getFileMetadata(filePath) {
  * @param {boolean} includeSource - Whether to include function source
  * @returns {object} Map of function name to metadata
  */
-export function extractFileFunctions(filePath, includeSource = false) {
+export async function extractFileFunctions(filePath, includeSource = false) {
   const functionMap = {};
 
   try {
     const source = readFileSync(filePath, 'utf-8');
 
-    // Parse with Babel
-    const ast = parse(source, {
-      sourceType: 'module',
-      plugins: []
-    });
+    // Detect language and parse with Tree-sitter
+    const language = ParserFactory.detectLanguage(filePath);
+    if (!language) {
+      console.log(`    Warning: Unsupported file type: ${filePath}`);
+      return functionMap;
+    }
 
-    // Collect all functions
-    traverse.default(ast, {
-      FunctionDeclaration(path) {
-        const metadata = extractFunctionMetadata(path, source, filePath);
-        const funcEntry = {
-          hash: metadata.hash,
-          line: metadata.line,
-          endLine: metadata.endLine,
-          size: metadata.size,
-          async: metadata.isAsync
-        };
+    const { tree } = await ParserFactory.parseFile(filePath);
+    const adapter = createAdapter(tree, language, source, filePath);
 
-        // Optionally include source for rename detection and diffs
-        if (includeSource) {
-          funcEntry.source = metadata.source;
-        }
+    // Extract all functions
+    const functions = adapter.extractFunctions();
 
-        functionMap[metadata.name] = funcEntry;
-      },
+    // Build map
+    for (const metadata of functions) {
+      const funcEntry = {
+        hash: metadata.hash,
+        line: metadata.line,
+        endLine: metadata.endLine,
+        size: metadata.size,
+        async: metadata.isAsync,
+        language: language  // NEW: Include language
+      };
 
-      VariableDeclarator(path) {
-        if (path.node.init?.type === 'ArrowFunctionExpression' ||
-            path.node.init?.type === 'FunctionExpression') {
-          const metadata = extractFunctionMetadata(path, source, filePath);
-          const funcEntry = {
-            hash: metadata.hash,
-            line: metadata.line,
-            endLine: metadata.endLine,
-            size: metadata.size,
-            async: metadata.isAsync
-          };
-
-          // Optionally include source for rename detection and diffs
-          if (includeSource) {
-            funcEntry.source = metadata.source;
-          }
-
-          functionMap[metadata.name] = funcEntry;
-        }
+      // Optionally include source for rename detection and diffs
+      if (includeSource) {
+        funcEntry.source = metadata.source;
       }
-    });
+
+      functionMap[metadata.name] = funcEntry;
+    }
 
   } catch (error) {
     console.log(`    Warning: Could not parse ${filePath}: ${error.message}`);
@@ -191,9 +174,9 @@ function loadGraphData() {
 
 /**
  * Generate manifest from current codebase state
- * @returns {object} Manifest data
+ * @returns {Promise<object>} Manifest data
  */
-function generateManifest() {
+async function generateManifest() {
   const config = loadConfig();
   const granularity = config.granularity || 'file';
 
@@ -224,7 +207,7 @@ function generateManifest() {
       // Add function-level hashes if granularity is 'function'
       if (granularity === 'function') {
         const storeSource = config.incremental?.storeSource || false;
-        const functionMetadata = extractFileFunctions(filePath, storeSource);
+        const functionMetadata = await extractFileFunctions(filePath, storeSource);
         fileEntry.functionHashes = functionMetadata;
 
         console.log(`    ${filePath}`);
@@ -304,8 +287,8 @@ function saveManifest(manifest) {
 /**
  * Main execution
  */
-function main() {
-  const manifest = generateManifest();
+async function main() {
+  const manifest = await generateManifest();
   saveManifest(manifest);
 }
 

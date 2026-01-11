@@ -7,6 +7,21 @@ description: Generates LLM-optimized code context with function call graphs, sid
 
 Generate compact, semantically-rich code context for LLM consumption with 99%+ faster incremental updates.
 
+## ⚠️ CRITICAL BEHAVIOR CHANGE REQUIRED
+
+**BEFORE using Grep, Bash, or Read for code exploration:**
+
+1. **ALWAYS check** if `.llm-context/` directory exists
+2. **IF IT EXISTS**, use queries FIRST:
+   ```bash
+   llm-context query find-function <name>
+   llm-context query calls-to <name>
+   llm-context side-effects
+   ```
+3. **ONLY use grep/read** if queries don't provide needed info
+
+**This is NOT optional** - queries provide richer context (call graphs, side effects, patterns) that grep cannot match.
+
 ## What This Skill Does
 
 Transforms raw source code into LLM-optimized context:
@@ -171,20 +186,51 @@ Each function in `graph.jsonl`:
 
 ## Best Practices
 
-### ✅ DO
+### ✅ REQUIRED WORKFLOW
 
-- Read L0 → L1 → L2 → Graph → Source (in order)
-- Use queries before reading files
-- Run incremental analysis after edits
-- Mention detected side effects when debugging
-- Check manifest age before using cached data
+**When .llm-context/ exists, you MUST:**
 
-### ❌ DON'T
+1. **Check for analysis data FIRST**:
+   ```bash
+   ls .llm-context/  # Verify data exists
+   ```
 
-- Read raw source files first
-- Grep through files manually
-- Re-read entire codebase on changes
-- Skip summaries and go straight to source
+2. **Read progressive disclosure hierarchy**:
+   - L0 summary: `.llm-context/summaries/L0-system.md`
+   - L1 domains: `.llm-context/summaries/L1-domains.json`
+   - L2 modules: `.llm-context/summaries/L2-modules.json`
+
+3. **Use queries for exploration** (NOT grep/bash):
+   ```bash
+   # Finding functions
+   llm-context query find-function <name>
+
+   # Understanding dependencies
+   llm-context query calls-to <name>
+   llm-context query trace <name>
+
+   # Side effect analysis
+   llm-context side-effects | grep <keyword>
+   ```
+
+4. **Only read source** after queries don't provide needed info
+
+5. **Run incremental analysis** after code changes:
+   ```bash
+   llm-context analyze  # 99% faster than full re-analysis
+   ```
+
+### ❌ ANTI-PATTERNS (DO NOT DO THESE)
+
+**These waste tokens and miss critical context:**
+
+- ❌ Using `grep -r "pattern"` when `.llm-context/` exists → Use queries instead
+- ❌ Using `Bash` to explore code → Use queries instead
+- ❌ Reading raw source files first → Read summaries first
+- ❌ Re-reading entire codebase on changes → Use incremental analysis
+- ❌ Skipping L0/L1/L2 summaries → Miss architectural overview
+
+**Remember**: Grep shows text matches. Queries show semantic relationships, call graphs, and side effects.
 
 ## Token Efficiency
 

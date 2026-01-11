@@ -1,69 +1,72 @@
 [
   {
-    "domain": "root",
+    "domain": ".",
     "modules": [
+      "ast-adapter",
+      "change-detector",
+      "claude-setup",
+      "dependency-analyzer",
+      "full-analysis",
+      "function-change-detector",
+      "function-source-extractor",
+      "incremental-analyzer",
+      "language-queries",
+      "manifest-generator",
+      "parser-factory",
       "query",
-      "scip-parser"
+      "scip-parser",
+      "side-effects-analyzer",
+      "summary-updater",
+      "transformer",
+      "prime",
+      "setup-claude",
+      "analyze"
     ],
-    "functionCount": 3,
+    "functionCount": 118,
     "effects": [
+      "network",
       "database",
+      "logging",
+      "file_io",
+      "dom"
+    ],
+    "keyFunctions": [
+      {
+        "file": "ast-adapter.js",
+        "line": 22
+      },
+      {
+        "file": "ast-adapter.js",
+        "line": 35
+      },
+      {
+        "file": "ast-adapter.js",
+        "line": 133
+      },
+      {
+        "file": "ast-adapter.js",
+        "line": 168
+      },
+      {
+        "file": "ast-adapter.js",
+        "line": 237
+      }
+    ]
+  },
+  {
+    "domain": "bin",
+    "modules": [
+      "llm-context"
+    ],
+    "functionCount": 1,
+    "effects": [
       "file_io",
       "logging"
     ],
     "keyFunctions": [
       {
-        "name": "unknown",
-        "file": "query.js",
-        "line": 49
-      },
-      {
-        "name": "unknown",
-        "file": "query.js",
-        "line": 93
-      },
-      {
-        "name": "unknown",
-        "file": "scip-parser.js",
-        "line": 12
-      }
-    ]
-  },
-  {
-    "domain": ".",
-    "modules": [
-      "scip-parser",
-      "change-detector",
-      "incremental-analyzer",
-      "query",
-      "summary-updater"
-    ],
-    "functionCount": 22,
-    "effects": [
-      "file_io",
-      "logging",
-      "database"
-    ],
-    "keyFunctions": [
-      {
-        "file": "scip-parser.js",
-        "line": 12
-      },
-      {
-        "file": "change-detector.js",
-        "line": 22
-      },
-      {
-        "file": "change-detector.js",
-        "line": 33
-      },
-      {
-        "file": "change-detector.js",
-        "line": 36
-      },
-      {
-        "file": "change-detector.js",
-        "line": 63
+        "file": "bin/llm-context.js",
+        "line": 23
       }
     ]
   }
