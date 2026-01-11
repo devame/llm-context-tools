@@ -7,9 +7,8 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { parse } from '@babel/parser';
-import traverse from '@babel/traverse';
-import { extractFunctionMetadata } from './function-source-extractor.js';
+import { ParserFactory } from './parser-factory.js';
+import { createAdapter } from './ast-adapter.js';
 
 /**
  * Load configuration file
@@ -28,35 +27,31 @@ function loadConfig() {
 /**
  * Extract current function metadata from a file
  * @param {string} filePath - Path to file
- * @returns {Map} Map of function name to metadata
+ * @returns {Promise<Map>} Map of function name to metadata
  */
-export function extractCurrentFunctions(filePath) {
+export async function extractCurrentFunctions(filePath) {
   const functionMap = new Map();
 
   try {
     const source = readFileSync(filePath, 'utf-8');
 
-    // Parse with Babel
-    const ast = parse(source, {
-      sourceType: 'module',
-      plugins: []
-    });
+    // Detect language and parse with Tree-sitter
+    const language = ParserFactory.detectLanguage(filePath);
+    if (!language) {
+      console.log(`    Warning: Unsupported file type: ${filePath}`);
+      return functionMap;
+    }
 
-    // Collect all functions
-    traverse.default(ast, {
-      FunctionDeclaration(path) {
-        const metadata = extractFunctionMetadata(path, source, filePath);
-        functionMap.set(metadata.name, metadata);
-      },
+    const { tree } = await ParserFactory.parseFile(filePath);
+    const adapter = createAdapter(tree, language, source, filePath);
 
-      VariableDeclarator(path) {
-        if (path.node.init?.type === 'ArrowFunctionExpression' ||
-            path.node.init?.type === 'FunctionExpression') {
-          const metadata = extractFunctionMetadata(path, source, filePath);
-          functionMap.set(metadata.name, metadata);
-        }
-      }
-    });
+    // Extract all functions
+    const functions = adapter.extractFunctions();
+
+    // Build map
+    for (const metadata of functions) {
+      functionMap.set(metadata.name, metadata);
+    }
 
   } catch (error) {
     console.log(`    Warning: Could not parse ${filePath}: ${error.message}`);
@@ -82,7 +77,7 @@ export async function detectFunctionChanges(filePath, manifest) {
   };
 
   // Get current functions
-  const currentFunctions = extractCurrentFunctions(filePath);
+  const currentFunctions = await extractCurrentFunctions(filePath);
 
   // Get manifest functions
   const fileEntry = manifest.files[filePath];
