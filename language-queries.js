@@ -23,28 +23,24 @@ export const LANGUAGE_QUERIES = {
         parameters: (formal_parameters) @params
         body: (statement_block) @body) @function
 
-      (variable_declarator
-        name: (identifier) @name
-        value: (arrow_function
-          parameters: (_) @params
-          body: (_) @body)) @function
+      (lexical_declaration
+        (variable_declarator
+          name: (identifier) @name
+          value: (arrow_function
+            parameters: (_) @params
+            body: (_) @body))) @function
 
-      (variable_declarator
-        name: (identifier) @name
-        value: (function_expression
-          parameters: (formal_parameters) @params
-          body: (statement_block) @body)) @function
+      (variable_declaration
+        (variable_declarator
+          name: (identifier) @name
+          value: (arrow_function
+            parameters: (_) @params
+            body: (_) @body))) @function
 
       (method_definition
         name: (_) @name
         parameters: (formal_parameters) @params
         body: (statement_block) @body) @function
-
-      (export_statement
-        declaration: (function_declaration
-          name: (identifier) @name
-          parameters: (formal_parameters) @params
-          body: (statement_block) @body)) @function
     `,
 
     // Function calls

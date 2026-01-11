@@ -25,6 +25,7 @@ export class ASTAdapter {
     this.sourceCode = sourceCode;
     this.filePath = filePath;
     this.rootNode = tree.rootNode;
+    this.languageObj = tree.getLanguage();  // Tree-sitter Language object for queries
   }
 
   /**
@@ -39,8 +40,7 @@ export class ASTAdapter {
     }
 
     try {
-      const Query = this.rootNode.language.query;
-      const query = new Query(functionQuery);
+      const query = this.languageObj.query(functionQuery);
       const matches = query.matches(this.rootNode);
 
       const functions = [];
@@ -141,8 +141,7 @@ export class ASTAdapter {
     }
 
     try {
-      const Query = this.rootNode.language.query;
-      const query = new Query(callQuery);
+      const query = this.languageObj.query(callQuery);
       const matches = query.matches(functionMetadata.bodyNode);
 
       const calls = new Set();
@@ -173,8 +172,7 @@ export class ASTAdapter {
     }
 
     try {
-      const Query = this.rootNode.language.query;
-      const query = new Query(importQuery);
+      const query = this.languageObj.query(importQuery);
       const matches = query.matches(this.rootNode);
 
       const imports = new Set();

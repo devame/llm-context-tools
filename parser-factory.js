@@ -111,11 +111,22 @@ export class ParserFactory {
 
     try {
       // Load language grammar (WASM)
+      // Construct WASM filename from grammar path
+      let wasmFile;
+      if (language === 'tsx' || language === 'typescript') {
+        // TypeScript has separate tsx and typescript grammars
+        wasmFile = `tree-sitter-${language}.wasm`;
+      } else {
+        // For most languages: tree-sitter-javascript/tree-sitter-javascript.wasm
+        const packageName = grammarPath.split('/').pop();
+        wasmFile = `${packageName}.wasm`;
+      }
+
       const wasmPath = join(
         __dirname,
         'node_modules',
         grammarPath,
-        'tree-sitter-' + (language === 'tsx' ? 'tsx' : language === 'typescript' ? 'typescript' : grammarPath.split('/').pop()) + '.wasm'
+        wasmFile
       );
 
       const languageGrammar = await Parser.Language.load(wasmPath);
