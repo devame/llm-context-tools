@@ -1,11 +1,30 @@
 {
+  "parser": "tree-sitter",
   "granularity": "function",
+  "languages": {
+    "enabled": ["javascript", "typescript", "python", "go", "rust", "java", "c", "cpp", "ruby", "php", "bash"],
+    "autoDetect": true,
+    "fallback": "skip"
+  },
   "patterns": {
-    "include": ["**/*.js"],
+    "include": [
+      "**/*.js", "**/*.mjs", "**/*.cjs", "**/*.jsx",
+      "**/*.ts", "**/*.tsx",
+      "**/*.py",
+      "**/*.go",
+      "**/*.rs",
+      "**/*.java",
+      "**/*.c", "**/*.h",
+      "**/*.cpp", "**/*.hpp",
+      "**/*.rb",
+      "**/*.php",
+      "**/*.sh", "**/*.bash"
+    ],
     "exclude": ["node_modules", ".git", ".llm-context", "test/**", "tests/**"]
   },
   "analysis": {
     "detectSideEffects": true,
+    "useASTAnalysis": true,
     "trackCallGraph": true,
     "trackDependencies": true,
     "maxCallDepth": 10
