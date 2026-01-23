@@ -34,7 +34,10 @@ const GRAMMAR_PATHS = {
   ruby: 'tree-sitter-ruby',
   php: 'tree-sitter-php',
   bash: 'tree-sitter-bash',
-  json: 'tree-sitter-json'
+  json: 'tree-sitter-json',
+  clojure: 'tree-sitter-clojure',
+  clojurescript: 'tree-sitter-clojure',
+  janet: 'tree-sitter-janet'
 };
 
 // File extension to language mapping
@@ -61,7 +64,12 @@ const EXTENSION_MAP = {
   '.sh': 'bash',
   '.bash': 'bash',
   '.zsh': 'bash',
-  '.json': 'json'
+  '.json': 'json',
+  '.clj': 'clojure',
+  '.cljc': 'clojure',
+  '.cljs': 'clojurescript',
+  '.janet': 'janet',
+  '.jdn': 'janet'
 };
 
 // Tree-sitter initialization (call once)
@@ -116,6 +124,9 @@ export class ParserFactory {
       if (language === 'tsx' || language === 'typescript') {
         // TypeScript has separate tsx and typescript grammars
         wasmFile = `tree-sitter-${language}.wasm`;
+      } else if (language === 'janet') {
+        // Janet uses tree-sitter-janet_simple.wasm
+        wasmFile = 'tree-sitter-janet_simple.wasm';
       } else {
         // For most languages: tree-sitter-javascript/tree-sitter-javascript.wasm
         const packageName = grammarPath.split('/').pop();

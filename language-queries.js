@@ -348,6 +348,111 @@ export const LANGUAGE_QUERIES = {
     functions: ``,
     calls: ``,
     imports: ``
+  },
+
+  clojure: {
+    functions: `
+      (list_lit
+        (sym_lit) @func_type
+        (sym_lit) @name
+        (_)* @params
+        (_)* @body
+        (#match? @func_type "^(defn|defn-)$")) @function
+
+      (list_lit
+        (sym_lit) @func_type
+        (_)* @params
+        (_)* @body
+        (#match? @func_type "^(fn|fn*)$")) @function
+
+      (list_lit
+        (sym_lit) @func_type
+        (sym_lit) @name
+        (_)* @body
+        (#eq? @func_type "defmulti")) @function
+    `,
+
+    calls: `
+      (list_lit
+        (sym_lit) @call)
+    `,
+
+    imports: `
+      (list_lit
+        (sym_lit) @import_type
+        (_)* @source
+        (#match? @import_type "^(require|use|import)$"))
+    `
+  },
+
+  clojurescript: {
+    functions: `
+      (list_lit
+        (sym_lit) @func_type
+        (sym_lit) @name
+        (_)* @params
+        (_)* @body
+        (#match? @func_type "^(defn|defn-)$")) @function
+
+      (list_lit
+        (sym_lit) @func_type
+        (_)* @params
+        (_)* @body
+        (#match? @func_type "^(fn|fn*)$")) @function
+
+      (list_lit
+        (sym_lit) @func_type
+        (sym_lit) @name
+        (_)* @body
+        (#eq? @func_type "defmulti")) @function
+    `,
+
+    calls: `
+      (list_lit
+        (sym_lit) @call)
+    `,
+
+    imports: `
+      (list_lit
+        (sym_lit) @import_type
+        (_)* @source
+        (#match? @import_type "^(require|use|import)$"))
+    `
+  },
+
+  janet: {
+    functions: `
+      (list
+        (symbol) @func_type
+        (symbol) @name
+        (_)* @params
+        (_)* @body
+        (#match? @func_type "^(defn|defn/?)$")) @function
+
+      (list
+        (symbol) @func_type
+        (_)* @params
+        (_)* @body
+        (#match? @func_type "^(fn|fn/)$")) @function
+
+      (list
+        (symbol) @func_type
+        (symbol) @name
+        (_)* @body
+        (#eq? @func_type "defmacro")) @function
+    `,
+
+    calls: `
+      (list
+        (symbol) @call)
+    `,
+
+    imports: `
+      (list
+        (symbol) @import_type
+        (_)* @source
+        (#match? @import_type "^(import|use)$"))
+    `
   }
 };
 
