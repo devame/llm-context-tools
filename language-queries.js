@@ -422,38 +422,39 @@ export const LANGUAGE_QUERIES = {
 
   janet: {
     functions: `
-      (list
-        (symbol) @func_type
-        (symbol) @name
+      (list_lit
+        (sym_lit) @func_type
+        (sym_lit) @name
         (_)* @params
         (_)* @body
         (#match? @func_type "^(defn|defn/?)$")) @function
 
-      (list
-        (symbol) @func_type
+      (list_lit
+        (sym_lit) @func_type
         (_)* @params
         (_)* @body
         (#match? @func_type "^(fn|fn/)$")) @function
 
-      (list
-        (symbol) @func_type
-        (symbol) @name
+      (list_lit
+        (sym_lit) @func_type
+        (sym_lit) @name
         (_)* @body
         (#eq? @func_type "defmacro")) @function
     `,
 
     calls: `
-      (list
-        (symbol) @call)
+      (list_lit
+        (sym_lit) @call)
     `,
 
     imports: `
-      (list
-        (symbol) @import_type
+      (list_lit
+        (sym_lit) @import_type
         (_)* @source
         (#match? @import_type "^(import|use)$"))
     `
   }
+
 };
 
 /**

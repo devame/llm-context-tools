@@ -1,3 +1,5 @@
 node_modules/
 .llm-context/index.scip
 .llm-context/scip-parsed.json
+*.wasm
+
