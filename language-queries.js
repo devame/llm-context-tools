@@ -422,20 +422,20 @@ export const LANGUAGE_QUERIES = {
 
   janet: {
     functions: `
-      (list_lit
+      (par_tup_lit
         (sym_lit) @func_type
         (sym_lit) @name
         (_)* @params
         (_)* @body
         (#match? @func_type "^(defn|defn/?)$")) @function
 
-      (list_lit
+      (par_tup_lit
         (sym_lit) @func_type
         (_)* @params
         (_)* @body
         (#match? @func_type "^(fn|fn/)$")) @function
 
-      (list_lit
+      (par_tup_lit
         (sym_lit) @func_type
         (sym_lit) @name
         (_)* @body
@@ -443,12 +443,12 @@ export const LANGUAGE_QUERIES = {
     `,
 
     calls: `
-      (list_lit
+      (par_tup_lit
         (sym_lit) @call)
     `,
 
     imports: `
-      (list_lit
+      (par_tup_lit
         (sym_lit) @import_type
         (_)* @source
         (#match? @import_type "^(import|use)$"))
