@@ -12,9 +12,10 @@
 
 import { readFileSync, writeFileSync, existsSync, statSync, readdirSync } from 'fs';
 import { createHash } from 'crypto';
-import { join, relative } from 'path';
+import { join, relative, extname } from 'path';
 import { ParserFactory } from './parser-factory.js';
 import { createAdapter } from './ast-adapter.js';
+import { parseGitignore } from './gitignore-parser.js';
 
 console.log('=== Manifest Generator ===\n');
 
@@ -111,13 +112,18 @@ export async function extractFileFunctions(filePath, includeSource = false) {
 }
 
 /**
- * Recursively find all JS files
- * @param {string} dir - Directory to search
- * @param {string[]} ignore - Patterns to ignore
- * @returns {string[]} List of JS files
+ * Supported file extensions for analysis
  */
-function findJsFiles(dir = '.', ignore = ['node_modules', '.git', '.llm-context']) {
+const SUPPORTED_EXTENSIONS = ['.js', '.jsx', '.ts', '.tsx', '.py', '.go', '.rs', '.java', '.c', '.h', '.cpp', '.cc', '.cxx', '.hpp', '.rb', '.php', '.sh', '.bash', '.json'];
+
+/**
+ * Recursively find all supported source files (respects .gitignore)
+ * @param {string} dir - Directory to search
+ * @returns {string[]} List of source files
+ */
+function findJsFiles(dir = '.') {
   const files = [];
+  const isIgnored = parseGitignore();
 
   function walk(currentDir) {
     const entries = readdirSync(currentDir, { withFileTypes: true });
@@ -125,16 +131,20 @@ function findJsFiles(dir = '.', ignore = ['node_modules', '.git', '.llm-context'
     for (const entry of entries) {
       const fullPath = join(currentDir, entry.name);
       const relativePath = relative('.', fullPath);
+      const isDirectory = entry.isDirectory();
 
-      // Skip ignored directories
-      if (ignore.some(pattern => relativePath.includes(pattern))) {
+      // Skip if ignored by .gitignore or default patterns
+      if (isIgnored(relativePath, isDirectory)) {
         continue;
       }
 
-      if (entry.isDirectory()) {
+      if (isDirectory) {
         walk(fullPath);
-      } else if (entry.isFile() && entry.name.endsWith('.js')) {
-        files.push(relativePath);
+      } else if (entry.isFile()) {
+        const ext = extname(entry.name).toLowerCase();
+        if (SUPPORTED_EXTENSIONS.includes(ext)) {
+          files.push(relativePath);
+        }
       }
     }
   }
@@ -181,9 +191,9 @@ async function generateManifest() {
   const granularity = config.granularity || 'file';
 
   console.log(`[1] Configuration: granularity=${granularity}`);
-  console.log('[2] Discovering JavaScript files...');
+  console.log('[2] Discovering source files...');
   const jsFiles = findJsFiles();
-  console.log(`    Found ${jsFiles.length} JavaScript files\n`);
+  console.log(`    Found ${jsFiles.length} source files\n`);
 
   console.log('[3] Computing file hashes...');
   const fileToFunctions = loadGraphData();

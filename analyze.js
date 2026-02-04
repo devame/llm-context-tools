@@ -14,13 +14,15 @@
  * 4. Update summaries
  */
 
-import { existsSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { detectChanges } from './change-detector.js';
 import { updateSummaries } from './summary-updater.js';
 import { setupClaudeIntegration } from './claude-setup.js';
+import { detectLanguages, printLanguageReport, shouldAnalyze } from './language-detector.js';
+import { promptYesNo } from './prompt-helper.js';
 
 // Get package directory
 const __filename = fileURLToPath(import.meta.url);
@@ -33,24 +35,221 @@ const stdio = isQuiet ? 'ignore' : 'inherit';
 // Logging helper
 function log(...args) {
   if (!isQuiet) {
-    log(...args);
+    console.log(...args);
   }
+}
+
+// Map file extensions to tree-sitter parser package names and grammar info
+function getTreeSitterParserInfo(extension) {
+  const parserMap = {
+    '.clj': { package: 'tree-sitter-clojure', language: 'clojure', extensions: ['.clj', '.cljs', '.cljc'] },
+    '.cljs': { package: 'tree-sitter-clojure', language: 'clojure', extensions: ['.clj', '.cljs', '.cljc'] },
+    '.cljc': { package: 'tree-sitter-clojure', language: 'clojure', extensions: ['.clj', '.cljs', '.cljc'] },
+    '.janet': null, // No tree-sitter parser available yet
+    '.elm': { package: 'tree-sitter-elm', language: 'elm', extensions: ['.elm'] },
+    '.ex': { package: 'tree-sitter-elixir', language: 'elixir', extensions: ['.ex', '.exs'] },
+    '.exs': { package: 'tree-sitter-elixir', language: 'elixir', extensions: ['.ex', '.exs'] },
+    '.erl': { package: 'tree-sitter-erlang', language: 'erlang', extensions: ['.erl', '.hrl'] },
+    '.hrl': { package: 'tree-sitter-erlang', language: 'erlang', extensions: ['.erl', '.hrl'] },
+    '.hs': { package: 'tree-sitter-haskell', language: 'haskell', extensions: ['.hs'] },
+    '.scala': { package: 'tree-sitter-scala', language: 'scala', extensions: ['.scala'] },
+    '.kt': { package: 'tree-sitter-kotlin', language: 'kotlin', extensions: ['.kt'] },
+    '.swift': { package: 'tree-sitter-swift', language: 'swift', extensions: ['.swift'] },
+    '.jl': { package: 'tree-sitter-julia', language: 'julia', extensions: ['.jl'] },
+    '.r': { package: 'tree-sitter-r', language: 'r', extensions: ['.r', '.R'] },
+    '.ml': { package: 'tree-sitter-ocaml', language: 'ocaml', extensions: ['.ml', '.mli'] },
+    '.mli': { package: 'tree-sitter-ocaml', language: 'ocaml', extensions: ['.ml', '.mli'] },
+    '.fs': null, // F# doesn't have official tree-sitter
+    '.rkt': { package: 'tree-sitter-racket', language: 'racket', extensions: ['.rkt'] },
+    '.lua': { package: 'tree-sitter-lua', language: 'lua', extensions: ['.lua'] },
+    '.zig': { package: 'tree-sitter-zig', language: 'zig', extensions: ['.zig'] },
+    '.nim': null,
+    '.cr': { package: 'tree-sitter-crystal', language: 'crystal', extensions: ['.cr'] },
+    '.d': { package: 'tree-sitter-d', language: 'd', extensions: ['.d'] },
+    '.dart': { package: 'tree-sitter-dart', language: 'dart', extensions: ['.dart'] },
+  };
+  return parserMap[extension] || null;
+}
+
+// Helper to get just the package name
+function getTreeSitterParserName(extension) {
+  const info = getTreeSitterParserInfo(extension);
+  return info?.package || null;
+}
+
+// Install missing parsers
+async function installMissingParsers(unsupportedLanguages) {
+  const packagesToInstall = new Map(); // package -> [extensions]
+  const unavailableLanguages = [];
+
+  // Collect packages to install
+  for (const lang of unsupportedLanguages) {
+    const info = getTreeSitterParserInfo(lang.extension);
+    if (info) {
+      if (!packagesToInstall.has(info.package)) {
+        packagesToInstall.set(info.package, { language: info.language, extensions: info.extensions });
+      }
+    } else {
+      unavailableLanguages.push(lang);
+    }
+  }
+
+  if (packagesToInstall.size === 0) {
+    console.error('\n❌ No installable parsers available for your languages.');
+    console.error('   These languages do not have tree-sitter parsers yet:');
+    for (const lang of unavailableLanguages) {
+      console.error(`   - ${lang.name}`);
+    }
+    console.error('\n   Please file an issue to request support at:');
+    console.error('   https://github.com/devame/llm-context-tools/issues\n');
+    return false;
+  }
+
+  // Show what will be installed
+  console.log('\n📦 Available parser packages:\n');
+  const packages = Array.from(packagesToInstall.keys());
+  for (const pkg of packages) {
+    const info = packagesToInstall.get(pkg);
+    console.log(`   ${pkg.padEnd(30)} → ${info.language} (${info.extensions.join(', ')})`);
+  }
+
+  if (unavailableLanguages.length > 0) {
+    console.log('\n⚠️  Not available (will still be skipped):');
+    for (const lang of unavailableLanguages) {
+      console.log(`   ${lang.name.padEnd(30)} → No parser exists yet`);
+    }
+  }
+
+  // Show commands
+  const installCmd = `npm install --save-dev ${packages.join(' ')}`;
+  console.log('\n🔧 Commands to run:\n');
+  console.log(`   ${installCmd}\n`);
+
+  // Prompt user
+  const shouldInstall = await promptYesNo('\n📥 Install these parser packages now?');
+
+  if (!shouldInstall) {
+    console.log('\n⚠️  Installation cancelled. Cannot proceed without language support.\n');
+    return false;
+  }
+
+  // Install packages
+  console.log('\n📥 Installing packages...\n');
+  try {
+    execSync(installCmd, { stdio: 'inherit', cwd: process.cwd() });
+    console.log('\n✅ Packages installed successfully!\n');
+
+    // Update parser-factory.js
+    console.log('🔧 Updating parser configuration...\n');
+    updateParserFactory(packagesToInstall);
+    console.log('✅ Parser configuration updated!\n');
+
+    return true;
+  } catch (error) {
+    console.error('\n❌ Installation failed:', error.message);
+    console.error('   You may need to install manually with:');
+    console.error(`   ${installCmd}\n`);
+    return false;
+  }
+}
+
+// Update parser-factory.js with new language support
+function updateParserFactory(packagesToInstall) {
+  const parserFactoryPath = join(__dirname, 'parser-factory.js');
+  let content = readFileSync(parserFactoryPath, 'utf-8');
+
+  // Add to GRAMMAR_PATHS
+  for (const [pkg, info] of packagesToInstall) {
+    const grammarEntry = `  ${info.language}: '${pkg}',`;
+
+    // Check if already exists
+    if (!content.includes(`${info.language}:`)) {
+      // Add before the closing brace of GRAMMAR_PATHS
+      content = content.replace(
+        /(const GRAMMAR_PATHS = \{[^}]+)(}\;)/,
+        `$1  ${info.language}: '${pkg}',\n$2`
+      );
+    }
+
+    // Add extensions to EXTENSION_MAP
+    for (const ext of info.extensions) {
+      if (!content.includes(`'${ext}':`)) {
+        content = content.replace(
+          /(const EXTENSION_MAP = \{[^}]+)(}\;)/,
+          `$1  '${ext}': '${info.language}',\n$2`
+        );
+      }
+    }
+  }
+
+  writeFileSync(parserFactoryPath, content, 'utf-8');
 }
 
 log('=== LLM Context Analyzer ===\n');
 
-const manifestExists = existsSync('.llm-context/manifest.json');
-const graphExists = existsSync('.llm-context/graph.jsonl');
+// Main async function
+(async () => {
+  const manifestExists = existsSync('.llm-context/manifest.json');
+  const graphExists = existsSync('.llm-context/graph.jsonl');
 
-if (!manifestExists || !graphExists) {
-  log('🔍 No previous analysis found - running initial full analysis...\n');
+  if (!manifestExists || !graphExists) {
+    log('🔍 No previous analysis found - running initial full analysis...\n');
+
+  // Step 0: Detect languages
+  log('[0/7] Detecting project languages...\n');
+  const detection = detectLanguages();
+  const canAnalyze = printLanguageReport(detection);
+
+  // Check if we have NO supported languages
+  if (!shouldAnalyze(detection)) {
+    console.error('\n❌ Cannot analyze: No supported source files found.');
+    console.error('   This project appears to use languages not yet supported.');
+    console.error('\n   Supported languages: JavaScript, TypeScript, Python, Go, Rust, Java, C/C++, Ruby, PHP, Bash');
+    console.error('\n   To add support for other languages, please file an issue at:');
+    console.error('   https://github.com/devame/llm-context-tools/issues\n');
+    process.exit(1);
+  }
+
+  // Check if unsupported languages dominate
+  if (detection.unsupported.length > 0) {
+    const unsupportedTotal = detection.unsupported.reduce((sum, l) => sum + l.count, 0);
+    const supportedTotal = detection.supported.reduce((sum, l) => sum + l.count, 0);
+
+    if (unsupportedTotal > supportedTotal) {
+      console.error('\n🚨 CRITICAL: Primary codebase uses unsupported languages!\n');
+      console.error(`   Your project has ${unsupportedTotal} unsupported files vs ${supportedTotal} supported files.`);
+      console.error('   Analysis would only cover a small fraction of your codebase.\n');
+
+      // Offer to install missing parsers
+      const installed = await installMissingParsers(detection.unsupported);
+
+      if (!installed) {
+        console.error('\n⚠️  Cannot proceed without language support.\n');
+        process.exit(1);
+      }
+
+      // Re-run language detection after installing
+      console.log('🔄 Re-detecting languages after installation...\n');
+      const newDetection = detectLanguages();
+      printLanguageReport(newDetection);
+
+      if (!shouldAnalyze(newDetection)) {
+        console.error('\n❌ Still cannot analyze after installation. Exiting.\n');
+        process.exit(1);
+      }
+    }
+  }
+
+  if (!canAnalyze) {
+    console.error('\n⚠️  Proceeding with caution: Analysis may not capture the primary codebase.\n');
+  }
 
   // Step 1: Create .llm-context directory
-  log('[1/5] Setting up analysis directory...');
+  log('[1/7] Setting up analysis directory...');
   execSync('mkdir -p .llm-context', { stdio });
 
   // Step 2: Run SCIP indexer (if needed for typed languages)
-  log('\n[2/5] Running SCIP indexer...');
+  log('\n[2/7] Running SCIP indexer...');
   try {
     execSync('npx scip-typescript index --infer-tsconfig --output .llm-context/index.scip 2>/dev/null || echo "SCIP indexing skipped"', { stdio });
   } catch (error) {
@@ -58,7 +257,7 @@ if (!manifestExists || !graphExists) {
   }
 
   // Step 3: Parse SCIP output (if available)
-  log('\n[3/5] Parsing SCIP data...');
+  log('\n[3/7] Parsing SCIP data...');
   if (existsSync('.llm-context/index.scip')) {
     try {
       execSync(`cp "${join(__dirname, 'scip.proto')}" .llm-context/ && node "${join(__dirname, 'scip-parser.js')}"`, { stdio });
@@ -70,11 +269,11 @@ if (!manifestExists || !graphExists) {
   }
 
   // Step 4: Run full analysis (Tree-sitter based)
-  log('\n[4/6] Running full analysis...');
+  log('\n[4/7] Running full analysis...');
   execSync(`node "${join(__dirname, 'full-analysis.js')}"`, { stdio });
 
   // Step 5: Generate initial manifest
-  log('\n[5/6] Generating manifest...');
+  log('\n[5/7] Generating manifest...');
   execSync(`node "${join(__dirname, 'manifest-generator.js')}"`, { stdio });
 
   // Step 6: Generate summaries
@@ -122,4 +321,9 @@ if (!manifestExists || !graphExists) {
   log(`  - Files analyzed: ${changedFiles.length}`);
   log(`  - Files skipped: ${changeReport.unchanged.length}`);
   log(`  - Time saved: ~${(changeReport.unchanged.length * 28).toFixed(0)}ms`);
-}
+  }
+})().catch(error => {
+  console.error('\n❌ Fatal error:', error.message);
+  console.error(error.stack);
+  process.exit(1);
+});

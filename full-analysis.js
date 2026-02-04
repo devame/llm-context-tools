@@ -11,6 +11,7 @@ import { join } from 'path';
 import { ParserFactory } from './parser-factory.js';
 import { createAdapter } from './ast-adapter.js';
 import { createAnalyzer } from './side-effects-analyzer.js';
+import { parseGitignore } from './gitignore-parser.js';
 
 console.log('=== Full Analysis (Tree-sitter) ===\n');
 
@@ -32,6 +33,9 @@ function findSourceFiles() {
   const config = loadConfig();
   const files = [];
 
+  // Create gitignore checker
+  const isIgnored = parseGitignore();
+
   // Extensions to include based on config
   const extensions = new Set();
   for (const pattern of config.patterns.include) {
@@ -47,8 +51,15 @@ function findSourceFiles() {
 
       for (const entry of entries) {
         const fullPath = join(dir, entry);
+        const stat = statSync(fullPath);
+        const isDirectory = stat.isDirectory();
 
-        // Skip excluded directories/files
+        // Skip if ignored by .gitignore or default patterns
+        if (isIgnored(fullPath, isDirectory)) {
+          continue;
+        }
+
+        // Skip excluded directories/files from config
         const isExcluded = config.patterns.exclude.some(pattern => {
           return fullPath.includes('/' + pattern + '/') ||
                  fullPath.includes('\\' + pattern + '\\') ||
@@ -61,9 +72,7 @@ function findSourceFiles() {
           continue;
         }
 
-        const stat = statSync(fullPath);
-
-        if (stat.isDirectory()) {
+        if (isDirectory) {
           walk(fullPath);
         } else if (stat.isFile()) {
           // Check if file has matching extension
