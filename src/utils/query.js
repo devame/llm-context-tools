@@ -51,23 +51,49 @@ functions.forEach(func => {
 function search(term) {
   const results = [];
   const termLower = term.toLowerCase();
+  
+  // Tokenize for multi-word search
+  const tokens = termLower.split(/[\s\-_:]+/).filter(t => t.length > 1);
 
   functions.forEach(func => {
     let score = 0;
-    const name = func.name || func.id;
+    const name = func.name || func.id || "";
     const nameLower = name.toLowerCase();
-    const fileLower = func.file.toLowerCase();
+    const sigLower = (func.sig || "").toLowerCase();
+    const docLower = (func.scipDoc || "").toLowerCase();
+    const fileLower = (func.file || "").toLowerCase();
+    const tagsLower = (func.tags || []).map(t => t.toLowerCase());
 
     // 1. Exact Name Match (Highest Priority)
     if (nameLower === termLower) score += 100;
-
-    // 2. Name Contains Term
     else if (nameLower.includes(termLower)) score += 50;
 
-    // 3. Tag Match
-    if (func.tags && func.tags.some(t => t.toLowerCase().includes(termLower))) score += 30;
+    // 2. Token Matching (Multi-word discovery)
+    if (tokens.length > 0) {
+      let tokenMatches = 0;
+      tokens.forEach(token => {
+        let matched = false;
+        if (nameLower.includes(token)) { score += 15; matched = true; }
+        if (sigLower.includes(token)) { score += 10; matched = true; }
+        if (docLower.includes(token)) { score += 5; matched = true; }
+        if (tagsLower.some(t => t.includes(token))) { score += 10; matched = true; }
+        if (matched) tokenMatches++;
+      });
+      
+      // Bonus for matching all tokens in a multi-word query
+      if (tokenMatches === tokens.length && tokens.length > 1) score += 30;
+    }
 
-    // 4. File Path Match
+    // 3. Signature Match (Semantic discovery)
+    if (sigLower.includes(termLower)) score += 40;
+
+    // 4. Tag Match
+    if (tagsLower.some(t => t.includes(termLower))) score += 30;
+
+    // 5. Docstring/Description Match
+    if (docLower.includes(termLower)) score += 20;
+
+    // 6. File Path Match
     if (fileLower.includes(termLower)) score += 10;
 
     if (score > 0) {
