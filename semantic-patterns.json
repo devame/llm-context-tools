@@ -1,0 +1,167 @@
+{
+  "javascript": {
+    "pure-html": {
+      "patterns": [
+        "return\\s+['\"`]\\s*<[a-z]+",
+        "innerHTML\\s*=",
+        "document\\.createElement"
+      ],
+      "antiPatterns": [
+        "useState",
+        "useEffect",
+        "React\\.createElement",
+        "jsx"
+      ]
+    },
+    "ui-component": {
+      "patterns": [
+        "return\\s*\\(\\s*<[A-Z]",
+        "return\\s*<[A-Z]",
+        "React\\.createElement"
+      ]
+    },
+    "api-endpoint": {
+      "patterns": [
+        "app\\.(get|post|put|delete|patch)\\(",
+        "router\\.(get|post|put|delete|patch)\\(",
+        "req, res",
+        "next\\)"
+      ]
+    }
+  },
+  "typescript": {
+    "pure-html": {
+      "patterns": [
+        "return\\s+['\"`]\\s*<[a-z]+",
+        "innerHTML\\s*=",
+        "document\\.createElement"
+      ],
+      "antiPatterns": [
+        "useState",
+        "useEffect",
+        "React\\.createElement",
+        "jsx"
+      ]
+    },
+    "ui-component": {
+      "patterns": [
+        "return\\s*\\(\\s*<[A-Z]",
+        "return\\s*<[A-Z]",
+        "React\\.FC",
+        "React\\.Component"
+      ]
+    },
+    "api-endpoint": {
+      "patterns": [
+        "app\\.(get|post|put|delete|patch)\\(",
+        "router\\.(get|post|put|delete|patch)\\(",
+        "Request, Response"
+      ]
+    }
+  },
+  "clojurescript": {
+    "pure-html": {
+      "patterns": [
+        "\\[:[a-z]+",
+        "string/join.*<",
+        "str.*<"
+      ],
+      "antiPatterns": [
+        "r/atom",
+        "r/cursor",
+        "reagent",
+        "defn-ui",
+        "with-let"
+      ]
+    },
+    "ui-component": {
+      "patterns": [
+        "\\[:[A-Z]",
+        "reagent",
+        "defn-ui"
+      ]
+    },
+    "re-frame-event": {
+      "patterns": [
+        "reg-event-db",
+        "reg-event-fx"
+      ]
+    },
+    "re-frame-sub": {
+      "patterns": [
+        "reg-sub"
+      ]
+    },
+    "keyboard-nav": {
+      "patterns": [
+        "on-key-down",
+        "keydown",
+        "keyup"
+      ]
+    },
+    "state-mutation": {
+      "patterns": [
+        "swap!",
+        "reset!",
+        "set!"
+      ]
+    },
+    "data-ingestion": {
+      "patterns": [
+        "ingest/",
+        "transact!",
+        "d/transact"
+      ]
+    },
+    "async-logic": {
+      "patterns": [
+        "go",
+        "<!",
+        ">!",
+        "timeout",
+        "async/go"
+      ]
+    },
+    "event-handling": {
+      "patterns": [
+        "on-click",
+        "on-change",
+        "on-mouse",
+        "events/"
+      ]
+    }
+  },
+  "janet": {
+    "api-endpoint": {
+      "patterns": [
+        "server/handler",
+        "routes",
+        "def-route"
+      ]
+    },
+    "peg-grammar": {
+      "patterns": [
+        "peg/compile",
+        "def grammar"
+      ]
+    },
+    "parsing-logic": {
+      "patterns": [
+        "peg/match",
+        "grammar",
+        "parse"
+      ]
+    }
+  },
+  "python": {
+    "api-endpoint": {
+      "patterns": [
+        "@app\\.route",
+        "@.*\\.get",
+        "@.*\\.post",
+        "request",
+        "response"
+      ]
+    }
+  }
+}

@@ -11,6 +11,7 @@ import { join } from 'path';
 import { ParserFactory } from './parser-factory.js';
 import { createAdapter } from './ast-adapter.js';
 import { createAnalyzer } from './side-effects-analyzer.js';
+import { createSemanticAnalyzer } from './semantic-analyzer.js';
 import { parseGitignore } from './gitignore-parser.js';
 
 console.log('=== Full Analysis (Tree-sitter) ===\n');
@@ -118,6 +119,7 @@ async function analyzeFile(filePath) {
     // Extract imports
     const imports = adapter.extractImports();
     const sideEffectAnalyzer = createAnalyzer(language, imports);
+    const semanticAnalyzer = createSemanticAnalyzer(language);
 
     // Build graph entries
     const entries = functions.map(({ metadata }) => {
@@ -128,6 +130,9 @@ async function analyzeFile(filePath) {
       const effectsWithConfidence = sideEffectAnalyzer.analyze(uniqueCalls, metadata.source);
       const uniqueEffects = [...new Set(effectsWithConfidence.map(e => e.type))];
 
+      // Semantic tagging
+      const tags = semanticAnalyzer.analyze(metadata.source);
+
       return {
         id: metadata.name,
         type: 'function',
@@ -137,6 +142,7 @@ async function analyzeFile(filePath) {
         async: metadata.isAsync || false,
         calls: uniqueCalls.slice(0, 10),
         effects: uniqueEffects,
+        tags: tags,
         scipDoc: '',
         language: language
       };
