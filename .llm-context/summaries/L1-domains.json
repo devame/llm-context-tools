@@ -69,5 +69,41 @@
         "line": 23
       }
     ]
+  },
+  {
+    "domain": "src",
+    "modules": [
+      "cli",
+      "index"
+    ],
+    "functionCount": 10,
+    "effects": [
+      "file_io",
+      "database",
+      "logging",
+      "network"
+    ],
+    "keyFunctions": [
+      {
+        "file": "src/cli.js",
+        "line": 18
+      },
+      {
+        "file": "src/cli.js",
+        "line": 94
+      },
+      {
+        "file": "src/cli.js",
+        "line": 99
+      },
+      {
+        "file": "src/index.js",
+        "line": 75
+      },
+      {
+        "file": "src/index.js",
+        "line": 81
+      }
+    ]
   }
 ]

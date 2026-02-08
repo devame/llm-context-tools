@@ -31,13 +31,18 @@ llm-context stats                      # Full statistics
 - ✅ 80-95% fewer tokens needed
 
 ## Statistics
-- **Files**: 20 modules
-- **Functions**: 119 total
-- **Call relationships**: 570
+- **Files**: 45 modules
+- **Functions**: 268 total
+- **Call relationships**: 1277
 - **Side effects**: network, database, logging, file_io, dom
 
 ## Key Components
 - **.**: ast-adapter, change-detector, claude-setup, dependency-analyzer, full-analysis, function-change-detector, function-source-extractor, incremental-analyzer, language-queries, manifest-generator, parser-factory, query, scip-parser, side-effects-analyzer, summary-updater, transformer, prime, setup-claude, analyze
+- **src**: cli, index
+- **src/core**: change-detector, dependency-analyzer, full-analysis, function-change-detector, incremental-analyzer, language-detector, semantic-analyzer, side-effects-analyzer
+- **src/parser**: ast-adapter, gitignore-parser, manifest-generator, parser-factory, scip-parser, transformer
+- **src/setup**: claude-setup, prime, setup-claude
+- **src/utils**: function-source-extractor, grep, language-queries, prompt-helper, query, summary-updater
 - **bin**: llm-context
 
 ## Entry Points

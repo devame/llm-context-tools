@@ -16,9 +16,9 @@ import { join } from 'path';
  * @param {boolean} options.force - Force overwrite if exists
  */
 export function setupClaudeIntegration(options = {}) {
-  const { projectName = 'this project', force = false } = options;
+  const { projectName = 'this project', force = false, cwd = process.cwd() } = options;
 
-  const claudeDir = join(process.cwd(), '.claude');
+  const claudeDir = join(cwd, '.claude');
   const claudeMdPath = join(claudeDir, 'CLAUDE.md');
 
   // Check if already exists

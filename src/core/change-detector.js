@@ -40,7 +40,8 @@ function findJsFiles(dir = '.', ignore = ['node_modules', '.git', '.llm-context'
 
     for (const entry of entries) {
       const fullPath = join(currentDir, entry.name);
-      const relativePath = relative('.', fullPath);
+      // Determine relative path from the *target directory* not CWD
+      const relativePath = relative(dir, fullPath);
 
       if (ignore.some(pattern => relativePath.includes(pattern))) {
         continue;
@@ -62,8 +63,8 @@ function findJsFiles(dir = '.', ignore = ['node_modules', '.git', '.llm-context'
  * Load existing manifest
  * @returns {object|null} Manifest data or null if not found
  */
-function loadManifest() {
-  const manifestPath = '.llm-context/manifest.json';
+function loadManifest(rootDir = '.') {
+  const manifestPath = join(rootDir, '.llm-context/manifest.json');
 
   if (!existsSync(manifestPath)) {
     console.log('⚠ No manifest.json found - run manifest-generator.js first');
@@ -77,9 +78,9 @@ function loadManifest() {
  * Detect changes between current state and manifest
  * @returns {object} Change report
  */
-function detectChanges() {
+function detectChanges(rootDir = '.') {
   console.log('[1] Loading manifest...');
-  const manifest = loadManifest();
+  const manifest = loadManifest(rootDir);
 
   if (!manifest) {
     return {
@@ -95,7 +96,7 @@ function detectChanges() {
   console.log(`    Files tracked: ${Object.keys(manifest.files).length}\n`);
 
   console.log('[2] Discovering current files...');
-  const currentFiles = findJsFiles();
+  const currentFiles = findJsFiles(rootDir);
   console.log(`    Found ${currentFiles.length} JavaScript files\n`);
 
   console.log('[3] Computing changes...');
@@ -116,7 +117,7 @@ function detectChanges() {
       console.log(`    + ${filePath} (NEW)`);
     } else {
       // Existing file - check hash
-      const currentHash = hashFile(filePath);
+      const currentHash = hashFile(join(rootDir, filePath));
       const manifestHash = manifest.files[filePath].hash;
 
       if (currentHash !== manifestHash) {

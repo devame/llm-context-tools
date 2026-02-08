@@ -189,15 +189,20 @@ log('=== LLM Context Analyzer ===\n');
 
 // Main async function
 (async () => {
-  const manifestExists = existsSync('.llm-context/manifest.json');
-  const graphExists = existsSync('.llm-context/graph.jsonl');
+  const args = process.argv.slice(2);
+  const targetArg = args.find(arg => !arg.startsWith('-'));
+  const targetDir = targetArg || '.';
+  const isFullAnalysis = args.includes('--full');
 
-  if (!manifestExists || !graphExists) {
-    log('🔍 No previous analysis found - running initial full analysis...\n');
+  const manifestExists = existsSync(join(targetDir, '.llm-context/manifest.json'));
+  const graphExists = existsSync(join(targetDir, '.llm-context/graph.jsonl'));
+
+  if (isFullAnalysis || !manifestExists || !graphExists) {
+    log(`🔍 ${isFullAnalysis ? 'Forced full analysis' : 'No previous analysis found'} in ${targetDir}...\n`);
 
   // Step 0: Detect languages
-  log('[0/7] Detecting project languages...\n');
-  const detection = detectLanguages();
+    log(`[0/7] Detecting project languages in ${targetDir}...\n`);
+    const detection = detectLanguages(targetDir);
   const canAnalyze = printLanguageReport(detection);
 
   // Check if we have NO supported languages
@@ -246,12 +251,12 @@ log('=== LLM Context Analyzer ===\n');
 
   // Step 1: Create .llm-context directory
   log('[1/7] Setting up analysis directory...');
-  execSync('mkdir -p .llm-context', { stdio });
+    execSync('mkdir -p .llm-context', { stdio, cwd: targetDir });
 
   // Step 2: Run SCIP indexer (if needed for typed languages)
   log('\n[2/7] Running SCIP indexer...');
   try {
-    execSync('npx scip-typescript index --infer-tsconfig --output .llm-context/index.scip 2>/dev/null || echo "SCIP indexing skipped"', { stdio });
+    execSync(`npx scip-typescript index --infer-tsconfig --output .llm-context/index.scip 2>/dev/null || echo "SCIP indexing skipped"`, { stdio, cwd: targetDir });
   } catch (error) {
     log('  ⚠ SCIP indexing failed (continuing with custom analysis only)');
   }
@@ -260,7 +265,7 @@ log('=== LLM Context Analyzer ===\n');
   log('\n[3/7] Parsing SCIP data...');
   if (existsSync('.llm-context/index.scip')) {
     try {
-      execSync(`cp "${join(__dirname, '../data/scip.proto')}" .llm-context/ && node "${join(__dirname, 'parser/scip-parser.js')}"`, { stdio });
+      execSync(`cp "${join(__dirname, '../data/scip.proto')}" .llm-context/ && node "${join(__dirname, 'parser/scip-parser.js')}"`, { stdio, cwd: targetDir });
     } catch (error) {
       log('  ⚠ SCIP parsing failed');
     }
@@ -270,19 +275,19 @@ log('=== LLM Context Analyzer ===\n');
 
   // Step 4: Run full analysis (Tree-sitter based)
   log('\n[4/7] Running full analysis...');
-    execSync(`node "${join(__dirname, 'core/full-analysis.js')}"`, { stdio });
+    execSync(`node "${join(__dirname, 'core/full-analysis.js')}"`, { stdio, cwd: targetDir });
 
   // Step 5: Generate initial manifest
   log('\n[5/7] Generating manifest...');
-    execSync(`node "${join(__dirname, 'parser/manifest-generator.js')}"`, { stdio });
+    execSync(`node "${join(__dirname, 'parser/manifest-generator.js')}"`, { stdio, cwd: targetDir });
 
   // Step 6: Generate summaries
   log('\n[6/7] Generating summaries...');
-    execSync(`node "${join(__dirname, 'utils/summary-updater.js')}"`, { stdio });
+    execSync(`node "${join(__dirname, 'utils/summary-updater.js')}"`, { stdio, cwd: targetDir });
 
   // Step 7: Setup Claude Code integration
   log('\n[7/7] Setting up Claude Code integration...');
-  setupClaudeIntegration();
+    setupClaudeIntegration({ cwd: targetDir });
 
   log('\n✅ Initial analysis complete!');
   log('\nNext steps:');
@@ -292,7 +297,8 @@ log('=== LLM Context Analyzer ===\n');
 } else {
   log('🔍 Existing analysis found - checking for changes...\n');
 
-  const changeReport = detectChanges();
+    const targetDir = process.argv[2] && !process.argv[2].startsWith('-') ? process.argv[2] : '.';
+    const changeReport = detectChanges(targetDir);
 
   const changedFiles = [...changeReport.added, ...changeReport.modified];
 
@@ -312,7 +318,7 @@ log('=== LLM Context Analyzer ===\n');
     execSync(`node "${join(__dirname, 'utils/summary-updater.js')}" ${changedFiles.join(' ')}`, { stdio });
 
   // Ensure Claude Code integration exists
-  setupClaudeIntegration();
+    setupClaudeIntegration({ cwd: targetDir });
 
   const totalTime = Date.now() - startTime;
 

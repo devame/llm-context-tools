@@ -292,5 +292,20 @@
     "exports": [],
     "effects": [],
     "entryPoints": []
+  },
+  {
+    "file": "src/index.js",
+    "module": "index",
+    "functionCount": 5,
+    "exports": [
+      null
+    ],
+    "effects": [
+      "network",
+      "logging",
+      "database",
+      "file_io"
+    ],
+    "entryPoints": []
   }
 ]
