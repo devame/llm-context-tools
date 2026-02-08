@@ -15,6 +15,7 @@ import { createHash } from 'crypto';
 import { ParserFactory } from './parser-factory.js';
 import { createAdapter } from './ast-adapter.js';
 import { createAnalyzer } from './side-effects-analyzer.js';
+import { createSemanticAnalyzer } from './semantic-analyzer.js';
 import { detectChanges } from './change-detector.js';
 import { detectAllFunctionChanges, printFunctionChangeSummary } from './function-change-detector.js';
 import { analyzeImpact } from './dependency-analyzer.js';
@@ -84,6 +85,7 @@ async function analyzeSpecificFunctions(sourcePath, targetFunctions = null) {
   // Extract imports for side effect analysis
   const imports = adapter.extractImports();
   const sideEffectAnalyzer = createAnalyzer(language, imports);
+  const semanticAnalyzer = createSemanticAnalyzer(language);
 
   // Analyze each function
   const results = [];
@@ -96,6 +98,9 @@ async function analyzeSpecificFunctions(sourcePath, targetFunctions = null) {
     // Analyze side effects (AST-based, not regex!)
     const effectsWithConfidence = sideEffectAnalyzer.analyze(uniqueCalls, metadata.source);
     const uniqueEffects = [...new Set(effectsWithConfidence.map(e => e.type))];
+
+    // Semantic tagging
+    const tags = semanticAnalyzer.analyze(metadata.source);
 
     // Detect code patterns
     const patterns = [];
@@ -145,6 +150,7 @@ async function analyzeSpecificFunctions(sourcePath, targetFunctions = null) {
       async: metadata.isAsync,
       calls: uniqueCalls.slice(0, 10),
       effects: uniqueEffects,
+      tags: tags,
       patterns: patterns.length > 0 ? patterns : undefined,
       scipDoc: '',
       functionHash: metadata.hash,
@@ -187,6 +193,7 @@ async function analyzeSingleFile(sourcePath) {
     // Extract imports for side effect analysis
     const imports = adapter.extractImports();
     const sideEffectAnalyzer = createAnalyzer(language, imports);
+    const semanticAnalyzer = createSemanticAnalyzer(language);
 
     // Build output
     const result = allFunctions.map(({ metadata }) => {
@@ -198,6 +205,9 @@ async function analyzeSingleFile(sourcePath) {
       const effectsWithConfidence = sideEffectAnalyzer.analyze(uniqueCalls, metadata.source);
       const uniqueEffects = [...new Set(effectsWithConfidence.map(e => e.type))];
 
+      // Semantic tagging
+      const tags = semanticAnalyzer.analyze(metadata.source);
+
       return {
         id: metadata.name,
         type: 'function',
@@ -207,6 +217,7 @@ async function analyzeSingleFile(sourcePath) {
         async: metadata.isAsync || false,
         calls: uniqueCalls.slice(0, 10),
         effects: uniqueEffects,
+        tags: tags,
         scipDoc: '',
         language: language  // NEW: Include language
       };

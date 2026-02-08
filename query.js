@@ -47,12 +47,61 @@ functions.forEach(func => {
   });
 });
 
+// Search function
+function search(term) {
+  const results = [];
+  const termLower = term.toLowerCase();
+
+  functions.forEach(func => {
+    let score = 0;
+    const name = func.name || func.id;
+    const nameLower = name.toLowerCase();
+    const fileLower = func.file.toLowerCase();
+
+    // 1. Exact Name Match (Highest Priority)
+    if (nameLower === termLower) score += 100;
+
+    // 2. Name Contains Term
+    else if (nameLower.includes(termLower)) score += 50;
+
+    // 3. Tag Match
+    if (func.tags && func.tags.some(t => t.toLowerCase().includes(termLower))) score += 30;
+
+    // 4. File Path Match
+    if (fileLower.includes(termLower)) score += 10;
+
+    if (score > 0) {
+      results.push({ ...func, score });
+    }
+  });
+
+  return results.sort((a, b) => b.score - a.score);
+}
+
 // Query functions
 // This function provides fast lookups on the graph
 function query(cmd, arg) {
+  // Smart Entry Point: If cmd is not a known command, treat as search
+  const knownCommands = [
+    'find-function', 'functions-in-file', 'calls-to', 'called-by',
+    'side-effects', 'entry-points', 'trace', 'stats', 'help'
+  ];
+
+  if (!knownCommands.includes(cmd)) {
+    // Treat 'cmd' as the search term, and 'arg' as extra search terms if any
+    const searchTerm = arg ? `${cmd} ${arg}` : cmd;
+    return search(searchTerm);
+  }
+
   switch (cmd) {
+    case 'search':
+      return search(arg);
+
     case 'find-function':
-      return Array.from(byName.get(arg) || []);
+      const exactMatches = Array.from(byName.get(arg) || []);
+      if (exactMatches.length > 0) return exactMatches;
+      // Fallback to search if no exact match
+      return search(arg);
 
     case 'functions-in-file':
       return byFile.get(arg) || [];
@@ -85,9 +134,12 @@ function query(cmd, arg) {
         filesAnalyzed: byFile.size,
         totalCalls: functions.reduce((sum, f) => sum + f.calls.length, 0),
         withSideEffects: functions.filter(f => f.effects.length > 0).length,
-        effectTypes: [...new Set(functions.flatMap(f => f.effects))]
+        effectTypes: [...new Set(functions.flatMap(f => f.effects))],
+        tags: [...new Set(functions.flatMap(f => f.tags || []))],
+        taggedFunctions: functions.filter(f => f.tags && f.tags.length > 0).length
       };
 
+    case 'help':
     default:
       return { error: 'Unknown query command' };
   }
@@ -105,6 +157,7 @@ function traceCalls(funcName, depth = 3, visited = new Set()) {
     function: funcName,
     file: func.file,
     line: func.line,
+    tags: func.tags,
     calls: func.calls.slice(0, 10).map(called => traceCalls(called, depth - 1, visited)).filter(Boolean)
   };
 }
@@ -116,6 +169,8 @@ if (!cmd) {
   console.log('LLM Context Query Interface\n');
   console.log('Usage: node query.js <command> [args]\n');
   console.log('Commands:');
+  console.log('  <search-term>              - Smart Search (names, tags, files)');
+  console.log('  search <term>              - Explicit search');
   console.log('  find-function <name>       - Find function by name');
   console.log('  functions-in-file <path>   - List functions in file');
   console.log('  calls-to <name>            - Who calls this function');
@@ -125,6 +180,7 @@ if (!cmd) {
   console.log('  trace <name>               - Trace call tree from function');
   console.log('  stats                      - Show statistics');
   console.log('\nExamples:');
+  console.log('  node query.js navigation   # Smart search');
   console.log('  node query.js stats');
   console.log('  node query.js find-function evalAST');
   console.log('  node query.js side-effects');
@@ -141,6 +197,9 @@ if (Array.isArray(result)) {
       console.log(`  ${i + 1}. ${item}`);
     } else {
       console.log(`  ${i + 1}. ${item.name || item.id} (${item.file}:${item.line})`);
+      if (item.tags && item.tags.length > 0) {
+        console.log(`     Tags: [${item.tags.join(', ')}]`);
+      }
       if (item.calls && item.calls.length > 0) {
         console.log(`     Calls: ${item.calls.slice(0, 5).join(', ')}`);
       }
