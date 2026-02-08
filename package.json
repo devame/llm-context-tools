@@ -22,6 +22,7 @@
     "analyze": "node analyze.js",
     "analyze:full": "rm -f .llm-context/manifest.json && node analyze.js",
     "query": "node query.js",
+    "grep": "node grep.js",
     "check-changes": "node change-detector.js",
     "parse-scip": "node scip-parser.js",
     "transform": "node transformer.js",
