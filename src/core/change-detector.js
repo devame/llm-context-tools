@@ -10,9 +10,24 @@
 
 import { readFileSync, existsSync, readdirSync, statSync } from 'fs';
 import { createHash } from 'crypto';
-import { join, relative } from 'path';
+import { join, relative, extname } from 'path';
+import { parseGitignore } from '../parser/gitignore-parser.js';
 
-console.log('=== Change Detector ===\n');
+/**
+ * Load configuration file
+ */
+function loadConfig(rootDir = '.') {
+  const configPath = join(rootDir, 'llm-context.config.json');
+  if (!existsSync(configPath)) {
+    return {
+      patterns: {
+        include: ['**/*.js'],
+        exclude: ['node_modules', '.git', '.llm-context']
+      }
+    };
+  }
+  return JSON.parse(readFileSync(configPath, 'utf-8'));
+}
 
 /**
  * Compute MD5 hash of file content
@@ -27,12 +42,27 @@ function hashFile(filePath) {
 }
 
 /**
- * Recursively find all JS files
+ * Recursively find all source files based on config
  * @param {string} dir - Directory to search
- * @param {string[]} ignore - Patterns to ignore
- * @returns {string[]} List of JS files
+ * @returns {string[]} List of source files
  */
-function findJsFiles(dir = '.', ignore = ['node_modules', '.git', '.llm-context']) {
+function findSourceFiles(dir = '.') {
+  const config = loadConfig(dir);
+  const isIgnored = parseGitignore(join(dir, '.gitignore'));
+
+  // Custom excludes from config
+  const customExcludes = config.patterns?.exclude || [];
+
+  // Supported extensions (normalized with dot)
+  const supportedExtensions = new Set(
+    (config.patterns?.include || ['**/*.js'])
+      .map(p => {
+        const match = p.match(/\.([^.*]+)$/);
+        return match ? `.${match[1]}` : null;
+      })
+      .filter(Boolean)
+  );
+
   const files = [];
 
   function walk(currentDir) {
@@ -40,17 +70,24 @@ function findJsFiles(dir = '.', ignore = ['node_modules', '.git', '.llm-context'
 
     for (const entry of entries) {
       const fullPath = join(currentDir, entry.name);
-      // Determine relative path from the *target directory* not CWD
-      const relativePath = relative(dir, fullPath);
+      const relativePath = relative(dir, fullPath).replace(/\\/g, '/');
 
-      if (ignore.some(pattern => relativePath.includes(pattern))) {
+      // Check gitignore and custom excludes
+      if (isIgnored(relativePath, entry.isDirectory()) ||
+        customExcludes.some(pattern => {
+          const cleanPattern = pattern.replace(/\/\*\*$/, '').replace(/\/$/, '');
+          return relativePath === cleanPattern || relativePath.startsWith(cleanPattern + '/');
+        })) {
         continue;
       }
 
       if (entry.isDirectory()) {
         walk(fullPath);
-      } else if (entry.isFile() && entry.name.endsWith('.js')) {
-        files.push(relativePath);
+      } else if (entry.isFile()) {
+        const ext = extname(entry.name);
+        if (supportedExtensions.has(ext)) {
+          files.push(relativePath);
+        }
       }
     }
   }
@@ -96,8 +133,8 @@ function detectChanges(rootDir = '.') {
   console.log(`    Files tracked: ${Object.keys(manifest.files).length}\n`);
 
   console.log('[2] Discovering current files...');
-  const currentFiles = findJsFiles(rootDir);
-  console.log(`    Found ${currentFiles.length} JavaScript files\n`);
+  const currentFiles = findSourceFiles(rootDir);
+  console.log(`    Found ${currentFiles.length} source files\n`);
 
   console.log('[3] Computing changes...');
 

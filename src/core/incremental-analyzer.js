@@ -560,4 +560,8 @@ async function main() {
   }
 }
 
-main();
+main().catch(error => {
+  console.error('\n❌ Incremental analysis failed:', error.message);
+  console.error(error.stack);
+  process.exit(1);
+});
