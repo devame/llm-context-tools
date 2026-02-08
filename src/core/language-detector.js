@@ -7,8 +7,8 @@
 
 import { readdirSync, statSync } from 'fs';
 import { join, extname } from 'path';
-import { parseGitignore } from './gitignore-parser.js';
-import { ParserFactory } from './parser-factory.js';
+import { parseGitignore } from '../parser/gitignore-parser.js';
+import { ParserFactory } from '../parser/parser-factory.js';
 
 /**
  * Language metadata

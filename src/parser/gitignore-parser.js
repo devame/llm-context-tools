@@ -53,7 +53,6 @@ const DEFAULT_IGNORE_PATTERNS = [
   // Tool-specific
   '.llm-context',
   '.deciduous',
-  '.beads',
 
   // OS
   '.DS_Store',

@@ -6,27 +6,24 @@
   "bin": {
     "llm-context": "./bin/llm-context.js"
   },
-  "main": "analyze.js",
+  "main": "src/index.js",
   "files": [
     "bin/",
-    "*.js",
-    "scip.proto",
+    "src/",
+    "data/",
     ".claude/skills/analyzing-codebases/",
     "README.md",
-    "INCREMENTAL_UPDATES.md",
-    "DEMO.md",
-    "performance-comparison.md",
-    "claude-setup.js"
+    "docs/"
   ],
   "scripts": {
-    "analyze": "node analyze.js",
-    "analyze:full": "rm -f .llm-context/manifest.json && node analyze.js",
-    "query": "node query.js",
-    "grep": "node grep.js",
-    "check-changes": "node change-detector.js",
-    "parse-scip": "node scip-parser.js",
-    "transform": "node transformer.js",
-    "summarize": "node summary-updater.js"
+    "analyze": "node src/index.js",
+    "analyze:full": "rm -f .llm-context/manifest.json && node src/index.js",
+    "query": "node src/utils/query.js",
+    "grep": "node src/utils/grep.js",
+    "check-changes": "node src/core/change-detector.js",
+    "parse-scip": "node src/parser/scip-parser.js",
+    "transform": "node src/parser/transformer.js",
+    "summarize": "node src/utils/summary-updater.js"
   },
   "keywords": [
     "llm",

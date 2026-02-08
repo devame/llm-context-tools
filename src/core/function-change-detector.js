@@ -7,8 +7,8 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { ParserFactory } from './parser-factory.js';
-import { createAdapter } from './ast-adapter.js';
+import { ParserFactory } from '../parser/parser-factory.js';
+import { createAdapter } from '../parser/ast-adapter.js';
 
 /**
  * Load configuration file
@@ -145,7 +145,7 @@ export async function detectFunctionChanges(filePath, manifest) {
       const hasStoredSource = Object.values(fileEntry.functionHashes).some(f => f.source);
 
       if (hasStoredSource) {
-        const { computeSimilarity } = await import('./function-source-extractor.js');
+        const { computeSimilarity } = await import('../utils/function-source-extractor.js');
         const threshold = config.incremental?.similarityThreshold || 0.85;
 
         for (const deletedFunc of changes.deleted) {

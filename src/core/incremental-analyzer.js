@@ -12,8 +12,8 @@
 
 import { readFileSync, writeFileSync, existsSync, statSync } from 'fs';
 import { createHash } from 'crypto';
-import { ParserFactory } from './parser-factory.js';
-import { createAdapter } from './ast-adapter.js';
+import { ParserFactory } from '../parser/parser-factory.js';
+import { createAdapter } from '../parser/ast-adapter.js';
 import { createAnalyzer } from './side-effects-analyzer.js';
 import { createSemanticAnalyzer } from './semantic-analyzer.js';
 import { detectChanges } from './change-detector.js';
@@ -462,7 +462,7 @@ async function mainFunctionLevel() {
     const metadata = getFileMetadata(filePath);
 
     // Re-extract all function hashes for changed files
-    const { extractFileFunctions } = await import('./manifest-generator.js');
+    const { extractFileFunctions } = await import('../parser/manifest-generator.js');
     const functionHashes = extractFileFunctions(filePath, storeSource);
 
     if (manifest.files[filePath]) {

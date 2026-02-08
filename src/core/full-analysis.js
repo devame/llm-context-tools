@@ -8,11 +8,11 @@
 
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
-import { ParserFactory } from './parser-factory.js';
-import { createAdapter } from './ast-adapter.js';
+import { ParserFactory } from '../parser/parser-factory.js';
+import { createAdapter } from '../parser/ast-adapter.js';
 import { createAnalyzer } from './side-effects-analyzer.js';
 import { createSemanticAnalyzer } from './semantic-analyzer.js';
-import { parseGitignore } from './gitignore-parser.js';
+import { parseGitignore } from '../parser/gitignore-parser.js';
 
 console.log('=== Full Analysis (Tree-sitter) ===\n');
 

@@ -18,11 +18,11 @@ import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { detectChanges } from './change-detector.js';
-import { updateSummaries } from './summary-updater.js';
-import { setupClaudeIntegration } from './claude-setup.js';
-import { detectLanguages, printLanguageReport, shouldAnalyze } from './language-detector.js';
-import { promptYesNo } from './prompt-helper.js';
+import { detectChanges } from './core/change-detector.js';
+import { updateSummaries } from './utils/summary-updater.js';
+import { setupClaudeIntegration } from './setup/claude-setup.js';
+import { detectLanguages, printLanguageReport, shouldAnalyze } from './core/language-detector.js';
+import { promptYesNo } from './utils/prompt-helper.js';
 
 // Get package directory
 const __filename = fileURLToPath(import.meta.url);
@@ -260,7 +260,7 @@ log('=== LLM Context Analyzer ===\n');
   log('\n[3/7] Parsing SCIP data...');
   if (existsSync('.llm-context/index.scip')) {
     try {
-      execSync(`cp "${join(__dirname, 'scip.proto')}" .llm-context/ && node "${join(__dirname, 'scip-parser.js')}"`, { stdio });
+      execSync(`cp "${join(__dirname, '../data/scip.proto')}" .llm-context/ && node "${join(__dirname, 'parser/scip-parser.js')}"`, { stdio });
     } catch (error) {
       log('  ⚠ SCIP parsing failed');
     }
@@ -270,15 +270,15 @@ log('=== LLM Context Analyzer ===\n');
 
   // Step 4: Run full analysis (Tree-sitter based)
   log('\n[4/7] Running full analysis...');
-  execSync(`node "${join(__dirname, 'full-analysis.js')}"`, { stdio });
+    execSync(`node "${join(__dirname, 'core/full-analysis.js')}"`, { stdio });
 
   // Step 5: Generate initial manifest
   log('\n[5/7] Generating manifest...');
-  execSync(`node "${join(__dirname, 'manifest-generator.js')}"`, { stdio });
+    execSync(`node "${join(__dirname, 'parser/manifest-generator.js')}"`, { stdio });
 
   // Step 6: Generate summaries
   log('\n[6/7] Generating summaries...');
-  execSync(`node "${join(__dirname, 'summary-updater.js')}"`, { stdio });
+    execSync(`node "${join(__dirname, 'utils/summary-updater.js')}"`, { stdio });
 
   // Step 7: Setup Claude Code integration
   log('\n[7/7] Setting up Claude Code integration...');
@@ -305,11 +305,11 @@ log('=== LLM Context Analyzer ===\n');
 
   // Run incremental analyzer
   const startTime = Date.now();
-  execSync(`node "${join(__dirname, 'incremental-analyzer.js')}"`, { stdio });
+    execSync(`node "${join(__dirname, 'core/incremental-analyzer.js')}"`, { stdio });
 
   // Update summaries
   log('');
-  execSync(`node "${join(__dirname, 'summary-updater.js')}" ${changedFiles.join(' ')}`, { stdio });
+    execSync(`node "${join(__dirname, 'utils/summary-updater.js')}" ${changedFiles.join(' ')}`, { stdio });
 
   // Ensure Claude Code integration exists
   setupClaudeIntegration();

@@ -6,7 +6,7 @@
  * of the source language.
  */
 
-import { getFunctionQuery, getCallQuery, getImportQuery } from './language-queries.js';
+import { getFunctionQuery, getCallQuery, getImportQuery } from '../utils/language-queries.js';
 import { createHash } from 'crypto';
 
 /**

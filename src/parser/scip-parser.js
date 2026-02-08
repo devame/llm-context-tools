@@ -7,7 +7,7 @@ import { readFileSync } from 'fs';
 import protobuf from 'protobufjs';
 
 const scipFile = '.llm-context/index.scip';
-const protoFile = '.llm-context/scip.proto';
+const protoFile = 'data/scip.proto';
 
 async function parseScip() {
   try {

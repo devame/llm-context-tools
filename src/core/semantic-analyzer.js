@@ -15,7 +15,7 @@ const __dirname = dirname(__filename);
 // Load semantic patterns
 let SEMANTIC_PATTERNS;
 try {
-  const patternsPath = join(__dirname, 'semantic-patterns.json');
+  const patternsPath = join(__dirname, '../../data/semantic-patterns.json');
   SEMANTIC_PATTERNS = JSON.parse(readFileSync(patternsPath, 'utf-8'));
 } catch (error) {
   console.warn('Failed to load semantic patterns:', error.message);

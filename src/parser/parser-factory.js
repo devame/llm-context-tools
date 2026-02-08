@@ -135,7 +135,7 @@ export class ParserFactory {
 
       const wasmPath = join(
         __dirname,
-        'node_modules',
+        '../../node_modules',
         grammarPath,
         wasmFile
       );

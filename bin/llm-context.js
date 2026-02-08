@@ -20,6 +20,7 @@ const command = args[0] || 'help';
 const commandArgs = args.slice(1);
 
 // Helper to run script from package
+// Helper to run script from package
 function runScript(scriptPath, extraArgs = []) {
   const fullPath = join(rootDir, scriptPath);
 
@@ -35,112 +36,31 @@ function runScript(scriptPath, extraArgs = []) {
       cwd: process.cwd()
     });
   } catch (error) {
-    process.exit(error.status || 1);
+    process.exit(1);
   }
 }
 
-// Command handlers
 const commands = {
-  analyze: () => runScript('analyze.js'),
+  analyze: () => runScript('src/index.js'),
+  'analyze:full': () => runScript('src/index.js', ['--full']),
+  'check-changes': () => runScript('src/core/change-detector.js'),
 
-  'analyze:full': () => {
-    console.log('🔄 Forcing full re-analysis...\n');
-    const manifestPath = join(process.cwd(), '.llm-context', 'manifest.json');
-    if (existsSync(manifestPath)) {
-      execSync(`rm "${manifestPath}"`, { stdio: 'inherit' });
-    }
-    runScript('analyze.js');
-  },
-
-  query: () => runScript('query.js'),
-
-  'check-changes': () => runScript('change-detector.js'),
+  query: () => runScript('src/utils/query.js'),
+  stats: () => runScript('src/utils/query.js', ['stats']),
+  'entry-points': () => runScript('src/utils/query.js', ['entry-points']),
+  'side-effects': () => runScript('src/utils/query.js', ['side-effects']),
 
   init: () => {
-    console.log('🚀 Initializing LLM Context Tools...\n');
-
-    // Check if already initialized
-    if (existsSync(join(process.cwd(), '.llm-context'))) {
-      console.log('⚠️  .llm-context directory already exists');
-      console.log('   Run "llm-context analyze" to update analysis\n');
-      return;
-    }
-
-    console.log('📦 Setting up dependencies...');
-
-    // Check for package.json
-    if (!existsSync(join(process.cwd(), 'package.json'))) {
-      console.log('⚠️  No package.json found. Creating one...');
-      execSync('npm init -y', { stdio: 'inherit' });
-    }
-
-    // Install dependencies
-    console.log('\n📥 Installing analysis dependencies...');
-    execSync('npm install --save-dev @babel/parser @babel/traverse @sourcegraph/scip-typescript protobufjs', {
-      stdio: 'inherit'
-    });
-
-    // Run first analysis
-    console.log('\n🔍 Running initial analysis...');
-    runScript('analyze.js');
-
-    console.log('\n✅ Initialization complete!');
-    console.log('\nGenerated files:');
-    console.log('  - .llm-context/       → Analysis results');
-    console.log('  - .claude/CLAUDE.md   → Claude Code instructions');
-    console.log('\nNext steps:');
-    console.log('  - Run "llm-context query stats" to see statistics');
-    console.log('  - Check .llm-context/ directory for generated files');
-    console.log('  - Use "llm-context help" for more commands');
+    console.log('Initializing llm-context...');
+    // TODO: explicit init script if needed
+    runScript('src/index.js');
   },
 
-  stats: () => runScript('query.js', ['stats']),
-
-  'entry-points': () => runScript('query.js', ['entry-points']),
-
-  'side-effects': () => runScript('query.js', ['side-effects']),
-
-  'setup-claude': async () => {
-    const hasCheck = commandArgs.includes('--check');
-    const hasRemove = commandArgs.includes('--remove');
-    const hasForce = commandArgs.includes('--force');
-    const hasHooksOnly = commandArgs.includes('--hooks-only');
-    const hasDocsOnly = commandArgs.includes('--docs-only');
-
-    if (hasCheck || hasRemove || hasHooksOnly) {
-      // Run hooks setup
-      runScript('setup-claude.js', commandArgs);
-    } else if (hasDocsOnly) {
-      // Only generate .claude/CLAUDE.md
-      console.log('🔧 Setting up Claude Code documentation...\n');
-      const { setupClaudeIntegration } = await import('../claude-setup.js');
-      setupClaudeIntegration({ force: hasForce });
-      console.log('\n✅ Setup complete!');
-      console.log('   Claude Code will see query instructions in .claude/CLAUDE.md');
-    } else {
-      // Full setup: both docs and hooks
-      console.log('🔧 Setting up Claude Code integration...\n');
-
-      // 1. Generate .claude/CLAUDE.md
-      console.log('[1/2] Generating .claude/CLAUDE.md...');
-      const { setupClaudeIntegration } = await import('../claude-setup.js');
-      setupClaudeIntegration({ force: hasForce });
-
-      // 2. Install hooks
-      console.log('\n[2/2] Installing Claude Code hooks...');
-      runScript('setup-claude.js', hasForce ? ['--force'] : []);
-    }
-  },
-
-  prime: () => {
-    // Inject context at session start (called by SessionStart hook)
-    runScript('prime.js');
-  },
+  'setup-claude': () => runScript('src/setup/setup-claude.js'),
+  prime: () => runScript('src/setup/prime.js'),
 
   version: () => {
-    const packageJson = JSON.parse(
-      readFileSync(join(rootDir, 'package.json'), 'utf-8')
-    );
+    const packageJson = JSON.parse(readFileSync(join(rootDir, 'package.json'), 'utf-8'));
     console.log(`llm-context v${packageJson.version}`);
   },
 

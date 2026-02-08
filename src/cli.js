@@ -19,24 +19,24 @@ async function main() {
 
 // Commands that delegate to existing tools
 const commands = {
-  'analyze': 'analyze.js',
+  'analyze': 'src/index.js',
   'analyze:full': async () => {
     // Delete manifest and run analyze
     const manifestPath = '.llm-context/manifest.json';
     if (existsSync(manifestPath)) {
       unlinkSync(manifestPath);
     }
-    return 'analyze.js';
+    return 'src/index.js';
   },
-  'check-changes': 'change-detector.js',
-  'query': 'query.js',
+  'check-changes': 'src/core/change-detector.js',
+  'query': 'src/utils/query.js',
   'stats': () => runQuery('stats'),
   'entry-points': () => runQuery('entry-points'),
   'side-effects': () => runQuery('side-effects'),
   'grep': () => runGrep(args),
   'search': () => runGrep(args),
-  'find-symbol': () => runSymbolSearch(args),
-  'show-context': () => showContext(args),
+  // 'find-symbol': () => runSymbolSearch(args),
+  // 'show-context': () => showContext(args),
   'help': () => showHelp(),
   'version': () => showVersion()
 };
@@ -72,24 +72,24 @@ if (commands[command]) {
 // Helper functions
 
 async function runQuery(queryType) {
-  const { default: queryModule } = await import('./query.js');
+  const { default: queryModule } = await import('./utils/query.js');
   // Query module will handle its own execution
 }
 
 async function runGrep(args) {
-  const { grep } = await import('./grep.js');
+  const { grep } = await import('./utils/grep.js');
   await grep(args);
 }
 
-async function runSymbolSearch(args) {
-  const { searchSymbol } = await import('./symbol-search.js');
-  await searchSymbol(args);
-}
+  // async function runSymbolSearch(args) {
+  //   const { searchSymbol } = await import('./symbol-search.js');
+  //   await searchSymbol(args);
+  // }
 
-async function showContext(args) {
-  const { showContext: show } = await import('./context-extractor.js');
-  await show(args);
-}
+  // async function showContext(args) {
+  //   const { showContext: show } = await import('./context-extractor.js');
+  //   await show(args);
+  // }
 
 function showVersion() {
   const pkg = JSON.parse(readFileSync('./package.json', 'utf-8'));

@@ -19,7 +19,7 @@ const __dirname = dirname(__filename);
 // Load effect patterns
 let EFFECT_PATTERNS;
 try {
-  const patternsPath = join(__dirname, 'effect-patterns.json');
+  const patternsPath = join(__dirname, '../../data/effect-patterns.json');
   EFFECT_PATTERNS = JSON.parse(readFileSync(patternsPath, 'utf-8'));
 } catch (error) {
   console.error('Failed to load effect patterns:', error.message);

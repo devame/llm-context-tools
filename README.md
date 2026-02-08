@@ -67,7 +67,7 @@ llm-context setup-claude
 
 ## New: Claude Code Hooks Integration
 
-Automatic context injection and incremental analysis (similar to [beads](https://github.com/steveyegge/beads)):
+Automatic context injection and incremental analysis:
 
 ```bash
 # Install hooks + documentation
@@ -675,7 +675,7 @@ MIT - See [LICENSE](LICENSE) file
 - **[Tree-sitter](https://tree-sitter.github.io/)** - Multi-language parser
 - **[SCIP](https://github.com/sourcegraph/scip)** - Code Intelligence Protocol
 - **[Claude Code](https://claude.ai/code)** - AI pair programming
-- **[Beads](https://github.com/steveyegge/beads)** - Git-based issue tracking (hooks inspiration)
+
 - **[RepoPrompt](https://repoprompt.com/)** - MCP server for codebase context
 
 ## Acknowledgments
