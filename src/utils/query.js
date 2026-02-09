@@ -7,8 +7,13 @@
 
 import { readFileSync } from 'fs';
 
+import MiniSearch from 'minisearch';
+
 const graphLines = readFileSync('.llm-context/graph.jsonl', 'utf-8').split('\n').filter(Boolean);
-const functions = graphLines.map(line => JSON.parse(line));
+const functions = graphLines.map((line, index) => {
+  const parsed = JSON.parse(line);
+  return { ...parsed, id: index, id_str: parsed.id }; // MiniSearch needs unique 'id', preserve original string ID as 'id_str'
+});
 
 // Build indices
 const byName = new Map();
@@ -16,10 +21,21 @@ const byFile = new Map();
 const callIndex = new Map(); // who calls what
 const calledByIndex = new Map(); // reverse index
 
-functions.forEach(func => {
-  const name = func.name || func.id;
+// Initialize MiniSearch
+const miniSearch = new MiniSearch({
+  fields: ['name', 'id_str', 'sig', 'scipDoc', 'file', 'tags'], // Include id_str for better partial matching
+  storeFields: ['name', 'file', 'line', 'sig', 'scipDoc', 'tags', 'calls', 'effects', 'patterns', 'id_str'],
+  searchOptions: {
+    boost: { name: 12, id_str: 10, sig: 4, tags: 3, scipDoc: 2, file: 1 },
+    fuzzy: 0.15, // Slightly stricter fuzzy matching for better precision
+    prefix: true
+  }
+});
 
-  // Name index
+functions.forEach(func => {
+  const name = func.name || func.id_str || "anonymous"; // Use functional name or original ID
+
+  // Name index (for exact lookups)
   if (!byName.has(name)) {
     byName.set(name, []);
   }
@@ -32,12 +48,13 @@ functions.forEach(func => {
   byFile.get(func.file).push(func);
 
   // Call graph indices
-  func.calls.forEach(called => {
+  (func.calls || []).forEach(called => {
+    const callerId = func.name || func.id_str || `anon-${func.id}`;
     // Forward: func calls 'called'
-    if (!callIndex.has(func.id)) {
-      callIndex.set(func.id, new Set());
+    if (!callIndex.has(callerId)) {
+      callIndex.set(callerId, new Set());
     }
-    callIndex.get(func.id).add(called);
+    callIndex.get(callerId).add(called);
 
     // Reverse: 'called' is called by func
     if (!calledByIndex.has(called)) {
@@ -47,61 +64,42 @@ functions.forEach(func => {
   });
 });
 
+// Index all functions in MiniSearch
+miniSearch.addAll(functions.map(f => ({
+  ...f,
+  name: f.name || "anonymous",
+  // Join tags for search but store original structure if needed
+  // Note: we can also just use the array if we provide a custom tokenizer
+})));
+
 // Search function
 function search(term) {
-  const results = [];
-  const termLower = term.toLowerCase();
+  if (!term) return [];
   
-  // Tokenize for multi-word search
-  const tokens = termLower.split(/[\s\-_:]+/).filter(t => t.length > 1);
+  let results = miniSearch.search(term);
 
-  functions.forEach(func => {
-    let score = 0;
-    const name = func.name || func.id || "";
-    const nameLower = name.toLowerCase();
-    const sigLower = (func.sig || "").toLowerCase();
-    const docLower = (func.scipDoc || "").toLowerCase();
-    const fileLower = (func.file || "").toLowerCase();
-    const tagsLower = (func.tags || []).map(t => t.toLowerCase());
+  if (results.length > 0) {
+    const maxScore = results[0].score;
+    // Relative Thresholding: Filter out results that are too weak compared to the best match.
+    // This removes the "noise" when common tokens like 'render' match thousands of functions.
+    if (results.length > 15 && maxScore > 0.1) {
+      results = results.filter(hit => hit.score > maxScore * 0.4);
+    }
+  }
 
-    // 1. Exact Name Match (Highest Priority)
-    if (nameLower === termLower) score += 100;
-    else if (nameLower.includes(termLower)) score += 50;
-
-    // 2. Token Matching (Multi-word discovery)
-    if (tokens.length > 0) {
-      let tokenMatches = 0;
-      tokens.forEach(token => {
-        let matched = false;
-        if (nameLower.includes(token)) { score += 15; matched = true; }
-        if (sigLower.includes(token)) { score += 10; matched = true; }
-        if (docLower.includes(token)) { score += 5; matched = true; }
-        if (tagsLower.some(t => t.includes(token))) { score += 10; matched = true; }
-        if (matched) tokenMatches++;
-      });
-      
-      // Bonus for matching all tokens in a multi-word query
-      if (tokenMatches === tokens.length && tokens.length > 1) score += 30;
+  // Map back to original function objects, and normalize score
+  return results.slice(0, 40).map(hit => {
+    let score = hit.score;
+    // Boost named functions over anonymous ones
+    if (hit.name && hit.name !== 'anonymous' && !hit.name.startsWith('anon-')) {
+      score *= 2.0;
     }
 
-    // 3. Signature Match (Semantic discovery)
-    if (sigLower.includes(termLower)) score += 40;
-
-    // 4. Tag Match
-    if (tagsLower.some(t => t.includes(termLower))) score += 30;
-
-    // 5. Docstring/Description Match
-    if (docLower.includes(termLower)) score += 20;
-
-    // 6. File Path Match
-    if (fileLower.includes(termLower)) score += 10;
-
-    if (score > 0) {
-      results.push({ ...func, score });
-    }
-  });
-
-  return results.sort((a, b) => b.score - a.score);
+    return {
+      ...hit,
+      score: Math.round(score * 10) // Normalize for CLI display
+    };
+  }).sort((a, b) => b.score - a.score);
 }
 
 // Query functions
@@ -152,7 +150,16 @@ function query(cmd, arg) {
 
     case 'trace':
       // Trace call path from function
-      return traceCalls(arg, 3);
+      let targetFunc = Array.from(byName.get(arg) || [])[0];
+      if (!targetFunc) {
+        // Fallback to fuzzy search for trace entry point
+        const fuzzyHits = search(arg);
+        if (fuzzyHits.length > 0) {
+          targetFunc = functions[fuzzyHits[0].id];
+          console.log(`ℹ️  Trace: No exact match for "${arg}", using closest match: "${targetFunc.name || targetFunc.id_str}"`);
+        }
+      }
+      return targetFunc ? traceCalls(targetFunc.name || targetFunc.id_str, 3) : { error: 'Function not found' };
 
     case 'stats':
       return {
@@ -176,7 +183,7 @@ function traceCalls(funcName, depth = 3, visited = new Set()) {
 
   visited.add(funcName);
 
-  const func = functions.find(f => (f.name || f.id) === funcName);
+  const func = functions.find(f => (f.name || f.id_str) === funcName);
   if (!func) return [];
 
   return {
@@ -223,8 +230,10 @@ if (Array.isArray(result)) {
       console.log(`  ${i + 1}. ${item}`);
     } else {
       console.log(`  ${i + 1}. ${item.name || item.id} (${item.file}:${item.line})`);
-      if (item.tags && item.tags.length > 0) {
+      if (item.tags && Array.isArray(item.tags) && item.tags.length > 0) {
         console.log(`     Tags: [${item.tags.join(', ')}]`);
+      } else if (item.tags && typeof item.tags === 'string' && item.tags.length > 0) {
+        console.log(`     Tags: [${item.tags}]`);
       }
       if (item.calls && item.calls.length > 0) {
         console.log(`     Calls: ${item.calls.slice(0, 5).join(', ')}`);

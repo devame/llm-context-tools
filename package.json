@@ -58,6 +58,7 @@
   },
   "dependencies": {
     "@sourcegraph/scip-typescript": "^0.4.0",
+    "minisearch": "^7.2.0",
     "protobufjs": "^7.5.4",
     "tree-sitter": "^0.20.4",
     "tree-sitter-bash": "^0.20.5",
