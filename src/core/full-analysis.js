@@ -22,7 +22,23 @@ console.log('=== Full Analysis (Tree-sitter) ===\n');
 function loadConfig() {
   const configPath = './llm-context.config.json';
   if (!existsSync(configPath)) {
-    return { patterns: { include: ['**/*.js'], exclude: ['node_modules', '.git', '.llm-context'] } };
+    return {
+      patterns: {
+        include: [
+          '**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx', // JS/TS
+          '**/*.py', // Python
+          '**/*.go', // Go
+          '**/*.rs', // Rust
+          '**/*.java', // Java
+          '**/*.c', '**/*.h', '**/*.cpp', '**/*.hpp', // C/C++
+          '**/*.rb', // Ruby
+          '**/*.php', // PHP
+          '**/*.sh', '**/*.bash', // Bash
+          '**/*.clj', '**/*.cljs', '**/*.cljc', // Clojure
+          '**/*.janet' // Janet
+        ], exclude: ['node_modules', '.git', '.llm-context']
+      }
+    };
   }
   return JSON.parse(readFileSync(configPath, 'utf-8'));
 }
@@ -133,16 +149,57 @@ async function analyzeFile(filePath) {
       // Semantic tagging
       const tags = semanticAnalyzer.analyze(metadata.source);
 
+      // Detect code patterns (same as incremental-analyzer.js)
+      const patterns = [];
+
+      // Parsing patterns
+      if (uniqueCalls.some(c => c === 'parse' || c.includes('parse'))) {
+        patterns.push({
+          type: 'parsing',
+          tool: uniqueCalls.find(c => c.includes('tree-sitter') || c.includes('parser')) ? 'tree-sitter' : 'unknown',
+          description: 'Parses source code into AST'
+        });
+      }
+
+      // Hash/crypto patterns
+      if (uniqueCalls.some(c => /hash|md5|sha|digest|crypto/i.test(c))) {
+        patterns.push({
+          type: 'hashing',
+          method: uniqueCalls.find(c => /md5|sha/i.test(c)) || 'hash',
+          description: 'Computes file/content hash for change detection'
+        });
+      }
+
+      // Side effect detection patterns
+      if (effectsWithConfidence.length > 0) {
+        patterns.push({
+          type: 'side-effect-detection',
+          method: 'ast-analysis',
+          description: 'Detects side effects via AST analysis with import tracking'
+        });
+      }
+
+      // Graph manipulation
+      if (uniqueCalls.some(c => /map|filter|reduce|forEach/i.test(c)) &&
+        uniqueCalls.some(c => /graph|entries|functions/i.test(c))) {
+        patterns.push({
+          type: 'graph-transformation',
+          description: 'Transforms or filters call graph data'
+        });
+      }
+
       return {
-        id: metadata.name,
+        id: metadata.id,
+        name: metadata.name,
         type: 'function',
         file: filePath,
         line: metadata.line,
-        sig: `(${metadata.isAsync ? 'async ' : ''}${metadata.params || ''})`,
+        sig: metadata.params ? `(${metadata.params})` : '()',
         async: metadata.isAsync || false,
-        calls: uniqueCalls.slice(0, 10),
+        calls: uniqueCalls.slice(0, 50),
         effects: uniqueEffects,
         tags: tags,
+        patterns: patterns.length > 0 ? patterns : undefined,
         scipDoc: '',
         language: language
       };
@@ -173,8 +230,22 @@ async function main() {
     allEntries.push(...entries);
   }
 
-  console.log(`\n[3] Writing graph.jsonl...`);
-  const jsonlContent = allEntries.map(entry => JSON.stringify(entry)).join('\n');
+  console.log(`\n[3] Deduplicating and writing graph.jsonl...`);
+
+  // Deduplicate by unique key (file#name)
+  const seen = new Map();
+  for (const entry of allEntries) {
+    const key = `${entry.file}#${entry.name || entry.id}`;
+    // Keep the first occurrence (or could keep latest if preferred)
+    if (!seen.has(key)) {
+      seen.set(key, entry);
+    }
+  }
+  const dedupedEntries = Array.from(seen.values());
+
+  console.log(`    Before dedup: ${allEntries.length}, After: ${dedupedEntries.length}`);
+
+  const jsonlContent = dedupedEntries.map(entry => JSON.stringify(entry)).join('\n');
   writeFileSync('.llm-context/graph.jsonl', jsonlContent);
 
   console.log(`\n✅ Analysis complete!`);

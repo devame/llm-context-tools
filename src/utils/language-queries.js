@@ -355,21 +355,13 @@ export const LANGUAGE_QUERIES = {
       (list_lit
         (sym_lit) @func_type
         (sym_lit) @name
-        (_)* @params
-        (_)* @body
-        (#match? @func_type "^(defn|defn-)$")) @function
+        (_)* @content
+        (#match? @func_type "^(defn|defn-|def|defonce|defmulti|defmacro|deftest)$")) @function
 
       (list_lit
         (sym_lit) @func_type
-        (_)* @params
-        (_)* @body
-        (#match? @func_type "^(fn|fn*)$")) @function
-
-      (list_lit
-        (sym_lit) @func_type
-        (sym_lit) @name
-        (_)* @body
-        (#eq? @func_type "defmulti")) @function
+        (_)* @content
+        (#match? @func_type "^(fn|fn*|letfn)$")) @function
     `,
 
     calls: `
@@ -381,7 +373,7 @@ export const LANGUAGE_QUERIES = {
       (list_lit
         (sym_lit) @import_type
         (_)* @source
-        (#match? @import_type "^(require|use|import)$"))
+        (#match? @import_type "^(require|use|import|ns)$"))
     `
   },
 
@@ -390,21 +382,13 @@ export const LANGUAGE_QUERIES = {
       (list_lit
         (sym_lit) @func_type
         (sym_lit) @name
-        (_)* @params
-        (_)* @body
-        (#match? @func_type "^(defn|defn-)$")) @function
+        (_)* @content
+        (#match? @func_type "^(defn|defn-|def|defonce|defmulti|defmacro|deftest)$")) @function
 
       (list_lit
         (sym_lit) @func_type
-        (_)* @params
-        (_)* @body
-        (#match? @func_type "^(fn|fn*)$")) @function
-
-      (list_lit
-        (sym_lit) @func_type
-        (sym_lit) @name
-        (_)* @body
-        (#eq? @func_type "defmulti")) @function
+        (_)* @content
+        (#match? @func_type "^(fn|fn*|letfn)$")) @function
     `,
 
     calls: `
@@ -416,7 +400,7 @@ export const LANGUAGE_QUERIES = {
       (list_lit
         (sym_lit) @import_type
         (_)* @source
-        (#match? @import_type "^(require|use|import)$"))
+        (#match? @import_type "^(require|use|import|ns)$"))
     `
   },
 
@@ -425,26 +409,24 @@ export const LANGUAGE_QUERIES = {
       (par_tup_lit
         (sym_lit) @func_type
         (sym_lit) @name
-        (_)* @params
-        (_)* @body
+        (_)* @content
         (#match? @func_type "^(defn|defn/?)$")) @function
 
       (par_tup_lit
         (sym_lit) @func_type
-        (_)* @params
-        (_)* @body
+        (_)* @content
         (#match? @func_type "^(fn|fn/)$")) @function
 
       (par_tup_lit
         (sym_lit) @func_type
         (sym_lit) @name
-        (_)* @body
+        (_)* @content
         (#eq? @func_type "defmacro")) @function
     `,
 
     calls: `
       (par_tup_lit
-        (sym_lit) @call)
+        [(sym_lit) (sym_lit_plain)] @call)
     `,
 
     imports: `

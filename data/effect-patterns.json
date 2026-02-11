@@ -239,5 +239,274 @@
       "commands": ["echo", "printf", "logger"],
       "patterns": ["echo", "printf"]
     }
+  },
+  "clojure": {
+    "mutation": {
+      "calls": [
+        "swap!",
+        "reset!",
+        "vswap!",
+        "vreset!",
+        "set!",
+        "alter-var-root",
+        "commute",
+        "ref-set",
+        "alter"
+      ],
+      "patterns": [
+        ".*!$"
+      ]
+    },
+    "file_io": {
+      "imports": [
+        "clojure.java.io",
+        "clojure.core/spit",
+        "clojure.core/slurp"
+      ],
+      "calls": [
+        "spit",
+        "slurp",
+        "writer",
+        "reader",
+        "file",
+        "copy",
+        "delete-file",
+        "make-parents"
+      ],
+      "patterns": [
+        "io/.*",
+        ".*file.*",
+        ".*stream.*"
+      ]
+    },
+    "network": {
+      "imports": [
+        "clj-http.client",
+        "org.httpkit.client",
+        "hato.client"
+      ],
+      "calls": [
+        "get",
+        "post",
+        "put",
+        "delete",
+        "request"
+      ],
+      "patterns": [
+        "http/.*",
+        "client/.*"
+      ]
+    },
+    "logging": {
+      "imports": [
+        "clojure.tools.logging",
+        "timbre"
+      ],
+      "calls": [
+        "println",
+        "print",
+        "prn",
+        "info",
+        "warn",
+        "error",
+        "debug",
+        "fatal",
+        "spy"
+      ],
+      "patterns": [
+        "log/.*",
+        "println",
+        "prn"
+      ]
+    },
+    "database": {
+      "imports": [
+        "next.jdbc",
+        "honey.sql",
+        "datomic.api",
+        "xtdb.api"
+      ],
+      "calls": [
+        "execute!",
+        "execute-one!",
+        "transact",
+        "submit-tx",
+        "query",
+        "insert!",
+        "update!",
+        "delete!"
+      ],
+      "patterns": [
+        "jdbc/.*",
+        "db/.*",
+        "xt/.*"
+      ]
+    }
+  },
+  "clojurescript": {
+    "mutation": {
+      "calls": [
+        "swap!",
+        "reset!",
+        "vswap!",
+        "vreset!",
+        "set!"
+      ],
+      "patterns": [
+        ".*!$"
+      ]
+    },
+    "file_io": {
+      "imports": [
+        "fs"
+      ],
+      "calls": [
+        "slurp",
+        "spit"
+      ],
+      "patterns": [
+        "fs/.*"
+      ]
+    },
+    "network": {
+      "imports": [
+        "cljs-http.client",
+        "promesa.core"
+      ],
+      "calls": [
+        "fetch",
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE"
+      ],
+      "patterns": [
+        "http/.*",
+        ".*fetch.*"
+      ]
+    },
+    "logging": {
+      "calls": [
+        "println",
+        "print",
+        "prn",
+        "console.log",
+        "console.error",
+        "console.warn",
+        "info",
+        "warn",
+        "error"
+      ],
+      "patterns": [
+        "js/console.*",
+        "println",
+        "prn",
+        "log/.*"
+      ]
+    },
+    "database": {
+      "imports": [
+        "datascript.core"
+      ],
+      "calls": [
+        "transact",
+        "transact!"
+      ],
+      "patterns": [
+        "d/.*",
+        "db/.*"
+      ]
+    },
+    "dom": {
+      "imports": [
+        "reagent.core",
+        "reagent.dom",
+        "goog.dom"
+      ],
+      "calls": [
+        "render",
+        "mount",
+        "getElementById",
+        "querySelector",
+        "addEventListener"
+      ],
+      "patterns": [
+        "dom/.*",
+        ".*Element.*"
+      ]
+    }
+  },
+  "janet": {
+    "mutation": {
+      "calls": [
+        "set",
+        "put",
+        "array/push",
+        "array/pop",
+        "buffer/push",
+        "table/put"
+      ],
+      "patterns": [
+        ".*!$"
+      ]
+    },
+    "file_io": {
+      "calls": [
+        "file/open",
+        "file/read",
+        "file/write",
+        "file/close",
+        "spit",
+        "slurp",
+        "os/rm",
+        "os/mkdir"
+      ],
+      "patterns": [
+        "file/.*",
+        "os/.*"
+      ]
+    },
+    "network": {
+      "imports": [
+        "net",
+        "http"
+      ],
+      "calls": [
+        "net/connect",
+        "net/listen",
+        "net/accept"
+      ],
+      "patterns": [
+        "net/.*"
+      ]
+    },
+    "logging": {
+      "calls": [
+        "print",
+        "pp",
+        "printf",
+        "prin",
+        "eprint",
+        "eprintf"
+      ],
+      "patterns": [
+        "print.*",
+        "pp"
+      ]
+    },
+    "database": {
+      "imports": [
+        "sqlite3"
+      ],
+      "calls": [
+        "eval",
+        "query",
+        "execute"
+      ],
+      "patterns": [
+        "db/.*",
+        "sql/.*"
+      ]
+    }
   }
 }

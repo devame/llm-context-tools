@@ -1,92 +1,62 @@
 /**
- * Semantic Analyzer - Pattern-based code tagging
+ * Semantic Analyzer
  *
- * Adds semantic tags to functions based on regex patterns defined in
- * semantic-patterns.json.
+ * Analyzes code comments and strings for semantic meaning and tags.
+ * Helps identify patterns like:
+ * - Debouncing/Throttling
+ * - Animations
+ * - Performance optimizations
+ * - Hacks/TODOs
+ * - React Hooks usage
  */
 
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+const SEMANTIC_PATTERNS = [
+  // Timing / Performance
+  { tag: 'debounce', regex: /debounce/i },
+  { tag: 'throttle', regex: /throttle/i },
+  { tag: 'batch', regex: /batch/i },
+  { tag: 'cache', regex: /cache|memoiz/i },
+  { tag: 'optimization', regex: /optimiz|perf/i },
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+  // UI / Animation
+  { tag: 'animation', regex: /animat|transition/i },
+  { tag: 'scroll', regex: /scroll/i },
+  { tag: 'layout', regex: /layout|reflow/i },
+  { tag: 'render', regex: /render|paint/i },
 
-// Load semantic patterns
-let SEMANTIC_PATTERNS;
-try {
-  const patternsPath = join(__dirname, '../../data/semantic-patterns.json');
-  SEMANTIC_PATTERNS = JSON.parse(readFileSync(patternsPath, 'utf-8'));
-} catch (error) {
-  console.warn('Failed to load semantic patterns:', error.message);
-  SEMANTIC_PATTERNS = {};
-}
+  // State / Effects
+  { tag: 'state-mutation', regex: /mutat|setstate|reset!|swap!/i },
+  { tag: 'side-effect', regex: /side-effect|api call|fetch/i },
+  { tag: 'event-handler', regex: /handle|on[A-Z]/ },
 
-/**
- * Semantic Analyzer class
- */
-export class SemanticAnalyzer {
-  /**
-   * @param {string} language - Language name
-   */
-  constructor(language) {
-    this.language = language;
-    this.patterns = SEMANTIC_PATTERNS[language] || {};
-  }
+  // Code Quality
+  { tag: 'hack', regex: /hack|workaround|fixme/i },
+  { tag: 'todo', regex: /todo/i },
+  { tag: 'deprecated', regex: /deprecated/i },
 
-  /**
-   * Analyze function source for semantic tags
-   * @param {string} source - Function source code
-   * @returns {Array<string>} Detected tags
-   */
-  analyze(source) {
-    const tags = [];
+  // React specific
+  { tag: 'react-hook', regex: /use[A-Z]/ },
+  { tag: 'context', regex: /provider|context/i }
+];
 
-    for (const [tag, config] of Object.entries(this.patterns)) {
-      if (this.matchesTag(source, config)) {
-        tags.push(tag);
-      }
-    }
-
-    return tags;
-  }
-
-  /**
-   * Check if source matches a tag configuration
-   * @param {string} source - Source code
-   * @param {object} config - Tag configuration {patterns, antiPatterns}
-   * @returns {boolean} True if matches
-   */
-  matchesTag(source, config) {
-    // Check anti-patterns first
-    if (config.antiPatterns) {
-      for (const pattern of config.antiPatterns) {
-        if (new RegExp(pattern, 'm').test(source)) {
-          return false;
-        }
-      }
-    }
-
-    // Check positive patterns
-    if (config.patterns) {
-      for (const pattern of config.patterns) {
-        if (new RegExp(pattern, 'm').test(source)) {
-          return true;
-        }
-      }
-    }
-
-    return false;
-  }
-}
-
-/**
- * Create a semantic analyzer for a language
- * @param {string} language - Language name
- * @returns {SemanticAnalyzer} Analyzer instance
- */
 export function createSemanticAnalyzer(language) {
-  return new SemanticAnalyzer(language);
-}
+  return {
+    analyze(sourceCode) {
+      if (!sourceCode) return [];
 
-export default SemanticAnalyzer;
+      const tags = new Set();
+
+      // Simple regex scan over source (comments are part of source)
+      // For more precision, we could only scan comment nodes, but scanning
+      // the whole function source is a good heuristic for "semantic relevance".
+
+      for (const pattern of SEMANTIC_PATTERNS) {
+        if (pattern.regex.test(sourceCode)) {
+          tags.add(pattern.tag);
+        }
+      }
+
+      return Array.from(tags);
+    }
+  };
+}

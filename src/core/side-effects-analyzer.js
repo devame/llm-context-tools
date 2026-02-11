@@ -68,7 +68,7 @@ export class SideEffectAnalyzer {
    */
   analyzeCall(call, context = '') {
     const effects = [];
-    const effectTypes = ['file_io', 'network', 'logging', 'database', 'dom'];
+    const effectTypes = ['file_io', 'network', 'logging', 'database', 'dom', 'mutation'];
 
     for (const effectType of effectTypes) {
       const patterns = this.patterns[effectType];

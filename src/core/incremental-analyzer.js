@@ -277,9 +277,20 @@ function updateGraphFunctionLevel(functionChanges, newEntries) {
   console.log(`    Entries removed (changed/deleted functions): ${existingEntries.length - keptEntries.length}`);
 
   // Add new entries
-  const updatedGraph = [...keptEntries, ...newEntries];
+  const mergedGraph = [...keptEntries, ...newEntries];
+
+  // Deduplicate by unique key (file#id)
+  const seen = new Map();
+  for (const entry of mergedGraph) {
+    const key = `${entry.file}#${entry.id}`;
+    if (!seen.has(key)) {
+      seen.set(key, entry);
+    }
+  }
+  const updatedGraph = Array.from(seen.values());
+
   console.log(`    New entries added: ${newEntries.length}`);
-  console.log(`    Total entries: ${updatedGraph.length}`);
+  console.log(`    After dedup: ${updatedGraph.length}`);
 
   // Write updated graph
   const jsonlContent = updatedGraph.map(node => JSON.stringify(node)).join('\n');
@@ -309,9 +320,20 @@ function updateGraph(changedFiles, newEntries) {
   console.log(`    Entries removed (changed files): ${existingEntries.length - keptEntries.length}`);
 
   // Add all new entries
-  const updatedGraph = [...keptEntries, ...newEntries];
+  const mergedGraph = [...keptEntries, ...newEntries];
+
+  // Deduplicate by unique key (file#name or file#id)
+  const seen = new Map();
+  for (const entry of mergedGraph) {
+    const key = `${entry.file}#${entry.name || entry.id}`;
+    if (!seen.has(key)) {
+      seen.set(key, entry);
+    }
+  }
+  const updatedGraph = Array.from(seen.values());
+
   console.log(`    New entries added: ${newEntries.length}`);
-  console.log(`    Total entries: ${updatedGraph.length}`);
+  console.log(`    After dedup: ${updatedGraph.length}`);
 
   // Write updated graph
   const jsonlContent = updatedGraph.map(node => JSON.stringify(node)).join('\n');

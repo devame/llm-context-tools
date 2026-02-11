@@ -82,18 +82,50 @@ export class ASTAdapter {
     const nameNode = captures.name;
     const funcName = nameNode ? nameNode.text : 'anonymous';
 
-    // Extract parameters
-    const paramsNode = captures.params;
-    const params = paramsNode ? paramsNode.text : '';
+    // Extract parameters and body
+    let params = '';
+    let bodyNode = captures.body || functionNode;
 
-    // Extract function body
-    const bodyNode = captures.body || functionNode;
+    // Handle @content for Lisp-like languages (Clojure, Janet)
+    // This refined approach avoids duplication from multiple greedy (_) captures
+    if (captures.content) {
+      // Logic for Clojure/Janet: find the params vector/tuple
+      const contentNode = captures.content;
+      const isLisp = ['clojure', 'clojurescript', 'janet'].includes(this.language);
+
+      if (isLisp) {
+        // Find the node that looks like params (vector in Clojure, tuple in Janet)
+        const siblings = functionNode.children;
+        const nameIdx = siblings.findIndex(s => s.id === nameNode?.id);
+        const searchStart = nameIdx !== -1 ? nameIdx + 1 : 0;
+
+        let paramsNode = null;
+        for (let i = searchStart; i < siblings.length; i++) {
+          const s = siblings[i];
+          const type = s.type;
+          // Clojure vector or Janet tuple/array used for params
+          if (type.includes('vector') || type.includes('tuple') || type.includes('array')) {
+            paramsNode = s;
+            break;
+          }
+        }
+
+        if (paramsNode) {
+          params = paramsNode.text;
+          // Body is everything after params
+          // In tree-sitter, we don't have a single node for "rest of siblings"
+          // but we can treat the functionNode as the body provider for extraction
+          bodyNode = functionNode;
+        }
+      }
+    } else {
+      const paramsNode = captures.params;
+      params = paramsNode ? paramsNode.text : '';
+    }
 
     // Get location information
     const startLine = functionNode.startPosition.row + 1;  // Tree-sitter uses 0-based rows
     const endLine = functionNode.endPosition.row + 1;
-    const startCol = functionNode.startPosition.column;
-    const endCol = functionNode.endPosition.column;
 
     // Extract source code
     const source = functionNode.text;
@@ -108,12 +140,23 @@ export class ASTAdapter {
     // Generate unique ID
     const funcId = `${this.filePath}#${funcName}`;
 
+    // Extract preceding comments for semantic analysis
+    let precedingComments = '';
+    let previousNode = functionNode.previousSibling;
+    while (previousNode && (previousNode.type === 'comment' || previousNode.type === 'comment_block')) {
+      precedingComments = previousNode.text + '\n' + precedingComments;
+      previousNode = previousNode.previousSibling;
+    }
+
+    // Combine source and comments for semantic analysis
+    const fullAnalysisSource = precedingComments + source;
+
     return {
       id: funcId,
       name: funcName,
       line: startLine,
       endLine: endLine,
-      source: source,
+      source: fullAnalysisSource, // Use combined source for semantic analysis
       hash: hash,
       size: source.length,
       params: params,
@@ -149,7 +192,16 @@ export class ASTAdapter {
       for (const match of matches) {
         for (const capture of match.captures) {
           if (capture.name === 'call') {
-            calls.add(capture.node.text);
+            const callText = capture.node.text;
+            calls.add(callText);
+
+            // Support namespace-aware calls (e.g., ui/button -> button, ui)
+            // This enables "calls-to ui" and "calls-to button"
+            if (callText.includes('/')) {
+              const [ns, name] = callText.split('/');
+              if (ns) calls.add(ns);
+              if (name) calls.add(name);
+            }
           }
         }
       }
