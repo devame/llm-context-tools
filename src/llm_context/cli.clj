@@ -1,8 +1,9 @@
 (ns llm-context.cli
   (:require [clojure.pprint :as pprint]
-            [llm-context.config :as config]
             [llm-context.analysis.full :as full]
             [llm-context.analysis.incremental :as incremental]
+            [llm-context.config :as config]
+            [llm-context.context :as context-packet]
             [llm-context.project :as project]
             [llm-context.query :as query]
             [llm-context.runtime.doctor :as doctor]
@@ -122,6 +123,45 @@
 
 (defmethod execute "side-effects" [context _ _]
   (execute context "query" ["effects"]))
+
+(defn- parse-context-args [args defaults]
+  (loop [remaining (seq args) result defaults]
+    (if-let [arg (first remaining)]
+      (case arg
+        "--max-tokens" (if-let [value (second remaining)]
+                         (recur (nnext remaining)
+                                (assoc result :max-tokens (parse-long value)))
+                         (throw (ex-info "--max-tokens requires an integer" {:exit-code 2})))
+        "--depth" (if-let [value (second remaining)]
+                    (recur (nnext remaining) (assoc result :depth (parse-long value)))
+                    (throw (ex-info "--depth requires an integer" {:exit-code 2})))
+        "--format" (if-let [value (second remaining)]
+                     (recur (nnext remaining) (assoc result :format value))
+                     (throw (ex-info "--format requires edn or markdown" {:exit-code 2})))
+        (if (:focus result)
+          (throw (ex-info (str "Unexpected context argument: " arg) {:exit-code 2}))
+          (recur (next remaining) (assoc result :focus arg))))
+      result)))
+
+(defmethod execute "context" [cli-context _ args]
+  (let [settings (config/load-config cli-context)
+        options (parse-context-args
+                 args {:max-tokens (get-in settings [:context :default-max-tokens])
+                       :depth (get-in settings [:context :trace-depth])
+                       :format "markdown"})]
+    (when-not (:focus options)
+      (throw (ex-info "context requires a symbol name or ID" {:exit-code 2})))
+    (when-not (and (pos-int? (:max-tokens options)) (nat-int? (:depth options)))
+      (throw (ex-info "context budgets must be positive tokens and non-negative depth"
+                      {:exit-code 2})))
+    (store/with-store [graph cli-context settings]
+      (let [packet (context-packet/build graph options)]
+        (case (:format options)
+          "edn" (pprint/pprint packet)
+          "markdown" (print (context-packet/markdown packet))
+          (throw (ex-info (str "Unsupported context format: " (:format options))
+                          {:exit-code 2})))))
+    0))
 
 (defmethod execute :default [_ command _]
   (throw (ex-info (str "Unknown command: " command)

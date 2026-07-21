@@ -38,12 +38,12 @@
                    [?symbol :source/start-line ?line]]
           [])
          (keep (fn [[id name qualified kind path line]]
-                 (when (or (= term name) (= term qualified)
+                 (when (or (= term id) (= term name) (= term qualified)
                            (str/includes? (str/lower-case name) needle)
                            (str/includes? (str/lower-case qualified) needle))
                    {:id id :name name :qualified-name qualified
                     :kind kind :file path :line line})))
-         (sort-by (juxt #(if (or (= term (:name %))
+         (sort-by (juxt #(if (or (= term (:id %)) (= term (:name %))
                                  (= term (:qualified-name %))) 0 1)
                        :qualified-name))
          vec)))
