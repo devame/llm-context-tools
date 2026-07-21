@@ -11,6 +11,8 @@
   revision, ABI, and license provenance.
 - Fixed the repository's composite GitHub Action to install the tagged,
   checksum-verified release instead of an unrelated public npm package.
+- Rebuilt the official Tree-sitter 0.25.3 Windows core DLL with its public C
+  API exported so JTreeSitter can initialize and load packaged grammars.
 
 ## 0.4.2
 

@@ -9,3 +9,9 @@ license text and source are available in the upstream repository. Run
 `script/build-janet-grammar.sh` with Zig 0.15 or newer to reproduce all shipped
 Linux and macOS libraries for x86-64 and ARM64, plus Windows x86-64. These are
 the platforms provided by the packaged Tree-sitter core runtime.
+
+The Windows package also contains a rebuild of the official Tree-sitter
+`v0.25.3` core. The corresponding Maven DLL does not export its public C API,
+which prevents JTreeSitter from resolving `ts_set_allocator`. The rebuild uses
+the unmodified official source and public API declarations and is distributed
+under Tree-sitter's MIT license in `TREE_SITTER_CORE_LICENSE.txt`.
