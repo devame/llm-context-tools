@@ -1,5 +1,6 @@
 (ns llm-context.cli
   (:require [llm-context.config :as config]
+            [llm-context.analysis.full :as full]
             [llm-context.project :as project]
             [llm-context.runtime.doctor :as doctor]
             [llm-context.version :as version]))
@@ -64,6 +65,16 @@
   (let [checks (doctor/check context (config/load-config context))]
     (doctor/print-report checks)
     (if (doctor/healthy? checks) 0 1)))
+
+(defmethod execute "analyze" [context _ args]
+  (when (seq (remove #{"--full"} args))
+    (throw (ex-info (str "Unknown analyze option: " (first args)) {:exit-code 2})))
+  (let [result (full/analyze! context (config/load-config context))]
+    (when-not (get-in context [:options :quiet?])
+      (println (format "Analyzed %d files into %d entities (%d diagnostics)"
+                       (:files result) (:entities result)
+                       (count (:diagnostics result)))))
+    0))
 
 (defmethod execute :default [_ command _]
   (throw (ex-info (str "Unknown command: " command)
