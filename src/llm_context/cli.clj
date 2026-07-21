@@ -1,6 +1,7 @@
 (ns llm-context.cli
   (:require [llm-context.config :as config]
             [llm-context.project :as project]
+            [llm-context.runtime.doctor :as doctor]
             [llm-context.version :as version]))
 
 (defn usage []
@@ -58,6 +59,11 @@
 (defmethod execute "init" [context _ _]
   (println "Created" (str (config/init! context)))
   0)
+
+(defmethod execute "doctor" [context _ _]
+  (let [checks (doctor/check context (config/load-config context))]
+    (doctor/print-report checks)
+    (if (doctor/healthy? checks) 0 1)))
 
 (defmethod execute :default [_ command _]
   (throw (ex-info (str "Unknown command: " command)
