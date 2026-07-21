@@ -6,3 +6,5 @@ test-dir/
 .clj-kondo/.cache/
 target/
 dist/
+.lsp/
+frontend/

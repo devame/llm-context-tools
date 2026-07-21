@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: zulu
+          java-version: "25"
+      - uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          cli: latest
+      - name: Test and build
+        run: |
+          clojure -M:test
+          clojure -T:build dist
+      - name: Verify tag and prepare checksums
+        run: |
+          APP_VERSION=$(java --enable-native-access=ALL-UNNAMED -jar dist/llm-context.jar version)
+          test "$GITHUB_REF_NAME" = "v$APP_VERSION"
+          cd dist
+          sha256sum llm-context.jar > llm-context.jar.sha256
+      - name: Smoke-test installer against release artifacts
+        run: test/install-unix.sh
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/llm-context.jar \
+            dist/llm-context.jar.sha256 \
+            install.sh \
+            install.ps1 \
+            --generate-notes \
+            --verify-tag

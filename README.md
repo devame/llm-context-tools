@@ -34,6 +34,45 @@ tool does not present naming guesses as compiler facts.
 - Node.js 20+ only when using the npm launcher or optional
   `scip-typescript` provider. Node is not the application runtime.
 
+## Install
+
+Linux and macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/devame/llm-context-tools/main/install.sh | sh
+```
+
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/devame/llm-context-tools/main/install.ps1 | iex
+```
+
+Both installers require Java 23 or newer, download the latest release jar,
+verify its SHA-256 checksum, install a launcher, and run a version smoke check.
+The PowerShell installer adds its per-user installation directory to `PATH`.
+The Unix installer uses `~/.local/bin` and adds it to the appropriate user
+shell profile when needed. Open a new terminal after either installer changes
+`PATH`.
+
+Set `LLM_CONTEXT_VERSION=0.4.0` to pin a release or
+`LLM_CONTEXT_INSTALL_DIR` to choose another destination. The installers are
+idempotent: running them again replaces the jar and launcher only after
+checksum validation.
+
+To install the optional compiler-backed JavaScript/TypeScript provider in the
+same run, set `LLM_CONTEXT_INSTALL_SCIP=1`; this option also requires Node.js
+and npm. Re-run the installer to update, or remove the installed directory to
+uninstall.
+
+After installation:
+
+```bash
+llm-context doctor
+llm-context init
+llm-context analyze
+```
+
 ## Quick start from source
 
 ```bash

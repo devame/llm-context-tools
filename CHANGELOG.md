@@ -15,6 +15,8 @@
   EDN/JSON/JSONL/Markdown exports.
 - Added a measured authenticated resident service for interactive latency.
 - Replaced the Node runtime with an uberjar and thin npm launcher.
+- Added checksum-verifying one-script installers for Unix and Windows.
+- Added tagged-release automation for the jar and checksum artifacts.
 
 This is a greenfield cutover. No legacy JSON configuration or JSONL database
 migration is provided.

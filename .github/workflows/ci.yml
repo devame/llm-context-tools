@@ -24,4 +24,20 @@ jobs:
       - run: clojure -M:test
       - run: clojure -T:build dist
       - run: java --enable-native-access=ALL-UNNAMED -jar dist/llm-context.jar version
+      - run: test/install-unix.sh
       - run: npm pack --dry-run
+
+  installer-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: zulu
+          java-version: "25"
+      - uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          cli: latest
+      - run: clojure -T:build dist
+      - shell: pwsh
+        run: test/install-windows.ps1
