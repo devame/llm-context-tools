@@ -32,3 +32,13 @@
     (is (= "symbol:one" (get-in edges ["edge:one" :edge/to])))
     (is (= :resolution/ambiguous (get-in edges ["edge:dup" :edge/resolution])))
     (is (nil? (get-in edges ["edge:dup" :edge/to])))))
+
+(deftest incremental-decisions-retract-stale-unique-targets
+  (let [symbols [{:symbol-id "symbol:a" :name "target" :qualified-name "a/target"}
+                 {:symbol-id "symbol:b" :name "target" :qualified-name "b/target"}]
+        edge {:edge-id "edge:call" :kind :edge.kind/calls
+              :target-text "target" :current-target "symbol:a"
+              :resolution :resolution/heuristic}
+        decision (first (resolve/resolution-decisions symbols [edge] {}))]
+    (is (= :resolution/ambiguous (:resolution decision)))
+    (is (nil? (:target-id decision)))))

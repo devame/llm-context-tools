@@ -63,3 +63,39 @@
                                '[:find [?entity ...]
                                  :where [?entity :entity/type _]]
                                []))))))
+
+(deftest target-file-replacement-preserves-inbound-evidence
+  (let [project (temp-project)
+        source-file (file-entity "src/source.clj" "source")
+        target-file (file-entity "src/target.clj" "target")
+        source (symbol-entity source-file "sample/source" 1)
+        target (symbol-entity target-file "sample/target" 1)
+        edge {:entity/type :entity.type/edge
+              :edge/id "edge:inbound"
+              :edge/kind :edge.kind/calls
+              :edge/from (:symbol/id source)
+              :edge/to (:symbol/id target)
+              :edge/target-text "target"
+              :edge/resolution :resolution/exact
+              :edge/confidence 1.0}]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-file! graph source-file [source])
+      (store/replace-file! graph target-file [target])
+      (store/transact! graph [edge])
+      (store/delete-file! graph (:file/id target-file))
+      (is (= #{["edge:inbound" :resolution/unresolved]}
+             (store/query graph
+                          '[:find ?id ?resolution
+                            :where [?edge :edge/id ?id]
+                                   [?edge :edge/resolution ?resolution]]
+                          [])))
+      (store/reconcile-edges! graph
+                              [{:edge-id "edge:inbound"
+                                :target-id nil
+                                :resolution :resolution/unresolved
+                                :confidence 0.0}])
+      (is (empty? (store/query graph
+                               '[:find [?target ...]
+                                 :where [?edge :edge/id "edge:inbound"]
+                                        [?edge :edge/to ?target]]
+                               []))))))

@@ -1,6 +1,7 @@
 (ns llm-context.cli
   (:require [llm-context.config :as config]
             [llm-context.analysis.full :as full]
+            [llm-context.analysis.incremental :as incremental]
             [llm-context.project :as project]
             [llm-context.runtime.doctor :as doctor]
             [llm-context.version :as version]))
@@ -67,13 +68,23 @@
     (if (doctor/healthy? checks) 0 1)))
 
 (defmethod execute "analyze" [context _ args]
-  (when (seq (remove #{"--full"} args))
-    (throw (ex-info (str "Unknown analyze option: " (first args)) {:exit-code 2})))
-  (let [result (full/analyze! context (config/load-config context))]
+  (when-let [unknown (first (remove #{"--full"} args))]
+    (throw (ex-info (str "Unknown analyze option: " unknown) {:exit-code 2})))
+  (let [settings (config/load-config context)
+        full? (or (some #{"--full"} args)
+                  (not (incremental/index-present? context settings)))
+        result (if full?
+                 (full/analyze! context settings)
+                 (incremental/analyze! context settings))]
     (when-not (get-in context [:options :quiet?])
-      (println (format "Analyzed %d files into %d entities (%d diagnostics)"
-                       (:files result) (:entities result)
-                       (count (:diagnostics result)))))
+      (println
+       (if (= :incremental (:mode result))
+         (format "Analyzed %d files: %d changed, %d deleted (%d diagnostics)"
+                 (:files result) (:changed result) (:deleted result)
+                 (count (:diagnostics result)))
+         (format "Analyzed %d files into %d entities (%d diagnostics)"
+                 (:files result) (:entities result)
+                 (count (:diagnostics result))))))
     0))
 
 (defmethod execute :default [_ command _]

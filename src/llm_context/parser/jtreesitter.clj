@@ -36,6 +36,9 @@
 
 (defonce ^:private loaded-core (atom nil))
 
+(defn available-languages []
+  (set (keys language-definitions)))
+
 (defn- platform []
   (let [os (str/lower-case (System/getProperty "os.name"))
         arch (str/lower-case (System/getProperty "os.arch"))
@@ -112,7 +115,7 @@
 
 (defrecord JTreeSitterProvider [^Arena arena native-directory languages]
   provider/ParserProvider
-  (supported-languages [_] (set (keys language-definitions)))
+  (supported-languages [_] (available-languages))
   (parse-source [_ language source]
     (let [grammar (or (get @languages language)
                       (get (swap! languages

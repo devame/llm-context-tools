@@ -89,3 +89,75 @@
                          :else entity))))
                  entities))))
      outputs)))
+
+(defn scip-exact-targets
+  "Return edge-id -> symbol-id evidence from a SCIP index and database-shaped
+  symbol/edge maps."
+  [symbols edges scip-index]
+  (let [symbols-by-file (group-by :file-path symbols)
+        definitions
+        (into {}
+              (mapcat
+               (fn [{:keys [relative-path occurrences]}]
+                 (keep (fn [{:keys [range symbol roles]}]
+                         (when (and range symbol (pos? (bit-and 1 roles)))
+                           (let [[line column] range
+                                 target (->> (get symbols-by-file relative-path)
+                                             (filter #(point-in? % (inc line) (inc column)))
+                                             (sort-by span) first)]
+                             (when target [symbol (:symbol-id target)]))))
+                       occurrences))
+               (:documents scip-index)))
+        edges-by-file (group-by :file-path edges)]
+    (into {}
+          (mapcat
+           (fn [{:keys [relative-path occurrences]}]
+             (for [edge (get edges-by-file relative-path)
+                   occurrence occurrences
+                   :let [range (:range occurrence)
+                         symbol (:symbol occurrence)]
+                   :when (and range symbol
+                              (zero? (bit-and 1 (:roles occurrence)))
+                              (contains? definitions symbol)
+                              (let [[line column] range]
+                                (point-in? edge (inc line) (inc column))))]
+               [(:edge-id edge) (get definitions symbol)]))
+           (:documents scip-index)))))
+
+(defn resolution-decisions
+  "Resolve database-shaped edge maps after incremental symbol changes."
+  [symbols edges exact-targets]
+  (let [symbol-ids (set (map :symbol-id symbols))
+        by-qualified (group-by :qualified-name symbols)
+        by-name (group-by :name symbols)]
+    (mapv
+     (fn [edge]
+       (let [exact (get exact-targets (:edge-id edge))
+             candidates (or (seq (get by-qualified (:target-text edge)))
+                            (seq (get by-name (target-name (:target-text edge)))))]
+         (cond
+           (= :edge.kind/contains (:kind edge))
+           {:edge-id (:edge-id edge) :target-id (:current-target edge)
+            :resolution :resolution/exact :confidence 1.0}
+
+           exact
+           {:edge-id (:edge-id edge) :target-id exact
+            :resolution :resolution/exact :confidence 1.0}
+
+           (and (= :resolution/exact (:resolution edge))
+                (contains? symbol-ids (:current-target edge)))
+           {:edge-id (:edge-id edge) :target-id (:current-target edge)
+            :resolution :resolution/exact :confidence 1.0}
+
+           (= 1 (count candidates))
+           {:edge-id (:edge-id edge) :target-id (:symbol-id (first candidates))
+            :resolution :resolution/heuristic :confidence 0.75}
+
+           (> (count candidates) 1)
+           {:edge-id (:edge-id edge) :target-id nil
+            :resolution :resolution/ambiguous :confidence 0.25}
+
+           :else
+           {:edge-id (:edge-id edge) :target-id nil
+            :resolution :resolution/unresolved :confidence 0.0})))
+     edges)))

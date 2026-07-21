@@ -11,6 +11,8 @@
     "Atomically replace one file and every graph fact owned by it.")
   (delete-file! [store file-id]
     "Atomically retract a file and every graph fact connected to its symbols.")
+  (reconcile-edges! [store decisions]
+    "Update edge targets and resolution states after the symbol set changes.")
   (query [store query-form inputs] "Run a Datalog query against the store."))
 
 (defn- lookup-ref [attribute value]
@@ -30,7 +32,7 @@
     (:effect/symbol entity)
     (update :effect/symbol #(lookup-ref :symbol/id %))))
 
-(defn- file-owned-entity-ids [db file-id]
+(defn- file-retraction-plan [db file-id]
   (let [symbols (d/q '[:find [?symbol ...]
                        :in $ ?file-id
                        :where
@@ -43,19 +45,21 @@
                             :where [?edge :edge/from ?symbol]]
                           db symbols)
                      [])
-        to-edges (if (seq symbols)
-                   (d/q '[:find [?edge ...]
-                          :in $ [?symbol ...]
-                          :where [?edge :edge/to ?symbol]]
-                        db symbols)
-                   [])
+        inbound (if (seq symbols)
+                  (d/q '[:find ?edge ?symbol
+                         :in $ [?symbol ...]
+                         :where [?edge :edge/to ?symbol]]
+                       db symbols)
+                  #{})
         effects (if (seq symbols)
                   (d/q '[:find [?effect ...]
                          :in $ [?symbol ...]
                          :where [?effect :effect/symbol ?symbol]]
                        db symbols)
-                  [])]
-    (distinct (concat from-edges to-edges effects symbols))))
+                  [])
+        owned (set (concat from-edges effects symbols))]
+    {:owned owned
+     :inbound (remove #(contains? owned (first %)) inbound)}))
 
 (defn- file-eid [db file-id]
   (d/q '[:find ?file .
@@ -64,8 +68,14 @@
        db file-id))
 
 (defn- retract-owned-tx [db file-id]
-  (mapv (fn [eid] [:db/retractEntity eid])
-        (file-owned-entity-ids db file-id)))
+  (let [{:keys [owned inbound]} (file-retraction-plan db file-id)]
+    (into (mapv (fn [eid] [:db/retractEntity eid]) owned)
+          (mapcat (fn [[edge target]]
+                    [[:db/retract edge :edge/to target]
+                     {:db/id edge
+                      :edge/resolution :resolution/unresolved
+                      :edge/confidence 0.0}])
+                  inbound))))
 
 (defrecord DatalevinStore [connection path]
   GraphStore
@@ -93,6 +103,36 @@
                (conj [:db/retractEntity (file-eid db file-id)]))]
       (when (seq tx)
         (d/transact! connection tx))))
+
+  (reconcile-edges! [_ decisions]
+    (let [db (d/db connection)
+          tx (mapcat
+              (fn [{:keys [edge-id target-id resolution confidence]}]
+                (when-let [edge-eid (d/q '[:find ?edge .
+                                           :in $ ?id
+                                           :where [?edge :edge/id ?id]]
+                                         db edge-id)]
+                  (let [current-target (d/q '[:find ?target .
+                                              :in $ ?edge
+                                              :where [?edge :edge/to ?target]]
+                                            db edge-eid)
+                        target-eid (when target-id
+                                     (d/q '[:find ?target .
+                                            :in $ ?id
+                                            :where [?target :symbol/id ?id]]
+                                          db target-id))]
+                    (cond-> []
+                      (and current-target (not= current-target target-eid))
+                      (conj [:db/retract edge-eid :edge/to current-target])
+
+                      true
+                      (conj (cond-> {:db/id edge-eid
+                                     :edge/resolution resolution
+                                     :edge/confidence (double confidence)}
+                              target-eid (assoc :edge/to target-eid)))))))
+              decisions)]
+      (when (seq tx)
+        (d/transact! connection (vec tx)))))
 
   (query [_ query-form inputs]
     (apply d/q query-form (d/db connection) inputs))
