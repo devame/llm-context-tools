@@ -20,8 +20,13 @@ jobs:
       - uses: DeLaGuardo/setup-clojure@13.4
         with:
           cli: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
       - name: Test and build
         run: |
+          npm ci
           clojure -M:test
           clojure -T:build dist
       - name: Verify tag and prepare checksums
