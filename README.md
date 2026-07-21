@@ -55,7 +55,7 @@ The Unix installer uses `~/.local/bin` and adds it to the appropriate user
 shell profile when needed. Open a new terminal after either installer changes
 `PATH`.
 
-Set `LLM_CONTEXT_VERSION=0.4.2` to pin a release or
+Set `LLM_CONTEXT_VERSION=0.5.0` to pin a release or
 `LLM_CONTEXT_INSTALL_DIR` to choose another destination. The installers are
 idempotent: running them again replaces the jar and launcher only after
 checksum validation.
@@ -91,12 +91,18 @@ clojure -T:build dist
 java --enable-native-access=ALL-UNNAMED -jar dist/llm-context.jar help
 ```
 
-The npm package is a thin launcher around the same jar:
+For local npm-based development, the repository package is a thin launcher
+around the same jar:
 
 ```bash
-npm install -g llm-context
+npm pack
+npm install --global ./llm-context-0.5.0.tgz
 llm-context doctor
 ```
+
+The public npm name `llm-context` is not controlled by this project. Use the
+one-script installer for normal installations rather than installing that
+unrelated registry package.
 
 ## Commands
 
@@ -157,9 +163,12 @@ release.
 ## Language support
 
 Packaged structural grammars are verified for JavaScript, TypeScript, Python,
-Java, Go, Rust, C, C++, Ruby, PHP, Bash, and Clojure. TSX and Janet extensions
-are detected but currently reported as unavailable rather than silently
-producing incomplete graphs.
+Java, Go, Rust, C, C++, Ruby, PHP, Bash, Clojure, and Janet. Janet analysis
+recognizes `def`, `var`, function and macro variants, calls, and
+`import`/`use`/`require` module relationships. The grammar and all native
+libraries are embedded, so users do not need a separate Janet installation.
+TSX extensions are detected but currently reported as unavailable rather than
+silently producing incomplete graphs.
 
 SCIP TypeScript is optional and currently enriches JavaScript/TypeScript
 resolution. Other languages use explicit structural resolution states; they do
@@ -196,6 +205,10 @@ clojure -M:bench 50
 clojure -T:build dist
 npm pack --dry-run
 ```
+
+Maintainers can reproduce the embedded Janet grammar libraries with Zig 0.15+
+by running `script/build-janet-grammar.sh`. The pinned source revision and
+license are recorded in `resources/llm_context/native/JANET_GRAMMAR.md`.
 
 See [architecture and tradeoffs](docs/architecture.md),
 [semantic graph model](docs/semantic-graph.md), and

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.0
+
+- Added first-class Janet discovery, parsing, structural symbols, calls,
+  module imports, and effect classification.
+- Embedded a pinned Tree-sitter Janet grammar for every platform shipped by
+  the Tree-sitter core runtime; Janet and a C toolchain are not runtime
+  requirements.
+- Added a reproducible Zig-based native grammar build and recorded its source,
+  revision, ABI, and license provenance.
+- Fixed the repository's composite GitHub Action to install the tagged,
+  checksum-verified release instead of an unrelated public npm package.
+
 ## 0.4.2
 
 - Changed initialization to confirm the canonical project root before writing

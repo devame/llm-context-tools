@@ -35,12 +35,9 @@
           "export function hidden() {}")
     (let [{:keys [files diagnostics]}
           (files/discover context settings (jtreesitter/available-languages))]
-      (is (= ["frontend/src/app.cljs"] (mapv :relative-path files)))
-      (is (= [{:level :warning
-               :kind :grammar-unavailable
-               :file "frontend/src/build.janet"
-               :language :language/janet}]
-             diagnostics)))))
+      (is (= ["frontend/src/app.cljs" "frontend/src/build.janet"]
+             (mapv :relative-path files)))
+      (is (empty? diagnostics)))))
 
 (deftest git-project-discovery-honors-ignore-rules
   (let [root (Files/createTempDirectory

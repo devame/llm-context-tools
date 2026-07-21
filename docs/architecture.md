@@ -49,14 +49,17 @@ and queries to share the service safely.
   service mitigate it but add operational choices.
 - The current npm tarball contains a roughly 50 MB uberjar and native grammar
   libraries for multiple platforms.
-- Native grammar packaging must be tested for every supported OS/architecture.
+- Native grammar packaging must be tested for every supported OS/architecture;
+  the Janet grammar is pinned and cross-compiled into all supported packages.
 - `scip-typescript` still requires Node when compiler-backed JS/TS evidence is
   desired.
 - The Clojure contributor pool is smaller than the JavaScript contributor pool.
 - Tree-sitter, Clojure, and Datalevin do not automatically provide compiler
   symbol resolution. Unsupported semantics remain heuristic or unresolved.
-- TSX and Janet are detected but have no compatible packaged structural grammar
-  in this release.
+- TSX is detected but has no compatible packaged structural grammar in this
+  release. Janet is structurally analyzed, but—like other languages without a
+  compiler-backed provider—cross-file resolution remains explicitly heuristic
+  or unresolved.
 
 These costs are accepted because the project premise is a persistent semantic
 graph and query engine, not a transient JSON document generator.

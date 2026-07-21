@@ -40,3 +40,31 @@
     (is (some #(= "app.core/greet" (:symbol/qualified-name %)) entities))
     (is (some #(and (= :edge.kind/calls (:edge/kind %))
                     (= "println" (:edge/target-text %))) entities))))
+
+(deftest janet-forms-produce-symbol-call-and-import-facts
+  (let [{:keys [entities diagnostics]}
+        (analyze :language/janet "src/app.janet"
+                 (str "(import path :as p)\n"
+                      "(def api-version 1)\n"
+                      "(var *runs* 0)\n"
+                      "(defmacro traced [body] body)\n"
+                      "(defn greet [name]\n"
+                      "  (print (p/join \"hello\" name)))\n"))
+        symbols (filter :symbol/id entities)]
+    (is (empty? diagnostics))
+    (is (= #{"api-version" "*runs*" "traced" "greet"}
+           (set (map :symbol/name (remove #(= :symbol.kind/module
+                                              (:symbol/kind %))
+                                         symbols)))))
+    (is (some #(and (= :edge.kind/imports (:edge/kind %))
+                    (= "path" (:edge/target-text %))) entities))
+    (is (some #(and (= :edge.kind/calls (:edge/kind %))
+                    (= "print" (:edge/target-text %))) entities))
+    (is (some #(and (= :edge.kind/calls (:edge/kind %))
+                    (= "p/join" (:edge/target-text %))) entities))
+    (is (not-any? #(and (= :edge.kind/calls (:edge/kind %))
+                        (contains? #{"def" "var" "defn" "defmacro" "import"}
+                                   (:edge/target-text %)))
+                  entities))
+    (doseq [entity entities]
+      (is (= entity (schema/validate-entity! entity))))))

@@ -31,3 +31,11 @@
                                [(call "slurp") (call "spit") (call "println")])]
     (is (= [:effect.kind/file-read :effect.kind/file-write :effect.kind/logging]
            (mapv :effect/kind found)))))
+
+(deftest janet-core-effects-are-explicit
+  (let [found (effects/analyze :language/janet
+                               [(call "slurp") (call "spit") (call "print")
+                                (call "os/spawn") (call "net/connect")])]
+    (is (= [:effect.kind/file-read :effect.kind/file-write
+            :effect.kind/logging :effect.kind/process :effect.kind/network]
+           (mapv :effect/kind found)))))

@@ -86,6 +86,10 @@
    :language/clojure
    {:symbols {}
     :calls #{"list_lit"}
+    :imports #{}}
+   :language/janet
+   {:symbols {}
+    :calls #{"par_tup_lit"}
     :imports #{}}})
 
 (def identifier-types
@@ -121,7 +125,7 @@
       (str/replace #"\.[^.]+$" "")
       (str/replace #"[/\\]" ".")))
 
-(defn- clojure-form-head [source node]
+(defn- lisp-form-head [source node]
   (when-let [head (first (:children node))]
     (source-text source head)))
 
@@ -135,25 +139,64 @@
    "defrecord" :symbol.kind/type
    "deftype" :symbol.kind/type})
 
+(def janet-definitions
+  {"def" :symbol.kind/variable
+   "def-" :symbol.kind/variable
+   "defglobal" :symbol.kind/variable
+   "defdyn" :symbol.kind/variable
+   "var" :symbol.kind/variable
+   "var-" :symbol.kind/variable
+   "varglobal" :symbol.kind/variable
+   "defn" :symbol.kind/function
+   "defn-" :symbol.kind/function
+   "varfn" :symbol.kind/function
+   "defmacro" :symbol.kind/function
+   "defmacro-" :symbol.kind/function})
+
+(def janet-import-heads
+  #{"import" "use" "require"})
+
+(def janet-non-call-heads
+  ;; Compiler special forms and syntax-only forms do not represent runtime
+  ;; calls. Macros remain call edges because user-defined macros can resolve to
+  ;; graph symbols just like functions.
+  #{"break" "do" "fn" "if" "quasiquote" "quote" "set" "splice"
+    "unquote" "upscope" "while"})
+
 (defn- clojure-namespace [source root fallback]
   (or (some (fn [node]
               (when (and (= "list_lit" (:type node))
-                         (= "ns" (clojure-form-head source node)))
+                         (= "ns" (lisp-form-head source node)))
                 (when-let [name-node (second (:children node))]
                   (source-text source name-node))))
             (:children root))
       fallback))
 
-(defn- symbol-candidates [language source root]
-  (if (= :language/clojure language)
-    (keep (fn [node]
-            (when (and (= "list_lit" (:type node))
-                       (contains? clojure-definitions (clojure-form-head source node)))
-              (let [name-node (second (:children node))]
+(defn- lisp-symbol-candidates [source root node-type definitions]
+  (keep (fn [node]
+          (when (and (= node-type (:type node))
+                     (contains? definitions (lisp-form-head source node)))
+            (let [name-node (second (:children node))]
+              ;; Janet and Clojure both allow destructuring in some binding
+              ;; forms. Only a literal symbol denotes one canonical graph
+              ;; symbol; aggregate bindings need compiler expansion to split.
+              (when (and name-node
+                         (contains? #{"sym_lit" "sym_name" "simple_symbol"}
+                                    (:type name-node)))
                 {:node node
                  :name (source-text source name-node)
-                 :kind (get clojure-definitions (clojure-form-head source node))})))
-          (walk-nodes root))
+                 :kind (get definitions (lisp-form-head source node))}))))
+        (walk-nodes root)))
+
+(defn- symbol-candidates [language source root]
+  (cond
+    (= :language/clojure language)
+    (lisp-symbol-candidates source root "list_lit" clojure-definitions)
+
+    (= :language/janet language)
+    (lisp-symbol-candidates source root "par_tup_lit" janet-definitions)
+
+    :else
     (let [symbols (get-in language-profiles [language :symbols])]
       (keep (fn [node]
               (when-let [kind (get symbols (:type node))]
@@ -257,14 +300,29 @@
 (defn- clojure-call? [source node]
   (and (= "list_lit" (:type node))
        (not (contains? (conj (set (keys clojure-definitions)) "ns")
-                       (clojure-form-head source node)))))
+                       (lisp-form-head source node)))))
+
+(defn- janet-call? [source node]
+  (let [head (lisp-form-head source node)]
+    (and (= "par_tup_lit" (:type node))
+         (not (contains? janet-non-call-heads head))
+         (not (contains? janet-import-heads head))
+         (not (contains? janet-definitions head)))))
+
+(defn- janet-import? [source node]
+  (and (= "par_tup_lit" (:type node))
+       (contains? janet-import-heads (lisp-form-head source node))))
 
 (defn- extract-edges [language source root candidates symbols module-symbol]
   (let [{:keys [calls imports]} (get language-profiles language)
         nodes (walk-nodes root)
-        call? (if (= :language/clojure language)
-                #(clojure-call? source %)
-                #(contains? calls (:type %)))]
+        call? (case language
+                :language/clojure #(clojure-call? source %)
+                :language/janet #(janet-call? source %)
+                #(contains? calls (:type %)))
+        import? (if (= :language/janet language)
+                  #(janet-import? source %)
+                  #(contains? imports (:type %)))]
     (concat
      (keep (fn [node]
              (when (call? node)
@@ -274,8 +332,10 @@
                        target source node))))
            nodes)
      (keep (fn [node]
-             (when (contains? imports (:type node))
-               (when-let [target (target-node node)]
+             (when (import? node)
+               (when-let [target (if (= :language/janet language)
+                                   (second (:children node))
+                                   (target-node node))]
                  (edge :edge.kind/imports module-symbol target source node))))
            nodes))))
 

@@ -31,3 +31,38 @@
       (is (empty? (store/query graph
                                '[:find [?file ...] :where [?file :file/id _]]
                                []))))))
+
+(deftest complete-analysis-persists-janet-graph
+  (let [root (Files/createTempDirectory "llm-context-full-janet-"
+                                        (make-array java.nio.file.attribute.FileAttribute 0))
+        src (.resolve root "src")
+        project (project/context (str root))
+        settings (assoc-in (config/defaults) [:semantic :providers] [])]
+    (Files/createDirectories src (make-array java.nio.file.attribute.FileAttribute 0))
+    (spit (str (.resolve src "names.janet"))
+          "(defn format-name [name] (string/ascii-lower name))")
+    (spit (str (.resolve src "main.janet"))
+          (str "(import ./names)\n"
+               "(defn greet [name] (print (names/format-name name)))\n"
+               "(defn load-config [path] (slurp path))\n"))
+    (let [result (full/analyze! project settings)]
+      (is (= 2 (:files result)))
+      (is (empty? (:diagnostics result))))
+    (store/with-store [graph project settings]
+      (is (= #{"format-name" "greet" "load-config"}
+             (set (store/query graph
+                               '[:find [?name ...]
+                                 :where [?symbol :symbol/name ?name]
+                                        [?symbol :symbol/kind :symbol.kind/function]]
+                               []))))
+      (is (= #{:effect.kind/logging :effect.kind/file-read}
+             (set (store/query graph
+                               '[:find [?kind ...]
+                                 :where [_ :effect/kind ?kind]]
+                               []))))
+      (is (some #{"./names"}
+                (store/query graph
+                             '[:find [?target ...]
+                               :where [?edge :edge/kind :edge.kind/imports]
+                                      [?edge :edge/target-text ?target]]
+                             []))))))

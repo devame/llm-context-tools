@@ -32,7 +32,9 @@
    :language/bash {:library "tree-sitter-bash"
                    :symbol "tree_sitter_bash"}
    :language/clojure {:library "tree-sitter-clojure"
-                      :symbol "tree_sitter_clojure"}})
+                      :symbol "tree_sitter_clojure"}
+   :language/janet {:library "tree-sitter-janet"
+                    :symbol "tree_sitter_janet_simple"}})
 
 (defonce ^:private loaded-core (atom nil))
 

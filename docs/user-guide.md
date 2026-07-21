@@ -141,10 +141,30 @@ still performs structural analysis and records semantic links as heuristic,
 ambiguous, or unresolved where compiler evidence is unavailable.
 
 SCIP is used only for JavaScript and TypeScript enrichment. It is not required
-for Python, Java, Go, Rust, C, C++, Ruby, PHP, Bash, or Clojure structural
-analysis.
+for Python, Java, Go, Rust, C, C++, Ruby, PHP, Bash, Clojure, or Janet
+structural analysis.
 
-## 9. Troubleshooting
+## 9. Janet projects
+
+Janet support is included in the normal installation. No Janet executable,
+package manager, Tree-sitter CLI, or C compiler is required. A normal project
+scan includes every tracked or non-ignored `.janet` file and extracts:
+
+- module symbols based on source paths;
+- constants, variables, functions, private functions, global bindings, and
+  macros declared by Janet's standard definition forms;
+- function and macro call relationships;
+- `import`, `use`, and `require` module relationships; and
+- high-confidence file, process, network, and logging effects from Janet core
+  APIs.
+
+Janet macro expansion and compiler name resolution are not executed. As a
+result, generated definitions and dynamically computed calls remain absent or
+unresolved, and cross-file links are labelled heuristic unless exact evidence
+exists in the graph. This is deliberate: structural evidence is not presented
+as compiler evidence.
+
+## 10. Troubleshooting
 
 - `doctor` reports Java failure: install JDK 23 or newer and reopen the shell.
 - `doctor` reports SCIP as optional/unavailable: install Node/npm and rerun the

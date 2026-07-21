@@ -49,7 +49,21 @@
     {:match #"^(?:clojure\.java\.shell/)?sh$"
      :kind :effect.kind/process :confidence 0.97}
     {:match #"^(?:next\.jdbc/)?execute!$"
-     :kind :effect.kind/database-write :confidence 0.75}]})
+     :kind :effect.kind/database-write :confidence 0.75}]
+
+   :language/janet
+   [{:match #"^slurp$"
+     :kind :effect.kind/file-read :confidence 0.99}
+    {:match #"^(?:spit|file/write)$"
+     :kind :effect.kind/file-write :confidence 0.99}
+    {:match #"^file/read$"
+     :kind :effect.kind/file-read :confidence 0.99}
+    {:match #"^(?:print|printf|prin|prinf|pp|eprint|eprintf)$"
+     :kind :effect.kind/logging :confidence 0.96}
+    {:match #"^(?:os/spawn|os/execute|file/popen)$"
+     :kind :effect.kind/process :confidence 0.98}
+    {:match #"^net/(?:connect|listen|accept|read|write)$"
+     :kind :effect.kind/network :confidence 0.9}]})
 
 (defn- normalize-target [target]
   (-> target
