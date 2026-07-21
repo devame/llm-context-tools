@@ -37,5 +37,8 @@
                        :git/sha "dfb30dd"}}
          :jvm-opts ["--enable-native-access=ALL-UNNAMED"]
          :main-opts ["-m" "cognitect.test-runner"]}
+  :bench {:extra-paths ["bench"]
+          :jvm-opts ["--enable-native-access=ALL-UNNAMED"]
+          :main-opts ["-m" "llm-context.benchmark"]}
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.8"}}
           :ns-default build}}}

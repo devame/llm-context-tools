@@ -1,16 +1,27 @@
 (ns llm-context.cli
   (:require [clojure.pprint :as pprint]
-            [llm-context.analysis.full :as full]
-            [llm-context.analysis.incremental :as incremental]
             [llm-context.config :as config]
-            [llm-context.context :as context-packet]
-            [llm-context.export :as export]
-            [llm-context.integrations :as integrations]
             [llm-context.project :as project]
-            [llm-context.query :as query]
-            [llm-context.runtime.doctor :as doctor]
-            [llm-context.store :as store]
+            [llm-context.service.client :as service-client]
             [llm-context.version :as version]))
+
+(defn- resolve-fn [symbol]
+  (requiring-resolve symbol))
+
+(defn- with-graph [context settings f]
+  (let [graph ((resolve-fn 'llm-context.store/open) context settings)]
+    (try
+      (f graph)
+      (finally (.close ^java.io.Closeable graph)))))
+
+(def ^:private unavailable ::unavailable)
+
+(defn- remote-value [context request]
+  (if-let [response (service-client/request context request)]
+    (if (:ok response)
+      (:value response)
+      (throw (ex-info (:error response) {:exit-code (:exit-code response)})))
+    unavailable))
 
 (defn usage []
   (str "llm-context " version/value "\n\n"
@@ -26,6 +37,7 @@
        "  context              Build an LLM context packet\n"
        "  export               Export graph data\n"
        "  integrate            Install agent guidance\n"
+       "  service              Manage the optional resident service\n"
        "  stats                Show graph statistics\n"
        "  doctor               Check runtime capabilities\n"
        "  version              Print the application version\n"))
@@ -70,19 +82,27 @@
   0)
 
 (defmethod execute "doctor" [context _ _]
-  (let [checks (doctor/check context (config/load-config context))]
-    (doctor/print-report checks)
-    (if (doctor/healthy? checks) 0 1)))
+  (let [checks ((resolve-fn 'llm-context.runtime.doctor/check)
+                context (config/load-config context))]
+    ((resolve-fn 'llm-context.runtime.doctor/print-report) checks)
+    (if ((resolve-fn 'llm-context.runtime.doctor/healthy?) checks) 0 1)))
 
 (defmethod execute "analyze" [context _ args]
   (when-let [unknown (first (remove #{"--full"} args))]
     (throw (ex-info (str "Unknown analyze option: " unknown) {:exit-code 2})))
   (let [settings (config/load-config context)
-        full? (or (some #{"--full"} args)
-                  (not (incremental/index-present? context settings)))
-        result (if full?
-                 (full/analyze! context settings)
-                 (incremental/analyze! context settings))]
+        force-full? (boolean (some #{"--full"} args))
+        remote (remote-value context {:op :analyze :full? force-full?})
+        result (if-not (= unavailable remote)
+                 remote
+                 (let [full? (or force-full?
+                                 (not ((resolve-fn
+                                        'llm-context.analysis.incremental/index-present?)
+                                       context settings)))]
+                   (if full?
+                     ((resolve-fn 'llm-context.analysis.full/analyze!) context settings)
+                     ((resolve-fn 'llm-context.analysis.incremental/analyze!)
+                      context settings))))]
     (when-not (get-in context [:options :quiet?])
       (println
        (if (= :incremental (:mode result))
@@ -101,21 +121,30 @@
 
 (defn- execute-query [graph subcommand args]
   (case subcommand
-    "stats" (query/stats graph)
-    "find-symbol" (query/symbols graph (require-argument subcommand args))
-    "callers" (query/callers graph (require-argument subcommand args))
-    "callees" (query/callees graph (require-argument subcommand args))
-    "trace" (query/transitive-callees graph (require-argument subcommand args))
-    "entry-points" (query/entry-points graph)
-    "effects" (query/effects graph)
-    "unresolved" (query/unresolved graph)
+    "stats" ((resolve-fn 'llm-context.query/stats) graph)
+    "find-symbol" ((resolve-fn 'llm-context.query/symbols)
+                   graph (require-argument subcommand args))
+    "callers" ((resolve-fn 'llm-context.query/callers)
+               graph (require-argument subcommand args))
+    "callees" ((resolve-fn 'llm-context.query/callees)
+               graph (require-argument subcommand args))
+    "trace" ((resolve-fn 'llm-context.query/transitive-callees)
+             graph (require-argument subcommand args))
+    "entry-points" ((resolve-fn 'llm-context.query/entry-points) graph)
+    "effects" ((resolve-fn 'llm-context.query/effects) graph)
+    "unresolved" ((resolve-fn 'llm-context.query/unresolved) graph)
     (throw (ex-info (str "Unknown query: " subcommand) {:exit-code 2}))))
 
 (defmethod execute "query" [context _ args]
   (let [subcommand (or (first args) "stats")
-        settings (config/load-config context)]
-    (store/with-store [graph context settings]
-      (pprint/pprint (execute-query graph subcommand (next args))))
+        command-args (vec (next args))
+        remote (remote-value context {:op :query :subcommand subcommand
+                                      :args command-args})]
+    (if-not (= unavailable remote)
+      (pprint/pprint remote)
+      (let [settings (config/load-config context)]
+        (with-graph context settings
+          #(pprint/pprint (execute-query % subcommand command-args)))))
     0))
 
 (defmethod execute "stats" [context _ _]
@@ -157,14 +186,23 @@
     (when-not (and (pos-int? (:max-tokens options)) (nat-int? (:depth options)))
       (throw (ex-info "context budgets must be positive tokens and non-negative depth"
                       {:exit-code 2})))
-    (store/with-store [graph cli-context settings]
-      (let [packet (context-packet/build graph options)]
-        (case (:format options)
-          "edn" (pprint/pprint packet)
-          "markdown" (print (context-packet/markdown packet))
-          (throw (ex-info (str "Unsupported context format: " (:format options))
-                          {:exit-code 2})))))
-    0))
+    (let [format (keyword (:format options))
+          _ (when-not (contains? #{:edn :markdown} format)
+              (throw (ex-info (str "Unsupported context format: " (:format options))
+                              {:exit-code 2})))
+          remote (remote-value cli-context
+                               {:op :context :options (assoc options :format format)})]
+      (if-not (= unavailable remote)
+        (if (= :edn format) (pprint/pprint remote) (print remote))
+        (with-graph cli-context settings
+          (fn [graph]
+            (let [packet ((resolve-fn 'llm-context.context/build) graph options)]
+              (case format
+                :edn (pprint/pprint packet)
+                :markdown (print ((resolve-fn 'llm-context.context/markdown) packet))
+                (throw (ex-info (str "Unsupported context format: " (:format options))
+                                {:exit-code 2})))))))
+    0)))
 
 (defn- parse-export-args [args]
   (loop [remaining (seq args) result {:format :edn :output nil}]
@@ -182,9 +220,12 @@
 
 (defmethod execute "export" [cli-context _ args]
   (let [{:keys [format output]} (parse-export-args args)
-        settings (config/load-config cli-context)]
-    (store/with-store [graph cli-context settings]
-      (let [rendered (export/render graph format)]
+        settings (config/load-config cli-context)
+        remote (remote-value cli-context {:op :export :format format})]
+    (let [rendered (if-not (= unavailable remote)
+                     remote
+                     (with-graph cli-context settings
+                       #((resolve-fn 'llm-context.export/render) % format)))]
         (if (or (nil? output) (= "-" output))
           (print rendered)
           (let [path (.normalize (.resolve ^java.nio.file.Path (:root cli-context) output))]
@@ -193,7 +234,7 @@
                parent (make-array java.nio.file.attribute.FileAttribute 0)))
             (java.nio.file.Files/writeString path rendered
                                              (make-array java.nio.file.OpenOption 0))
-            (println "Wrote" (str path))))))
+            (println "Wrote" (str path)))))
     0))
 
 (defmethod execute "summary" [cli-context _ args]
@@ -208,8 +249,23 @@
     (when-let [unknown (first (remove #{"--force"} (next args)))]
       (throw (ex-info (str "Unexpected integrate argument: " unknown)
                       {:exit-code 2})))
-    (println "Installed" (str (integrations/install! cli-context target force?)))
+    (println "Installed"
+             (str ((resolve-fn 'llm-context.integrations/install!)
+                   cli-context target force?)))
     0))
+
+(defmethod execute "service" [cli-context _ args]
+  (case (or (first args) "status")
+    "start" ((resolve-fn 'llm-context.service.server/start!) cli-context)
+    "status" (do (println (if (service-client/available? cli-context)
+                            "running" "not running")) 0)
+    "stop" (let [response (service-client/request cli-context {:op :stop})]
+             (if (:ok response)
+               (do (println "stopped") 0)
+               (throw (ex-info "No service is running for this project"
+                               {:exit-code 2}))))
+    (throw (ex-info (str "Unknown service command: " (first args))
+                    {:exit-code 2}))))
 
 (defmethod execute :default [_ command _]
   (throw (ex-info (str "Unknown command: " command)
