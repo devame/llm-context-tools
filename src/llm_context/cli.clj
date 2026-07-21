@@ -1,5 +1,5 @@
 (ns llm-context.cli
-  (:require [clojure.string :as str]
+  (:require [llm-context.config :as config]
             [llm-context.project :as project]
             [llm-context.version :as version]))
 
@@ -11,6 +11,7 @@
        "  -q, --quiet          Suppress informational output\n"
        "  -h, --help           Show this help\n\n"
        "Commands:\n"
+       "  init                 Write llm-context.edn\n"
        "  analyze              Update the semantic graph\n"
        "  query                Query the semantic graph\n"
        "  context              Build an LLM context packet\n"
@@ -52,6 +53,10 @@
 
 (defmethod execute "version" [_ _ _]
   (println version/value)
+  0)
+
+(defmethod execute "init" [context _ _]
+  (println "Created" (str (config/init! context)))
   0)
 
 (defmethod execute :default [_ command _]

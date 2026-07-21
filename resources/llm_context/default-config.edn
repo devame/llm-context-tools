@@ -1,0 +1,16 @@
+{:analysis
+ {:include ["src" "test"]
+  :exclude [".git" ".llm-context" "node_modules" "target" ".cpcache"]
+  :languages :auto
+  :max-file-bytes 1048576}
+
+ :store
+ {:path ".llm-context/db"}
+
+ :semantic
+ {:providers [:scip-typescript]
+  :scip-typescript-command ["npx" "--no-install" "scip-typescript" "index"]}
+
+ :context
+ {:default-max-tokens 8000
+  :trace-depth 4}}
