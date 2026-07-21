@@ -15,22 +15,41 @@
     "Update edge targets and resolution states after the symbol set changes.")
   (query [store query-form inputs] "Run a Datalog query against the store."))
 
-(defn- lookup-ref [attribute value]
-  [attribute value])
+(defn- entity-identity [entity]
+  (cond
+    (:file/id entity) [:file/id (:file/id entity)]
+    (:symbol/id entity) [:symbol/id (:symbol/id entity)]
+    (:edge/id entity) [:edge/id (:edge/id entity)]
+    (:effect/id entity) [:effect/id (:effect/id entity)]))
 
-(defn- entity->tx [entity]
-  (cond-> entity
-    (:symbol/file entity)
-    (update :symbol/file #(lookup-ref :file/id %))
+(defn- existing-eid [db [attribute value]]
+  (d/q '[:find ?entity .
+         :in $ ?attribute ?value
+         :where [?entity ?attribute ?value]]
+       db attribute value))
 
-    (:edge/from entity)
-    (update :edge/from #(lookup-ref :symbol/id %))
-
-    (:edge/to entity)
-    (update :edge/to #(lookup-ref :symbol/id %))
-
-    (:effect/symbol entity)
-    (update :effect/symbol #(lookup-ref :symbol/id %))))
+(defn- entities->tx
+  "Assign explicit entity/temp IDs so references within one transaction never
+  create partial lookup-ref placeholders. Identities in force-new are recreated
+  after retractEntity rather than reused in the same transaction."
+  [db entities force-new]
+  (let [identities (mapv entity-identity entities)
+        db-ids (into {}
+                     (map-indexed
+                      (fn [index ident]
+                        [ident (or (when-not (contains? force-new ident)
+                                     (existing-eid db ident))
+                                   (- (inc index)))])
+                      identities))
+        ref (fn [attribute value]
+              (or (get db-ids [attribute value]) [attribute value]))]
+    (mapv (fn [entity]
+            (cond-> (assoc entity :db/id (get db-ids (entity-identity entity)))
+              (:symbol/file entity) (update :symbol/file #(ref :file/id %))
+              (:edge/from entity) (update :edge/from #(ref :symbol/id %))
+              (:edge/to entity) (update :edge/to #(ref :symbol/id %))
+              (:effect/symbol entity) (update :effect/symbol #(ref :symbol/id %))))
+          entities)))
 
 (defn- file-retraction-plan [db file-id]
   (let [symbols (d/q '[:find [?symbol ...]
@@ -85,14 +104,17 @@
     (doseq [entity entities]
       (schema/validate-entity! entity))
     (when (seq entities)
-      (d/transact! connection (mapv entity->tx entities))))
+      (d/transact! connection (entities->tx (d/db connection) entities #{}))))
 
   (replace-file! [_ file entities]
     (schema/validate-entity! file)
     (doseq [entity entities]
       (schema/validate-entity! entity))
-    (let [retractions (retract-owned-tx (d/db connection) (:file/id file))
-          assertions (mapv entity->tx (cons file entities))]
+    (let [db (d/db connection)
+          retractions (retract-owned-tx db (:file/id file))
+          all-entities (vec (cons file entities))
+          force-new (set (map entity-identity entities))
+          assertions (entities->tx db all-entities force-new)]
       (d/transact! connection (into retractions assertions))))
 
   (delete-file! [_ file-id]

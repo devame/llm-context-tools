@@ -5,3 +5,4 @@ test-dir/
 .cpcache/
 .clj-kondo/.cache/
 target/
+dist/

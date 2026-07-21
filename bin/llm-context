@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PACKAGE_DIR=$(dirname -- "$SCRIPT_DIR")
+JAR_PATH="$PACKAGE_DIR/dist/llm-context.jar"
+
+if [ -f "$JAR_PATH" ]; then
+  exec java --enable-native-access=ALL-UNNAMED -jar "$JAR_PATH" "$@"
+fi
+
+cd "$PACKAGE_DIR"
+exec clojure -M -m llm-context.main "$@"

@@ -40,6 +40,7 @@
   (let [{:keys [project file entities]} (fixture)]
     (store/with-store [graph project (config/defaults)]
       (store/replace-file! graph file entities)
+      (is (= 5 (:entities (query/stats graph))))
       (is (= 1 (:files (query/stats graph))))
       (is (= "sample/callee" (:qualified-name (first (query/symbols graph "callee")))))
       (is (= "sample/caller" (:name (first (query/callers graph "symbol:callee")))))

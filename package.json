@@ -1,43 +1,30 @@
 {
   "name": "llm-context",
-  "version": "0.3.0",
-  "description": "LLM-optimized code analysis system with incremental updates - generates compact, semantically-rich code context for AI assistants",
+  "version": "0.4.0",
+  "description": "Datalevin-backed semantic code graph and context generator for AI assistants",
   "type": "module",
   "bin": {
     "llm-context": "./bin/llm-context.js"
   },
-  "main": "src/index.js",
   "files": [
-    "bin/",
-    "src/",
-    "data/",
-    ".claude/skills/analyzing-codebases/",
-    "README.md",
-    "docs/"
+    "bin/llm-context.js",
+    "dist/llm-context.jar",
+    "README.md"
   ],
   "scripts": {
-    "analyze": "node src/index.js",
-    "analyze:full": "rm -f .llm-context/manifest.json && node src/index.js",
-    "query": "node src/utils/query.js",
-    "grep": "node src/utils/grep.js",
-    "check-changes": "node src/core/change-detector.js",
-    "parse-scip": "node src/parser/scip-parser.js",
-    "transform": "node src/parser/transformer.js",
-    "summarize": "node src/utils/summary-updater.js"
+    "test": "clojure -M:test",
+    "build": "clojure -T:build dist",
+    "prepack": "clojure -T:build dist"
   },
   "keywords": [
     "llm",
-    "ai",
     "code-analysis",
-    "ast",
+    "semantic-graph",
+    "datalog",
+    "datalevin",
+    "clojure",
     "scip",
-    "code-intelligence",
-    "semantic-analysis",
-    "incremental-updates",
-    "claude",
-    "chatgpt",
-    "copilot",
-    "developer-tools"
+    "tree-sitter"
   ],
   "author": "devame",
   "license": "MIT",
@@ -50,32 +37,9 @@
   },
   "homepage": "https://github.com/devame/llm-context-tools#readme",
   "engines": {
-    "node": ">=16.0.0"
+    "node": ">=20.0.0"
   },
-  "devDependencies": {
-    "@sourcegraph/scip-typescript": "^0.4.0",
-    "protobufjs": "^7.5.4"
-  },
-  "dependencies": {
-    "@sourcegraph/scip-typescript": "^0.4.0",
-    "minisearch": "^7.2.0",
-    "protobufjs": "^7.5.4",
-    "tree-sitter": "^0.20.4",
-    "tree-sitter-bash": "^0.20.5",
-    "tree-sitter-c": "^0.20.8",
-    "tree-sitter-cli": "^0.26.5",
-    "tree-sitter-clojure": "github:sogaiu/tree-sitter-clojure",
-    "tree-sitter-cpp": "^0.20.0",
-    "tree-sitter-go": "^0.20.0",
-    "tree-sitter-janet": "github:sogaiu/tree-sitter-janet-simple",
-    "tree-sitter-java": "^0.20.2",
-    "tree-sitter-javascript": "^0.20.0",
-    "tree-sitter-json": "^0.20.2",
-    "tree-sitter-php": "^0.21.1",
-    "tree-sitter-python": "^0.20.4",
-    "tree-sitter-ruby": "^0.20.0",
-    "tree-sitter-rust": "^0.20.4",
-    "tree-sitter-typescript": "^0.20.3",
-    "web-tree-sitter": "^0.20.8"
+  "optionalDependencies": {
+    "@sourcegraph/scip-typescript": "^0.4.0"
   }
 }

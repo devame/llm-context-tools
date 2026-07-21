@@ -42,7 +42,10 @@
       (is (= #{["sample/a"]}
              (store/query graph
                           '[:find ?name :where [_ :symbol/qualified-name ?name]]
-                          []))))))
+                          [])))
+      (is (= 2 (count (store/query graph
+                                  '[:find [?entity ...]
+                                    :where [?entity :entity/type _]] [])))))))
 
 (deftest replacement-and-deletion-are-cascading
   (let [project (temp-project)

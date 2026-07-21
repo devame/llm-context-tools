@@ -8,8 +8,10 @@
        (into (sorted-map))))
 
 (defn stats [graph]
-  (let [types (store/query graph
-                           '[:find [?type ...] :where [_ :entity/type ?type]] [])]
+  (let [types (map second
+                   (store/query graph
+                                '[:find ?entity ?type
+                                  :where [?entity :entity/type ?type]] []))]
     {:entities (count types)
      :files (count (filter #{:entity.type/file} types))
      :symbols (count (filter #{:entity.type/symbol} types))

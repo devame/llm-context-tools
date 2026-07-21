@@ -10,7 +10,7 @@
     (let [out (with-out-str (is (zero? (main/run []))))]
       (is (str/includes? out "Usage:"))))
   (testing "version is printable"
-    (is (str/includes? (with-out-str (main/run ["version"])) "0.4.0")))
+    (is (= "0.4.0\n" (with-out-str (main/run ["version"])))))
   (testing "unknown commands are usage errors"
     (is (= 2 (main/run ["no-such-command"])))))
 
