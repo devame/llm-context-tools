@@ -5,6 +5,7 @@
             [llm-context.config :as config]
             [llm-context.context :as context-packet]
             [llm-context.export :as export]
+            [llm-context.integrations :as integrations]
             [llm-context.project :as project]
             [llm-context.query :as query]
             [llm-context.runtime.doctor :as doctor]
@@ -24,6 +25,7 @@
        "  query                Query the semantic graph\n"
        "  context              Build an LLM context packet\n"
        "  export               Export graph data\n"
+       "  integrate            Install agent guidance\n"
        "  stats                Show graph statistics\n"
        "  doctor               Check runtime capabilities\n"
        "  version              Print the application version\n"))
@@ -196,6 +198,18 @@
 
 (defmethod execute "summary" [cli-context _ args]
   (execute cli-context "export" (concat ["--format" "markdown"] args)))
+
+(defmethod execute "integrate" [cli-context _ args]
+  (let [target (some-> (first args) keyword)
+        force? (boolean (some #{"--force"} (next args)))]
+    (when-not target
+      (throw (ex-info "integrate requires claude, codex, or generic"
+                      {:exit-code 2})))
+    (when-let [unknown (first (remove #{"--force"} (next args)))]
+      (throw (ex-info (str "Unexpected integrate argument: " unknown)
+                      {:exit-code 2})))
+    (println "Installed" (str (integrations/install! cli-context target force?)))
+    0))
 
 (defmethod execute :default [_ command _]
   (throw (ex-info (str "Unknown command: " command)
