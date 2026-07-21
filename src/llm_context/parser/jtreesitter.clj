@@ -10,7 +10,29 @@
 
 (def language-definitions
   {:language/javascript {:library "tree-sitter-javascript"
-                         :symbol "tree_sitter_javascript"}})
+                         :symbol "tree_sitter_javascript"}
+   :language/typescript {:library "tree-sitter-typescript"
+                         :symbol "tree_sitter_typescript"}
+   :language/python {:library "tree-sitter-python"
+                     :symbol "tree_sitter_python"}
+   :language/java {:library "tree-sitter-java"
+                   :symbol "tree_sitter_java"}
+   :language/go {:library "tree-sitter-go"
+                 :symbol "tree_sitter_go"}
+   :language/rust {:library "tree-sitter-rust"
+                   :symbol "tree_sitter_rust"}
+   :language/c {:library "tree-sitter-c"
+                :symbol "tree_sitter_c"}
+   :language/cpp {:library "tree-sitter-cpp"
+                  :symbol "tree_sitter_cpp"}
+   :language/ruby {:library "tree-sitter-ruby"
+                   :symbol "tree_sitter_ruby"}
+   :language/php {:library "tree-sitter-php"
+                  :symbol "tree_sitter_php"}
+   :language/bash {:library "tree-sitter-bash"
+                   :symbol "tree_sitter_bash"}
+   :language/clojure {:library "tree-sitter-clojure"
+                      :symbol "tree_sitter_clojure"}})
 
 (defonce ^:private loaded-core (atom nil))
 
