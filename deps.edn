@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
- :deps {org.clojure/clojure {:mvn/version "1.12.0"}}
+ :deps {org.clojure/clojure {:mvn/version "1.12.0"}
+        org.datalevin/datalevin-embedded {:mvn/version "0.10.18"}}
  :aliases
  {:dev {:extra-paths ["dev"]}
   :test {:extra-paths ["test"]
