@@ -3,14 +3,16 @@
             [clojure.test :refer [deftest is testing]]
             [llm-context.cli :as cli]
             [llm-context.main :as main]
-            [llm-context.project :as project]))
+            [llm-context.project :as project]
+            [llm-context.version :as version]))
 
 (deftest basic-command-routing
   (testing "help is the default"
     (let [out (with-out-str (is (zero? (main/run []))))]
       (is (str/includes? out "Usage:"))))
   (testing "version is printable"
-    (is (= "0.4.0\n" (with-out-str (main/run ["version"])))))
+    (is (= (str version/value "\n")
+           (with-out-str (main/run ["version"])))))
   (testing "unknown commands are usage errors"
     (is (= 2 (main/run ["no-such-command"])))))
 
