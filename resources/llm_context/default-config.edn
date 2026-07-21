@@ -1,6 +1,7 @@
 {:analysis
- {:include ["src" "test"]
-  :exclude [".git" ".llm-context" "node_modules" "target" ".cpcache"]
+ {:include ["."]
+  :exclude [".git" ".llm-context" "node_modules" "target" ".cpcache"
+            "dist" "build" "out" ".shadow-cljs" ".cljs_node_repl" ".lsp"]
   :languages :auto
   :max-file-bytes 1048576}
 

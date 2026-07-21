@@ -1,5 +1,6 @@
 (ns llm-context.cli
   (:require [clojure.pprint :as pprint]
+            [clojure.string :as str]
             [llm-context.config :as config]
             [llm-context.project :as project]
             [llm-context.service.client :as service-client]
@@ -31,7 +32,7 @@
        "  -q, --quiet          Suppress informational output\n"
        "  -h, --help           Show this help\n\n"
        "Commands:\n"
-       "  init                 Write llm-context.edn\n"
+       "  init [--yes]         Confirm the project root and write llm-context.edn\n"
        "  analyze              Update the semantic graph\n"
        "  query                Query the semantic graph\n"
        "  context              Build an LLM context packet\n"
@@ -80,9 +81,34 @@
   (println version/value)
   0)
 
-(defmethod execute "init" [context _ _]
-  (println "Created" (str (config/init! context)))
+(defn- confirm-project-root? [context]
+  (printf "Initialize llm-context in %s? [y/N] " (:root-str context))
+  (flush)
+  (let [answer (some-> (read-line) str/trim str/lower-case)]
+    (case answer
+      ("y" "yes") true
+      ("" "n" "no") false
+      nil (throw (ex-info "Confirmation input is unavailable; rerun init with --yes"
+                          {:exit-code 2}))
+      (throw (ex-info "Please answer yes or no" {:exit-code 2})))))
+
+(defmethod execute "init" [context _ args]
+  (when-let [unknown (first (remove #{"--yes"} args))]
+    (throw (ex-info (str "Unknown init option: " unknown) {:exit-code 2})))
+  (if (or (some #{"--yes"} args) (confirm-project-root? context))
+    (println "Created" (str (config/init! context)))
+    (println "Initialization cancelled; no files were written."))
   0)
+
+(defn- diagnostic-message [{:keys [level kind file path language message size]}]
+  (str (name (or level :info)) " " (name kind) ": "
+       (case kind
+         :missing-include (str "configured path does not exist: " path)
+         :grammar-unavailable (str file " (" (some-> language name) ")")
+         :file-too-large (str file " (" size " bytes)")
+         :binary-file file
+         :semantic-provider-failed (or message "semantic provider failed")
+         (or file path message (pr-str kind)))))
 
 (defmethod execute "doctor" [context _ _]
   (let [checks ((resolve-fn 'llm-context.runtime.doctor/check)
@@ -114,7 +140,9 @@
                  (count (:diagnostics result)))
          (format "Analyzed %d files into %d entities (%d diagnostics)"
                  (:files result) (:entities result)
-                 (count (:diagnostics result))))))
+                 (count (:diagnostics result)))))
+      (doseq [diagnostic (:diagnostics result)]
+        (println "  " (diagnostic-message diagnostic))))
     0))
 
 (defn- require-argument [subcommand args]

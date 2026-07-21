@@ -67,6 +67,36 @@
                                  :where [?entity :entity/type _]]
                                []))))))
 
+(deftest whole-graph-replacement-resolves-forward-cross-file-references
+  (let [project (temp-project)
+        source-file (file-entity "src/source.clj" "source")
+        target-file (file-entity "src/target.clj" "target")
+        source (symbol-entity source-file "sample/source" 1)
+        target (symbol-entity target-file "sample/target" 1)
+        edge {:entity/type :entity.type/edge
+              :edge/id "edge:forward"
+              :edge/kind :edge.kind/calls
+              :edge/from (:symbol/id source)
+              :edge/to (:symbol/id target)
+              :edge/target-text "sample/target"
+              :edge/resolution :resolution/exact
+              :edge/confidence 1.0}]
+    (store/with-store [graph project (config/defaults)]
+      ;; The edge intentionally precedes its target in input order.
+      (store/replace-all! graph [source-file source edge target-file target])
+      (is (= #{["edge:forward" "sample/target"]}
+             (store/query graph
+                          '[:find ?edge-id ?target-name
+                            :where [?edge :edge/id ?edge-id]
+                                   [?edge :edge/to ?target]
+                                   [?target :symbol/qualified-name ?target-name]]
+                          [])))
+      (store/replace-all! graph [])
+      (is (empty? (store/query graph
+                               '[:find [?entity ...]
+                                 :where [?entity :entity/type _]]
+                               []))))))
+
 (deftest target-file-replacement-preserves-inbound-evidence
   (let [project (temp-project)
         source-file (file-entity "src/source.clj" "source")

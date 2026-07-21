@@ -35,14 +35,11 @@
                           files)
           semantic (maybe-scip project config (map :language files))
           resolved (resolve/resolve-outputs extracted (:index semantic))
-          current-file-ids (set (map #(get-in % [:file :file/id]) resolved))]
+          all-entities (vec (mapcat (fn [{:keys [file entities]}]
+                                      (cons file entities))
+                                    resolved))]
       (store/with-store [graph project config]
-        (doseq [{:keys [file entities]} resolved]
-          (store/replace-file! graph file entities))
-        (let [existing (set (store/query graph
-                                         '[:find [?id ...] :where [_ :file/id ?id]] []))]
-          (doseq [deleted (remove current-file-ids existing)]
-            (store/delete-file! graph deleted))))
+        (store/replace-all! graph all-entities))
       {:mode :full
        :files (count files)
        :entities (reduce + (map #(inc (count (:entities %))) resolved))

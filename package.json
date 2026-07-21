@@ -1,6 +1,6 @@
 {
   "name": "llm-context",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Datalevin-backed semantic code graph and context generator for AI assistants",
   "type": "module",
   "bin": {

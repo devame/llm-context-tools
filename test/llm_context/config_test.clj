@@ -10,7 +10,7 @@
 
 (deftest defaults-are-valid
   (let [loaded (config/load-config (temp-project))]
-    (is (= ["src" "test"] (get-in loaded [:analysis :include])))
+    (is (= ["."] (get-in loaded [:analysis :include])))
     (is (= ".llm-context/db" (get-in loaded [:store :path])))))
 
 (deftest user-configuration-deep-merges

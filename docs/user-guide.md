@@ -15,9 +15,13 @@ cd path/to/your-project
 llm-context init
 ```
 
-This creates `llm-context.edn`. It does not modify source files. Review the
-include/exclude paths before indexing a large monorepo. The default database
-location is `.llm-context/db/`.
+The command displays the canonical project root and requires confirmation
+before creating `llm-context.edn`. Automation can pass `--yes`. It does not
+modify source files. By default the analyzer scans the entire confirmed root
+and prunes generated, dependency, VCS, cache, and database directories before
+descent. In a Git repository it honors `.gitignore` by analyzing tracked files
+plus non-ignored untracked files. The default database location is
+`.llm-context/db/`.
 
 For a structural-only installation that does not use the optional SCIP
 TypeScript provider, set the semantic providers to an empty vector:

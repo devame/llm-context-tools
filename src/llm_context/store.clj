@@ -7,6 +7,8 @@
 (defprotocol GraphStore
   (database [store] "Return an immutable database value for querying.")
   (transact! [store entities] "Validate and transact canonical graph entities.")
+  (replace-all! [store entities]
+    "Atomically replace the complete graph with canonical entities.")
   (replace-file! [store file entities]
     "Atomically replace one file and every graph fact owned by it.")
   (delete-file! [store file-id]
@@ -105,6 +107,19 @@
       (schema/validate-entity! entity))
     (when (seq entities)
       (d/transact! connection (entities->tx (d/db connection) entities #{}))))
+
+  (replace-all! [_ entities]
+    (doseq [entity entities]
+      (schema/validate-entity! entity))
+    (let [db (d/db connection)
+          existing (d/q '[:find [?entity ...]
+                          :where [?entity :entity/type _]] db)
+          retractions (mapv (fn [eid] [:db/retractEntity eid]) existing)
+          force-new (set (map entity-identity entities))
+          assertions (entities->tx db entities force-new)
+          tx (into retractions assertions)]
+      (when (seq tx)
+        (d/transact! connection tx))))
 
   (replace-file! [_ file entities]
     (schema/validate-entity! file)

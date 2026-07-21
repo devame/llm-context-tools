@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.2
+
+- Changed initialization to confirm the canonical project root before writing
+  configuration; automation can use `init --yes`.
+- Changed default discovery to scan the complete project root while honoring
+  Git ignores and pruning generated/cache directories.
+- Added actionable diagnostics for missing includes and skipped known
+  languages while ignoring unrelated extensions.
+- Made full graph replacement atomic so cross-file references resolve
+  regardless of file transaction order.
+
+## 0.4.1
+
+- Updated the embedded Datalevin dependency to 1.0.0.
+- Added a complete installed-user workflow guide.
+
 ## 0.4.0
 
 - Reimplemented the application core in Clojure 1.12.
@@ -20,8 +36,3 @@
 
 This is a greenfield cutover. No legacy JSON configuration or JSONL database
 migration is provided.
-
-## 0.4.1
-
-- Updated the embedded Datalevin dependency to 1.0.0.
-- Added a complete installed-user workflow guide.

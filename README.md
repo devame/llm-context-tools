@@ -55,7 +55,7 @@ The Unix installer uses `~/.local/bin` and adds it to the appropriate user
 shell profile when needed. Open a new terminal after either installer changes
 `PATH`.
 
-Set `LLM_CONTEXT_VERSION=0.4.1` to pin a release or
+Set `LLM_CONTEXT_VERSION=0.4.2` to pin a release or
 `LLM_CONTEXT_INSTALL_DIR` to choose another destination. The installers are
 idempotent: running them again replaces the jar and launcher only after
 checksum validation.
@@ -69,7 +69,7 @@ After installation:
 
 ```bash
 llm-context doctor
-llm-context init
+llm-context init [--yes]
 llm-context analyze
 ```
 
@@ -101,7 +101,7 @@ llm-context doctor
 ## Commands
 
 ```text
-llm-context init
+llm-context init [--yes]
 llm-context doctor
 llm-context analyze [--full]
 llm-context query stats
@@ -122,7 +122,10 @@ llm-context service start|status|stop
 `analyze` runs a full scan when no graph exists and content-hash incremental
 analysis afterward. Incremental updates parse only changed files, cascade
 deleted files, preserve inbound evidence from unchanged callers, and reconcile
-all edge targets against the new symbol set.
+all edge targets against the new symbol set. The default scan covers the whole
+confirmed project root. In Git repositories it uses tracked plus non-ignored
+files; elsewhere it prunes the configured generated/cache directories during
+the filesystem walk.
 
 ## Configuration
 
@@ -130,8 +133,9 @@ all edge targets against the new symbol set.
 
 ```clojure
 {:analysis
- {:include ["src" "test"]
-  :exclude [".git" ".llm-context" "node_modules" "target"]
+ {:include ["."]
+  :exclude [".git" ".llm-context" "node_modules" "target" ".cpcache"
+            "dist" "build" "out" ".shadow-cljs" ".cljs_node_repl" ".lsp"]
   :languages :auto
   :max-file-bytes 1048576}
 
