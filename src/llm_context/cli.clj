@@ -4,6 +4,7 @@
             [llm-context.analysis.incremental :as incremental]
             [llm-context.config :as config]
             [llm-context.context :as context-packet]
+            [llm-context.export :as export]
             [llm-context.project :as project]
             [llm-context.query :as query]
             [llm-context.runtime.doctor :as doctor]
@@ -162,6 +163,39 @@
           (throw (ex-info (str "Unsupported context format: " (:format options))
                           {:exit-code 2})))))
     0))
+
+(defn- parse-export-args [args]
+  (loop [remaining (seq args) result {:format :edn :output nil}]
+    (if-let [arg (first remaining)]
+      (case arg
+        "--format" (if-let [value (second remaining)]
+                     (recur (nnext remaining) (assoc result :format (keyword value)))
+                     (throw (ex-info "--format requires edn, json, jsonl, or markdown"
+                                     {:exit-code 2})))
+        "--output" (if-let [value (second remaining)]
+                     (recur (nnext remaining) (assoc result :output value))
+                     (throw (ex-info "--output requires a path or -" {:exit-code 2})))
+        (throw (ex-info (str "Unexpected export argument: " arg) {:exit-code 2})))
+      result)))
+
+(defmethod execute "export" [cli-context _ args]
+  (let [{:keys [format output]} (parse-export-args args)
+        settings (config/load-config cli-context)]
+    (store/with-store [graph cli-context settings]
+      (let [rendered (export/render graph format)]
+        (if (or (nil? output) (= "-" output))
+          (print rendered)
+          (let [path (.normalize (.resolve ^java.nio.file.Path (:root cli-context) output))]
+            (when-let [parent (.getParent path)]
+              (java.nio.file.Files/createDirectories
+               parent (make-array java.nio.file.attribute.FileAttribute 0)))
+            (java.nio.file.Files/writeString path rendered
+                                             (make-array java.nio.file.OpenOption 0))
+            (println "Wrote" (str path))))))
+    0))
+
+(defmethod execute "summary" [cli-context _ args]
+  (execute cli-context "export" (concat ["--format" "markdown"] args)))
 
 (defmethod execute :default [_ command _]
   (throw (ex-info (str "Unknown command: " command)
