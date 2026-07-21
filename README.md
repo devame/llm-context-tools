@@ -55,7 +55,7 @@ The Unix installer uses `~/.local/bin` and adds it to the appropriate user
 shell profile when needed. Open a new terminal after either installer changes
 `PATH`.
 
-Set `LLM_CONTEXT_VERSION=0.4.0` to pin a release or
+Set `LLM_CONTEXT_VERSION=0.4.1` to pin a release or
 `LLM_CONTEXT_INSTALL_DIR` to choose another destination. The installers are
 idempotent: running them again replaces the jar and launcher only after
 checksum validation.
@@ -195,4 +195,5 @@ npm pack --dry-run
 
 See [architecture and tradeoffs](docs/architecture.md),
 [semantic graph model](docs/semantic-graph.md), and
-[benchmark methodology](docs/benchmarks.md).
+[benchmark methodology](docs/benchmarks.md). The complete project workflow is
+in the [user guide](docs/user-guide.md).

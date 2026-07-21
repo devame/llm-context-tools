@@ -20,3 +20,8 @@
 
 This is a greenfield cutover. No legacy JSON configuration or JSONL database
 migration is provided.
+
+## 0.4.1
+
+- Updated the embedded Datalevin dependency to 1.0.0.
+- Added a complete installed-user workflow guide.

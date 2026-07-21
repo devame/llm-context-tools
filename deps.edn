@@ -1,7 +1,7 @@
 {:paths ["src" "resources"]
  :deps {org.clojure/clojure {:mvn/version "1.12.0"}
         org.clojure/data.json {:mvn/version "2.5.1"}
-        org.datalevin/datalevin-embedded {:mvn/version "0.10.18"}
+        org.datalevin/datalevin-embedded {:mvn/version "1.0.0"}
         io.github.tree-sitter/jtreesitter {:mvn/version "0.26.1"}
         io.github.bonede/tree-sitter {:mvn/version "0.25.3"}
         io.github.bonede/tree-sitter-javascript

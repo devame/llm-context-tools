@@ -43,7 +43,7 @@ runs:
         node-version: "20"
     - name: Install llm-context
       shell: bash
-      run: npm install --global llm-context@0.4.0
+      run: npm install --global llm-context@0.4.1
     - name: Analyze and export
       id: analyze
       shell: bash
