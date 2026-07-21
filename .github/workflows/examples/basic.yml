@@ -1,5 +1,3 @@
-# Basic example: Analyze and upload as artifact
-
 name: LLM Context (Basic)
 
 on:
@@ -21,8 +19,4 @@ jobs:
           upload-artifact: true
           artifact-name: llm-context
 
-      - name: Summary
-        run: |
-          echo "✅ Analysis complete!"
-          echo "📥 Artifact uploaded: llm-context"
-          echo "🔗 Download from workflow artifacts"
+      - run: echo "Semantic graph uploaded as llm-context"

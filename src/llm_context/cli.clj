@@ -36,9 +36,12 @@
        "  query                Query the semantic graph\n"
        "  context              Build an LLM context packet\n"
        "  export               Export graph data\n"
+       "  summary              Export a Markdown graph summary\n"
        "  integrate            Install agent guidance\n"
        "  service              Manage the optional resident service\n"
        "  stats                Show graph statistics\n"
+       "  entry-points         Show inferred entry points\n"
+       "  side-effects         Show classified side effects\n"
        "  doctor               Check runtime capabilities\n"
        "  version              Print the application version\n"))
 
