@@ -2,4 +2,6 @@ node_modules/
 .llm-context/
 test-dir/
 *.wasm
-
+.cpcache/
+.clj-kondo/.cache/
+target/
