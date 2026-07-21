@@ -1,9 +1,12 @@
 (ns llm-context.cli
-  (:require [llm-context.config :as config]
+  (:require [clojure.pprint :as pprint]
+            [llm-context.config :as config]
             [llm-context.analysis.full :as full]
             [llm-context.analysis.incremental :as incremental]
             [llm-context.project :as project]
+            [llm-context.query :as query]
             [llm-context.runtime.doctor :as doctor]
+            [llm-context.store :as store]
             [llm-context.version :as version]))
 
 (defn usage []
@@ -86,6 +89,39 @@
                  (:files result) (:entities result)
                  (count (:diagnostics result))))))
     0))
+
+(defn- require-argument [subcommand args]
+  (or (first args)
+      (throw (ex-info (str "query " subcommand " requires an argument")
+                      {:exit-code 2}))))
+
+(defn- execute-query [graph subcommand args]
+  (case subcommand
+    "stats" (query/stats graph)
+    "find-symbol" (query/symbols graph (require-argument subcommand args))
+    "callers" (query/callers graph (require-argument subcommand args))
+    "callees" (query/callees graph (require-argument subcommand args))
+    "trace" (query/transitive-callees graph (require-argument subcommand args))
+    "entry-points" (query/entry-points graph)
+    "effects" (query/effects graph)
+    "unresolved" (query/unresolved graph)
+    (throw (ex-info (str "Unknown query: " subcommand) {:exit-code 2}))))
+
+(defmethod execute "query" [context _ args]
+  (let [subcommand (or (first args) "stats")
+        settings (config/load-config context)]
+    (store/with-store [graph context settings]
+      (pprint/pprint (execute-query graph subcommand (next args))))
+    0))
+
+(defmethod execute "stats" [context _ _]
+  (execute context "query" ["stats"]))
+
+(defmethod execute "entry-points" [context _ _]
+  (execute context "query" ["entry-points"]))
+
+(defmethod execute "side-effects" [context _ _]
+  (execute context "query" ["effects"]))
 
 (defmethod execute :default [_ command _]
   (throw (ex-info (str "Unknown command: " command)
