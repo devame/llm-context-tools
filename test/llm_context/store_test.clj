@@ -97,6 +97,52 @@
                                  :where [?entity :entity/type _]]
                                []))))))
 
+(deftest transaction-order-puts-reference-targets-first
+  (let [file (file-entity "src/a.clj" "source")
+        symbol (symbol-entity file "sample/a" 1)
+        edge {:entity/type :entity.type/edge :edge/id "edge:a"
+              :edge/from (:symbol/id symbol) :edge/to (:symbol/id symbol)}
+        effect {:entity/type :entity.type/effect :effect/id "effect:a"
+                :effect/symbol (:symbol/id symbol)}]
+    (is (= [:entity.type/file :entity.type/symbol
+            :entity.type/edge :entity.type/effect]
+           (mapv :entity/type
+                 (#'store/dependency-order [effect edge symbol file]))))))
+
+(deftest duplicate-canonical-identities-are-rejected
+  (let [project (temp-project)
+        file (file-entity "src/a.clj" "source")]
+    (store/with-store [graph project (config/defaults)]
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"Duplicate canonical entity identities"
+           (store/replace-all! graph [file file]))))))
+
+(deftest whole-graph-replacement-commits-bounded-batches
+  (let [project (temp-project)
+        file-a (file-entity "src/a.clj" "source-a")
+        file-b (file-entity "src/b.clj" "source-b")
+        symbols (mapv (fn [index]
+                        (symbol-entity (if (even? index) file-a file-b)
+                                       (str "sample/function-" index)
+                                       (inc index)))
+                      (range 205))
+        events (atom [])]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-all! graph
+                          (concat symbols [file-b file-a])
+                          {:batch-size 100
+                           :on-progress #(swap! events conj %)})
+      (is (= [{:phase :assert :completed 100 :total 207}
+              {:phase :assert :completed 200 :total 207}
+              {:phase :assert :completed 207 :total 207}]
+             @events))
+      (is (= 207
+             (count (store/query graph
+                                 '[:find [?entity ...]
+                                   :where [?entity :entity/type _]]
+                                 [])))))))
+
 (deftest target-file-replacement-preserves-inbound-evidence
   (let [project (temp-project)
         source-file (file-entity "src/source.clj" "source")

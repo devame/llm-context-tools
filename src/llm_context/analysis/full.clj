@@ -9,6 +9,8 @@
             [llm-context.semantic.scip :as scip]
             [llm-context.store :as store]))
 
+(def persistence-batch-size 100)
+
 (defn- enrich-effects [{:keys [file entities] :as output}]
   (let [edges (filter :edge/id entities)]
     (update output :entities into (effects/analyze (:file/language file) edges))))
@@ -22,27 +24,65 @@
         {:diagnostic {:level :warning :kind :semantic-provider-failed
                       :provider :scip-typescript :message (.getMessage error)}}))))
 
+(defn- emit! [progress stage data]
+  (when progress
+    (progress (assoc data :stage stage))))
+
+(defn- persist! [project config entities progress]
+  (store/with-store [graph project config]
+    (store/replace-all! graph entities
+                        {:batch-size persistence-batch-size
+                         :on-progress
+                         (when progress
+                           #(emit! progress :persist-progress %))})))
+
 (defn analyze!
-  "Perform a complete project scan and replace Datalevin facts file by file.
-  A missing optional semantic provider degrades resolution, not availability."
-  [project config]
-  (with-open [parser-provider (jtreesitter/open project)]
-    (let [{:keys [files diagnostics]}
-          (files/discover project config (parser/supported-languages parser-provider))
-          structural-indexer (structural/create parser-provider)
-          extracted (mapv #(-> (indexer/index-file structural-indexer %)
-                               enrich-effects)
-                          files)
-          semantic (maybe-scip project config (map :language files))
-          resolved (resolve/resolve-outputs extracted (:index semantic))
-          all-entities (vec (mapcat (fn [{:keys [file entities]}]
-                                      (cons file entities))
-                                    resolved))]
-      (store/with-store [graph project config]
-        (store/replace-all! graph all-entities))
-      {:mode :full
-       :files (count files)
-       :entities (reduce + (map #(inc (count (:entities %))) resolved))
-       :diagnostics (cond-> (vec (concat diagnostics
-                                         (mapcat :diagnostics resolved)))
-                      (:diagnostic semantic) (conj (:diagnostic semantic)))})))
+  "Perform a complete project scan and replace Datalevin facts in bounded
+  transactions. A missing optional semantic provider degrades resolution, not
+  availability."
+  ([project config]
+   (analyze! project config nil))
+  ([project config progress]
+   (let [started (System/nanoTime)]
+     (emit! progress :discover-start {})
+     (with-open [parser-provider (jtreesitter/open project)]
+       (let [{:keys [files diagnostics]}
+             (files/discover project config
+                             (parser/supported-languages parser-provider))
+             total (count files)
+             _ (emit! progress :discover-complete
+                      {:files total :diagnostics (count diagnostics)})
+             structural-indexer (structural/create parser-provider)
+             extracted
+             (mapv (fn [index file]
+                     (when (or (zero? index) (zero? (mod index 25)))
+                       (emit! progress :parse-progress
+                              {:completed index :total total
+                               :file (:relative-path file)}))
+                     (-> (indexer/index-file structural-indexer file)
+                         enrich-effects))
+                   (range) files)
+             _ (emit! progress :parse-complete
+                      {:completed total :total total})
+             _ (emit! progress :semantic-start {})
+             semantic (maybe-scip project config (map :language files))
+             _ (emit! progress :semantic-complete
+                      {:provider-ran? (boolean semantic)})
+             _ (emit! progress :resolve-start {})
+             resolved (resolve/resolve-outputs extracted (:index semantic))
+             all-entities (vec (mapcat (fn [{:keys [file entities]}]
+                                         (cons file entities))
+                                       resolved))
+             _ (emit! progress :persist-start
+                      {:entities (count all-entities)
+                       :batch-size persistence-batch-size})]
+         (persist! project config all-entities progress)
+         (emit! progress :complete
+                {:elapsed-seconds
+                 (long (/ (- (System/nanoTime) started) 1000000000))})
+         {:mode :full
+          :files total
+          :entities (count all-entities)
+          :diagnostics (cond-> (vec (concat diagnostics
+                                            (mapcat :diagnostics resolved)))
+                         (:diagnostic semantic) (conj (:diagnostic semantic)))})))))

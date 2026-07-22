@@ -55,7 +55,7 @@ The Unix installer uses `~/.local/bin` and adds it to the appropriate user
 shell profile when needed. Open a new terminal after either installer changes
 `PATH`.
 
-Set `LLM_CONTEXT_VERSION=0.5.0` to pin a release or
+Set `LLM_CONTEXT_VERSION=0.5.1` to pin a release or
 `LLM_CONTEXT_INSTALL_DIR` to choose another destination. The installers are
 idempotent: running them again replaces the jar and launcher only after
 checksum validation.
@@ -96,7 +96,7 @@ around the same jar:
 
 ```bash
 npm pack
-npm install --global ./llm-context-0.5.0.tgz
+npm install --global ./llm-context-0.5.1.tgz
 llm-context doctor
 ```
 
@@ -131,7 +131,10 @@ deleted files, preserve inbound evidence from unchanged callers, and reconcile
 all edge targets against the new symbol set. The default scan covers the whole
 confirmed project root. In Git repositories it uses tracked plus non-ignored
 files; elsewhere it prunes the configured generated/cache directories during
-the filesystem walk.
+the filesystem walk. Full analysis reports each stage and persists the rebuilt
+graph in dependency order using transactions of at most 100 records. If a full
+analysis is interrupted during persistence, rerun `analyze --full` to clear and
+rebuild the partial graph.
 
 ## Configuration
 
@@ -192,9 +195,11 @@ interactive sessions, run this in a dedicated terminal:
 llm-context service start
 ```
 
-Analyze, query, context, and export commands automatically use the warm service.
-It listens only on the loopback interface and requires a random token stored in
-the ignored `.llm-context/service.edn` descriptor. Commands fall back to direct
+Query, context, and export commands automatically use the warm service. Analysis
+runs in the invoking process so progress stays visible and a client timeout
+cannot start a second database writer. The service listens only on the loopback
+interface and requires a random token stored in the ignored
+`.llm-context/service.edn` descriptor. Supported commands fall back to direct
 execution when no service is available.
 
 ## Development

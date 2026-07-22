@@ -5,6 +5,7 @@
             [llm-context.config :as config]
             [llm-context.main :as main]
             [llm-context.project :as project]
+            [llm-context.service.client :as service-client]
             [llm-context.version :as version])
   (:import [java.nio.file Files]))
 
@@ -32,6 +33,16 @@
   (let [context (project/context ".")]
     (is (.isAbsolute (:root context)))
     (is (= (.resolve (:root context) ".llm-context/db") (:db-dir context)))))
+
+(deftest analysis-does-not-delegate-to-the-resident-service
+  (let [root (Files/createTempDirectory
+              "llm-context-local-analysis-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        context (assoc (project/context (str root)) :options {:quiet? true})]
+    (with-redefs [service-client/request
+                  (fn [& _]
+                    (throw (ex-info "analysis contacted the service" {})))]
+      (is (zero? (cli/execute context "analyze" ["--full"]))))))
 
 (deftest initialization-confirms-the-project-root
   (let [root (Files/createTempDirectory

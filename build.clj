@@ -2,7 +2,7 @@
   (:require [clojure.tools.build.api :as b]))
 
 (def lib 'devame/llm-context)
-(def version "0.5.0")
+(def version "0.5.1")
 (def class-dir "target/classes")
 (def basis (delay (b/create-basis {:project "deps.edn"})))
 (def uber-file (format "target/llm-context-%s-standalone.jar" version))

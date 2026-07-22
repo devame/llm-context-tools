@@ -116,22 +116,46 @@
     ((resolve-fn 'llm-context.runtime.doctor/print-report) checks)
     (if ((resolve-fn 'llm-context.runtime.doctor/healthy?) checks) 0 1)))
 
+(defn- print-analysis-progress! [{:keys [stage files diagnostics completed total
+                                         file entities batch-size phase
+                                         elapsed-seconds]}]
+  (println
+   (case stage
+     :discover-start "Discovering source files..."
+     :discover-complete
+     (format "Discovered %d supported files (%d diagnostics)" files diagnostics)
+     :parse-progress (format "Parsing %d/%d: %s" completed total file)
+     :parse-complete (format "Parsed %d/%d files" completed total)
+     :semantic-start "Running configured semantic providers..."
+     :semantic-complete "Semantic provider stage complete"
+     :resolve-start "Resolving graph relationships..."
+     :persist-start (format "Persisting %d entities in batches of %d..."
+                            entities batch-size)
+     :persist-progress
+     (format "%s %d/%d entities"
+             (if (= :retract phase) "Retracted" "Committed") completed total)
+     :complete (format "Full analysis completed in %d seconds" elapsed-seconds)
+     (str "Analysis stage: " (name stage))))
+  (flush))
+
 (defmethod execute "analyze" [context _ args]
   (when-let [unknown (first (remove #{"--full"} args))]
     (throw (ex-info (str "Unknown analyze option: " unknown) {:exit-code 2})))
   (let [settings (config/load-config context)
         force-full? (boolean (some #{"--full"} args))
-        remote (remote-value context {:op :analyze :full? force-full?})
-        result (if-not (= unavailable remote)
-                 remote
-                 (let [full? (or force-full?
-                                 (not ((resolve-fn
-                                        'llm-context.analysis.incremental/index-present?)
-                                       context settings)))]
-                   (if full?
-                     ((resolve-fn 'llm-context.analysis.full/analyze!) context settings)
-                     ((resolve-fn 'llm-context.analysis.incremental/analyze!)
-                      context settings))))]
+        full? (or force-full?
+                  (not ((resolve-fn
+                         'llm-context.analysis.incremental/index-present?)
+                        context settings)))
+        progress (when-not (get-in context [:options :quiet?])
+                   print-analysis-progress!)
+        ;; Keep analysis in this process so progress remains observable and a
+        ;; service timeout cannot accidentally launch a second writer.
+        result (if full?
+                 ((resolve-fn 'llm-context.analysis.full/analyze!)
+                  context settings progress)
+                 ((resolve-fn 'llm-context.analysis.incremental/analyze!)
+                  context settings))]
     (when-not (get-in context [:options :quiet?])
       (println
        (if (= :incremental (:mode result))

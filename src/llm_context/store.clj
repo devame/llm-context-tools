@@ -7,8 +7,8 @@
 (defprotocol GraphStore
   (database [store] "Return an immutable database value for querying.")
   (transact! [store entities] "Validate and transact canonical graph entities.")
-  (replace-all! [store entities]
-    "Atomically replace the complete graph with canonical entities.")
+  (replace-all! [store entities] [store entities options]
+    "Replace the complete graph in bounded, dependency-ordered transactions.")
   (replace-file! [store file entities]
     "Atomically replace one file and every graph fact owned by it.")
   (delete-file! [store file-id]
@@ -30,12 +30,52 @@
          :where [?entity ?attribute ?value]]
        db attribute value))
 
+(defn- dependency-order
+  "Put every referenced entity before entities that point at it. Datalevin can
+  resolve forward temp IDs, but doing that repeatedly in a large transaction
+  is pathologically expensive. Stable sorting preserves source order within a
+  dependency layer."
+  [entities]
+  (sort-by (fn [entity]
+             (case (:entity/type entity)
+               :entity.type/file 0
+               :entity.type/symbol 1
+               :entity.type/edge 2
+               :entity.type/effect 3
+               4))
+           entities))
+
+(defn- validate-identities! [entities]
+  (let [identities (map entity-identity entities)
+        duplicates (->> identities frequencies
+                        (keep (fn [[identity count]]
+                                (when (> count 1) identity)))
+                        vec)]
+    (when (seq duplicates)
+      (throw (ex-info "Duplicate canonical entity identities in transaction"
+                      {:duplicates duplicates})))))
+
+(defn- transact-batches!
+  [connection items batch-size tx-fn phase on-progress]
+  (let [batches (vec (partition-all batch-size items))
+        total (count items)]
+    (loop [remaining batches
+           completed 0]
+      (when-let [batch (first remaining)]
+        (d/transact! connection (vec (tx-fn batch)))
+        (let [next-completed (+ completed (count batch))]
+          (when on-progress
+            (on-progress {:phase phase :completed next-completed :total total}))
+          (recur (next remaining) next-completed))))))
+
 (defn- entities->tx
   "Assign explicit entity/temp IDs so references within one transaction never
   create partial lookup-ref placeholders. Identities in force-new are recreated
   after retractEntity rather than reused in the same transaction."
   [db entities force-new]
-  (let [identities (mapv entity-identity entities)
+  (let [entities (vec (dependency-order entities))
+        _ (validate-identities! entities)
+        identities (mapv entity-identity entities)
         db-ids (into {}
                      (map-indexed
                       (fn [index ident]
@@ -108,18 +148,29 @@
     (when (seq entities)
       (d/transact! connection (entities->tx (d/db connection) entities #{}))))
 
-  (replace-all! [_ entities]
+  (replace-all! [this entities]
+    (replace-all! this entities {}))
+
+  (replace-all! [_ entities {:keys [batch-size on-progress]
+                             :or {batch-size 100}}]
+    (when-not (pos-int? batch-size)
+      (throw (ex-info "Full replacement batch size must be positive"
+                      {:batch-size batch-size})))
     (doseq [entity entities]
       (schema/validate-entity! entity))
-    (let [db (d/db connection)
-          existing (d/q '[:find [?entity ...]
-                          :where [?entity :entity/type _]] db)
-          retractions (mapv (fn [eid] [:db/retractEntity eid]) existing)
-          force-new (set (map entity-identity entities))
-          assertions (entities->tx db entities force-new)
-          tx (into retractions assertions)]
-      (when (seq tx)
-        (d/transact! connection tx))))
+    (let [ordered (vec (dependency-order entities))
+          _ (validate-identities! ordered)
+          existing (vec (d/q '[:find [?entity ...]
+                               :where [?entity :entity/type _]]
+                             (d/db connection)))]
+      (transact-batches! connection existing batch-size
+                         #(map (fn [eid] [:db/retractEntity eid]) %)
+                         :retract on-progress)
+      (transact-batches! connection ordered batch-size
+                         (fn [batch]
+                           (entities->tx (d/db connection) batch
+                                         (set (map entity-identity batch))))
+                         :assert on-progress)))
 
   (replace-file! [_ file entities]
     (schema/validate-entity! file)

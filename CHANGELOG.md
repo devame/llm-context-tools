@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.1
+
+- Changed full graph replacement from one unbounded Datalevin transaction to
+  dependency-ordered transactions of at most 100 records.
+- Added visible discovery, parsing, semantic, resolution, and persistence
+  progress for full analysis.
+- Kept analysis in the invoking CLI process so a resident-service timeout
+  cannot fall back to a second concurrent database writer.
+
 ## 0.5.0
 
 - Added first-class Janet discovery, parsing, structural symbols, calls,

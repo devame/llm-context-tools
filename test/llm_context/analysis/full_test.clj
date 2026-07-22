@@ -15,9 +15,17 @@
         settings (assoc-in (config/defaults) [:semantic :providers] [])]
     (Files/createDirectories src (make-array java.nio.file.attribute.FileAttribute 0))
     (spit (str path) "export function greet(name) { console.log(name); }")
-    (let [result (full/analyze! project settings)]
+    (let [events (atom [])
+          result (full/analyze! project settings #(swap! events conj %))]
       (is (= 1 (:files result)))
-      (is (pos? (:entities result))))
+      (is (pos? (:entities result)))
+      (is (= [:discover-start :discover-complete :parse-progress
+              :parse-complete :semantic-start :semantic-complete
+              :resolve-start :persist-start :persist-progress :complete]
+             (mapv :stage @events)))
+      (is (= full/persistence-batch-size
+             (:batch-size (first (filter #(= :persist-start (:stage %))
+                                        @events))))))
     (store/with-store [graph project settings]
       (is (= #{"greet"}
              (set (store/query graph

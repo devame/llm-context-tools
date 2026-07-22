@@ -49,6 +49,13 @@ deleted files, preserves inbound relationships owned by unchanged callers,
 and reconciles their targets. A full scan is useful after changing config,
 language support, or the graph schema.
 
+A full scan prints discovery, parsing, semantic, resolution, and persistence
+progress. The rebuilt graph is written in dependency order—files, symbols,
+edges, then effects—in transactions of at most 100 records. This bounds each
+Datalevin transaction instead of asking it to resolve the entire graph at once.
+If the command is interrupted during persistence, the graph may be partial;
+rerun `llm-context analyze --full` to clear and rebuild it.
+
 Check the result with:
 
 ```bash
@@ -113,9 +120,12 @@ llm-context context authenticate --max-tokens 4000
 llm-context service stop
 ```
 
-The service uses a per-project random token in the ignored state directory and
-falls back to direct execution when it is not running. It is not a network
-service and does not expose the database beyond loopback.
+The service accelerates query, context, and export commands. Analysis remains in
+the invoking process so its progress is visible and a service-client timeout
+cannot launch a duplicate database writer. The service uses a per-project
+random token in the ignored state directory and supported commands fall back to
+direct execution when it is not running. It is not a network service and does
+not expose the database beyond loopback.
 
 ## 7. Export or inspect the graph
 

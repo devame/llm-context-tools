@@ -25,8 +25,18 @@ Three boundaries keep the implementation replaceable:
   Datalog execution.
 
 The optional service retains a warm JVM but not a permanently open database
-connection. Each request opens and closes the project store, allowing analysis
-and queries to share the service safely.
+connection. Query, context, and export requests open and close the project
+store. Analysis deliberately runs in the invoking CLI process: this keeps
+stage and transaction progress observable and prevents a service socket timeout
+from falling back to a second concurrent writer.
+
+Full replacement sorts canonical entities by dependency layer (files, symbols,
+edges, effects), retracts the previous graph in bounded transactions, and then
+asserts the replacement in transactions of at most 100 records. This avoids
+Datalevin's pathological cost when resolving many forward temporary-ID
+references in one large transaction. The tradeoff is that a process interrupted
+during persistence can leave a partial graph; the recovery operation is another
+full analysis.
 
 ## What Clojure and Datalevin gain
 
