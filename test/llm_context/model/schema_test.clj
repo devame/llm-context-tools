@@ -46,3 +46,14 @@
            :edge/target-text "target"
            :edge/resolution :resolution/unresolved
            :edge/confidence 1.5})))))
+
+(deftest symbol-search-text-preserves-and-expands-code-identifiers
+  (let [text (schema/symbol-search-text
+              {:symbol/name "safeFields"
+               :symbol/qualified-name "sample.edn/safe-fields!"
+               :symbol/signature "[inputValue]"
+               :symbol/doc "Keep supported primitive values."})]
+    (is (clojure.string/includes? text "safeFields"))
+    (is (clojure.string/includes? text "safe fields"))
+    (is (clojure.string/includes? text "sample edn safe fields"))
+    (is (clojure.string/includes? text "input value"))))

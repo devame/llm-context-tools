@@ -55,7 +55,7 @@ The Unix installer uses `~/.local/bin` and adds it to the appropriate user
 shell profile when needed. Open a new terminal after either installer changes
 `PATH`.
 
-Set `LLM_CONTEXT_VERSION=0.5.1` to pin a release or
+Set `LLM_CONTEXT_VERSION=0.6.0` to pin a release or
 `LLM_CONTEXT_INSTALL_DIR` to choose another destination. The installers are
 idempotent: running them again replaces the jar and launcher only after
 checksum validation.
@@ -96,7 +96,7 @@ around the same jar:
 
 ```bash
 npm pack
-npm install --global ./llm-context-0.5.1.tgz
+npm install --global ./llm-context-0.6.0.tgz
 llm-context doctor
 ```
 
@@ -124,6 +124,13 @@ llm-context summary [--output PATH]
 llm-context integrate claude|codex|generic [--force]
 llm-context service start|status|stop
 ```
+
+`find-symbol` and `context` use Datalevin's embedded full-text index across
+symbol names, qualified names, signatures, and documentation. This search is
+local and model-free. Exact identifiers and literal substrings remain
+supported, while natural-language terms can locate symbols through their
+signatures or documentation. Existing project databases are backfilled
+automatically the first time this version opens them.
 
 `analyze` runs a full scan when no graph exists and content-hash incremental
 analysis afterward. Incremental updates parse only changed files, cascade

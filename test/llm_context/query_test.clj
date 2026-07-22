@@ -21,7 +21,9 @@
                   :symbol/kind :symbol.kind/function :symbol/file (:file/id file)
                   :source/start-line line :source/start-column 1
                   :source/end-line (+ line 2) :source/end-column 1})
-        caller (symbol "symbol:caller" "caller" 1)
+        caller (assoc (symbol "symbol:caller" "caller" 1)
+                      :symbol/signature "[connection]"
+                      :symbol/doc "Initialize the persistent database connection")
         callee (symbol "symbol:callee" "callee" 5)
         edge {:entity/type :entity.type/edge :edge/id "edge:call"
               :edge/kind :edge.kind/calls :edge/from (:symbol/id caller)
@@ -43,6 +45,12 @@
       (is (= 5 (:entities (query/stats graph))))
       (is (= 1 (:files (query/stats graph))))
       (is (= "sample/callee" (:qualified-name (first (query/symbols graph "callee")))))
+      (is (= "sample/caller"
+             (:qualified-name
+              (first (query/symbols graph "persistent database")))))
+      (is (= "sample/caller"
+             (:qualified-name
+              (first (query/symbols graph "initialize connection")))))
       (is (= "sample/caller" (:name (first (query/callers graph "symbol:callee")))))
       (is (= "sample/callee" (:name (first (query/callees graph "symbol:caller")))))
       (is (= [{:id "symbol:callee" :name "sample/callee"}]

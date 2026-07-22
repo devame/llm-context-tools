@@ -25,9 +25,32 @@
                        graph '[:find [?state ...] :where [_ :edge/resolution ?state]])}))
 
 (defn symbols
-  "Find symbols by exact simple/qualified name or case-insensitive substring."
+  "Find symbols by exact name, case-insensitive substring, or Datalevin
+  full-text relevance over identifiers, signatures, and documentation."
   [graph term]
-  (let [needle (str/lower-case term)]
+  (let [needle (str/lower-case term)
+        fulltext-scores
+        (try
+          (reduce (fn [scores [id score]]
+                    (update scores id (fnil max Double/NEGATIVE_INFINITY)
+                            (double score)))
+                  {}
+                  (store/query
+                   graph
+                   '[:find ?id ?score
+                     :in $ ?query
+                     :where
+                     [(fulltext $ ?query
+                                {:domains ["symbols"]
+                                 :display :refs+scores})
+                      [[?symbol ?attribute ?value ?score]]]
+                     [?symbol :symbol/id ?id]]
+                   [term]))
+          (catch Exception _
+            ;; Full-text syntax is intentionally richer than identifier search.
+            ;; Invalid search expressions still retain the historical literal
+            ;; substring behavior instead of failing the command.
+            {}))]
     (->> (store/query
           graph
           '[:find ?id ?name ?qualified ?kind ?path ?line
@@ -40,15 +63,21 @@
                    [?symbol :source/start-line ?line]]
           [])
          (keep (fn [[id name qualified kind path line]]
-                 (when (or (= term id) (= term name) (= term qualified)
-                           (str/includes? (str/lower-case name) needle)
-                           (str/includes? (str/lower-case qualified) needle))
-                   {:id id :name name :qualified-name qualified
-                    :kind kind :file path :line line})))
-         (sort-by (juxt #(if (or (= term (:id %)) (= term (:name %))
-                                 (= term (:qualified-name %))) 0 1)
+                 (let [substring? (or (str/includes? (str/lower-case name) needle)
+                                      (str/includes? (str/lower-case qualified) needle))]
+                   (when (or (= term id) (= term name) (= term qualified)
+                             substring? (contains? fulltext-scores id))
+                     {:id id :name name :qualified-name qualified
+                      :kind kind :file path :line line
+                      ::exact? (or (= term id) (= term name) (= term qualified))
+                      ::substring? substring?
+                      ::score (get fulltext-scores id Double/NEGATIVE_INFINITY)}))))
+         (sort-by (juxt #(if (::exact? %) 0 (if (::substring? %) 1 2))
+                       #(if (Double/isFinite (double (::score %)))
+                          (- (double (::score %)))
+                          0.0)
                        :qualified-name))
-         vec)))
+         (mapv #(dissoc % ::exact? ::substring? ::score)))))
 
 (defn callers [graph target]
   (->> (store/query

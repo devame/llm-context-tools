@@ -32,6 +32,7 @@
 (s/def :symbol/file :file/id)
 (s/def :symbol/signature string?)
 (s/def :symbol/doc string?)
+(s/def :symbol/search-text (s/and string? seq))
 
 (s/def :edge/id (s/and string? #(str/starts-with? % "edge:")))
 (s/def :edge/kind edge-kinds)
@@ -63,6 +64,7 @@
   (s/and (s/keys :req [:entity/type :symbol/id :symbol/name
                        :symbol/qualified-name :symbol/kind :symbol/file]
                  :opt [:symbol/signature :symbol/doc
+                       :symbol/search-text
                        :source/start-line :source/start-column
                        :source/end-line :source/end-column])
          #(or (not (contains? % :source/start-line))
@@ -96,8 +98,38 @@
                       {:entity entity :explain (s/explain-data spec entity)})))
     entity))
 
+(defn- normalized-identifier [value]
+  (-> value
+      (str/replace #"([\p{Ll}\p{N}])([\p{Lu}])" "$1 $2")
+      (str/replace #"([\p{Lu}]+)([\p{Lu}][\p{Ll}])" "$1 $2")
+      (str/replace #"[^\p{L}\p{N}]+" " ")
+      str/lower-case
+      str/trim))
+
+(defn symbol-search-text
+  "Build the deterministic full-text document stored for a symbol. Preserve
+  source spellings while also splitting camelCase, kebab-case, namespaces,
+  and punctuation so natural-language queries can match identifiers."
+  [symbol]
+  (->> ((juxt :symbol/name :symbol/qualified-name :symbol/signature :symbol/doc)
+        symbol)
+       (filter #(and (string? %) (seq %)))
+       (mapcat (fn [value] [value (normalized-identifier value)]))
+       (remove str/blank?)
+       distinct
+       (str/join "\n")))
+
+(defn with-symbol-search-text [entity]
+  (if (= :entity.type/symbol (:entity/type entity))
+    (assoc entity :symbol/search-text (symbol-search-text entity))
+    entity))
+
 (def datalevin-schema
-  {:entity/type {:db/valueType :db.type/keyword
+  {:llm-context/meta-key {:db/valueType :db.type/string
+                          :db/unique :db.unique/identity}
+   :llm-context/search-schema-version {:db/valueType :db.type/long}
+
+   :entity/type {:db/valueType :db.type/keyword
                  :db/index true}
 
    :file/id {:db/valueType :db.type/string
@@ -122,6 +154,9 @@
                  :db/index true}
    :symbol/signature {:db/valueType :db.type/string}
    :symbol/doc {:db/valueType :db.type/string}
+   :symbol/search-text {:db/valueType :db.type/string
+                        :db/fulltext true
+                        :db.fulltext/domains ["symbols"]}
 
    :edge/id {:db/valueType :db.type/string
              :db/unique :db.unique/identity}

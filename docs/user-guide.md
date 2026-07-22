@@ -77,6 +77,13 @@ llm-context query effects
 llm-context query unresolved
 ```
 
+Symbol lookup combines exact identifiers and case-insensitive substrings with
+Datalevin's local full-text relevance ranking over names, qualified names,
+signatures, and documentation. It does not download or call an embedding
+model. The same lookup selects the starting symbols for `context`. Graphs from
+older releases are backfilled automatically in bounded transactions when they
+are first opened.
+
 Resolution is deliberately explicit. `exact` means semantic evidence supports
 the target; `heuristic`, `ambiguous`, and `unresolved` indicate weaker or
 missing evidence and should guide follow-up source inspection.

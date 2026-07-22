@@ -73,7 +73,10 @@
   create partial lookup-ref placeholders. Identities in force-new are recreated
   after retractEntity rather than reused in the same transaction."
   [db entities force-new]
-  (let [entities (vec (dependency-order entities))
+  (let [entities (->> entities
+                      (map schema/with-symbol-search-text)
+                      dependency-order
+                      vec)
         _ (validate-identities! entities)
         identities (mapv entity-identity entities)
         db-ids (into {}
@@ -92,6 +95,47 @@
               (:edge/to entity) (update :edge/to #(ref :symbol/id %))
               (:effect/symbol entity) (update :effect/symbol #(ref :symbol/id %))))
           entities)))
+
+(defn- backfill-symbol-search-text!
+  "Populate the derived full-text attribute once for databases created before
+  it existed. Missing-attribute detection makes interrupted batches resumable;
+  a version marker keeps normal database opens constant-time."
+  [connection]
+  (let [db (d/db connection)
+        current-version
+        (d/q '[:find ?version .
+               :where [?meta :llm-context/meta-key "search-index"]
+                      [?meta :llm-context/search-schema-version ?version]]
+             db)]
+    (when-not (= 1 current-version)
+      (let [symbols (d/q '[:find ?symbol ?name ?qualified
+                           :where [?symbol :symbol/name ?name]
+                                  [?symbol :symbol/qualified-name ?qualified]]
+                         db)
+            indexed (set (d/q '[:find [?symbol ...]
+                                :where [?symbol :symbol/search-text _]]
+                              db))
+            signatures (into {} (d/q '[:find ?symbol ?signature
+                                        :where [?symbol :symbol/signature ?signature]]
+                                      db))
+            docs (into {} (d/q '[:find ?symbol ?doc
+                                  :where [?symbol :symbol/doc ?doc]]
+                                db))
+            missing (keep (fn [[symbol name qualified]]
+                            (when-not (contains? indexed symbol)
+                              {:db/id symbol
+                               :symbol/search-text
+                               (schema/symbol-search-text
+                                {:symbol/name name
+                                 :symbol/qualified-name qualified
+                                 :symbol/signature (get signatures symbol)
+                                 :symbol/doc (get docs symbol)})}))
+                          symbols)]
+        (doseq [batch (partition-all 100 missing)]
+          (d/transact! connection (vec batch)))
+        (d/transact! connection
+                     [{:llm-context/meta-key "search-index"
+                       :llm-context/search-schema-version 1}])))))
 
 (defn- file-retraction-plan [db file-id]
   (let [symbols (d/q '[:find [?symbol ...]
@@ -235,7 +279,13 @@
   (let [configured (get-in config [:store :path])
         path (.normalize (.resolve root configured))]
     (Files/createDirectories path (make-array java.nio.file.attribute.FileAttribute 0))
-    (->DatalevinStore (d/get-conn (str path) schema/datalevin-schema) path)))
+    (let [connection (d/get-conn (str path) schema/datalevin-schema)]
+      (try
+        (backfill-symbol-search-text! connection)
+        (->DatalevinStore connection path)
+        (catch Throwable error
+          (d/close connection)
+          (throw error))))))
 
 (defmacro with-store [[binding project config] & body]
   `(with-open [~binding (open ~project ~config)]

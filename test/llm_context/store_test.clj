@@ -1,7 +1,9 @@
 (ns llm-context.store-test
   (:require [clojure.test :refer [deftest is]]
+            [datalevin.core :as d]
             [llm-context.config :as config]
             [llm-context.model.ids :as ids]
+            [llm-context.model.schema :as schema]
             [llm-context.project :as project]
             [llm-context.store :as store])
   (:import [java.nio.file Files]))
@@ -33,6 +35,18 @@
      :source/start-line line :source/start-column 1
      :source/end-line line :source/end-column 10}))
 
+(defn fulltext-symbol-names [graph query]
+  (set
+   (store/query
+    graph
+    '[:find [?name ...]
+      :in $ ?query
+      :where
+      [(fulltext $ ?query {:domains ["symbols"]})
+       [[?symbol ?attribute ?value]]]
+      [?symbol :symbol/qualified-name ?name]]
+    [query])))
+
 (deftest native-datalevin-round-trip
   (let [project (temp-project)
         file (file-entity "src/a.clj" "(defn a [])")
@@ -47,6 +61,38 @@
                                   '[:find [?entity ...]
                                     :where [?entity :entity/type _]] [])))))))
 
+(deftest existing-symbols-are-backfilled-into-full-text-search
+  (let [project (temp-project)
+        file (file-entity "src/legacy.clj" "legacy")
+        symbol (assoc (symbol-entity file "sample/legacy-loader" 1)
+                      :symbol/doc "Hydrate historical project state")
+        legacy-schema (dissoc schema/datalevin-schema :symbol/search-text)
+        path (.normalize (.resolve (:root project) ".llm-context/db"))]
+    (Files/createDirectories path
+                             (make-array java.nio.file.attribute.FileAttribute 0))
+    (with-open [connection (d/get-conn (str path) legacy-schema)]
+      (d/transact! connection
+                   [(assoc file :db/id -1)
+                    (assoc symbol :db/id -2 :symbol/file -1)]))
+    (store/with-store [graph project (config/defaults)]
+      (is (= #{["sample/legacy-loader"]}
+             (store/query
+              graph
+              '[:find ?qualified
+                :where
+                [(fulltext $ "historical project"
+                           {:domains ["symbols"]})
+                 [[?symbol ?attribute ?value]]]
+                [?symbol :symbol/qualified-name ?qualified]]
+              [])))
+      (is (= 1
+             (store/query
+              graph
+              '[:find ?version .
+                :where [?meta :llm-context/meta-key "search-index"]
+                       [?meta :llm-context/search-schema-version ?version]]
+              []))))))
+
 (deftest replacement-and-deletion-are-cascading
   (let [project (temp-project)
         file (file-entity "src/a.clj" "old")
@@ -55,13 +101,17 @@
         new-symbol (symbol-entity new-file "sample/new" 2)]
     (store/with-store [graph project (config/defaults)]
       (store/replace-file! graph file [old-symbol])
+      (is (= #{"sample/old"} (fulltext-symbol-names graph "old")))
       (store/replace-file! graph new-file [new-symbol])
+      (is (empty? (fulltext-symbol-names graph "old")))
+      (is (= #{"sample/new"} (fulltext-symbol-names graph "new")))
       (is (= #{"sample/new"}
              (set (store/query graph
                                '[:find [?name ...]
                                  :where [_ :symbol/qualified-name ?name]]
                                []))))
       (store/delete-file! graph (:file/id new-file))
+      (is (empty? (fulltext-symbol-names graph "new")))
       (is (empty? (store/query graph
                                '[:find [?entity ...]
                                  :where [?entity :entity/type _]]

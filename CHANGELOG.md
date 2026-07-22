@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0
+
+- Added model-free Datalevin full-text indexing for symbol names, qualified
+  names, signatures, and documentation.
+- Added relevance-ranked natural-language symbol and context lookup while
+  preserving exact-name and literal substring matching.
+- Added automatic, bounded backfilling for graphs created before the search
+  index existed and ensured replacement and deletion retract stale terms.
+
 ## 0.5.1
 
 - Changed full graph replacement from one unbounded Datalevin transaction to

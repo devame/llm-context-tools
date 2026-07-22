@@ -46,8 +46,8 @@ runs:
       run: |
         install_dir="$RUNNER_TEMP/llm-context/bin"
         curl -fsSL \
-          https://raw.githubusercontent.com/devame/llm-context-tools/v0.5.0/install.sh |
-          LLM_CONTEXT_VERSION=0.5.0 \
+          https://raw.githubusercontent.com/devame/llm-context-tools/v0.6.0/install.sh |
+          LLM_CONTEXT_VERSION=0.6.0 \
           LLM_CONTEXT_INSTALL_DIR="$install_dir" \
           LLM_CONTEXT_SKIP_PATH_UPDATE=1 sh
         echo "$install_dir" >> "$GITHUB_PATH"
