@@ -129,6 +129,69 @@
                           :db/unique :db.unique/identity}
    :llm-context/search-schema-version {:db/valueType :db.type/long}
 
+   ;; Operational semantic state is deliberately not assigned :entity/type.
+   ;; Full graph replacement only retracts canonical graph entities, so the
+   ;; durable queue and its recovery markers survive interrupted rebuilds.
+   :semantic.dirty/id {:db/valueType :db.type/string
+                       :db/unique :db.unique/identity}
+   :semantic.dirty/provider {:db/valueType :db.type/keyword
+                             :db/index true}
+   :semantic.dirty/file-id {:db/valueType :db.type/string
+                            :db/index true}
+   :semantic.dirty/file-hash {:db/valueType :db.type/string}
+   :semantic.dirty/operation {:db/valueType :db.type/keyword
+                              :db/index true}
+   :semantic.dirty/created-at {:db/valueType :db.type/long}
+
+   :semantic.job/id {:db/valueType :db.type/string
+                     :db/unique :db.unique/identity}
+   :semantic.job/provider {:db/valueType :db.type/keyword
+                           :db/index true}
+   :semantic.job/symbol-id {:db/valueType :db.type/string
+                            :db/index true}
+   :semantic.job/file-id {:db/valueType :db.type/string
+                          :db/index true}
+   :semantic.job/operation {:db/valueType :db.type/keyword
+                            :db/index true}
+   :semantic.job/document-hash {:db/valueType :db.type/string}
+   :semantic.job/status {:db/valueType :db.type/keyword
+                         :db/index true}
+   :semantic.job/attempts {:db/valueType :db.type/long}
+   :semantic.job/available-at {:db/valueType :db.type/long
+                               :db/index true}
+   :semantic.job/lease-owner {:db/valueType :db.type/string
+                              :db/index true}
+   :semantic.job/lease-until {:db/valueType :db.type/long
+                              :db/index true}
+   :semantic.job/last-error {:db/valueType :db.type/string}
+   :semantic.job/updated-at {:db/valueType :db.type/long}
+
+   :semantic.indexed/id {:db/valueType :db.type/string
+                         :db/unique :db.unique/identity}
+   :semantic.indexed/provider {:db/valueType :db.type/keyword
+                               :db/index true}
+   :semantic.indexed/symbol-id {:db/valueType :db.type/string
+                                :db/index true}
+   :semantic.indexed/file-id {:db/valueType :db.type/string
+                              :db/index true}
+   :semantic.indexed/document-hash {:db/valueType :db.type/string
+                                    :db/index true}
+   :semantic.indexed/model-revision {:db/valueType :db.type/string}
+   :semantic.indexed/document-version {:db/valueType :db.type/long}
+   :semantic.indexed/chunk-count {:db/valueType :db.type/long}
+   :semantic.indexed/updated-at {:db/valueType :db.type/long}
+
+   :semantic.watermark/id {:db/valueType :db.type/string
+                           :db/unique :db.unique/identity}
+   :semantic.watermark/provider {:db/valueType :db.type/keyword
+                                 :db/index true}
+   :semantic.watermark/state {:db/valueType :db.type/keyword
+                              :db/index true}
+   :semantic.watermark/last-success-at {:db/valueType :db.type/long}
+   :semantic.watermark/last-error-at {:db/valueType :db.type/long}
+   :semantic.watermark/last-error {:db/valueType :db.type/string}
+   :semantic.watermark/graph-revision {:db/valueType :db.type/string}
+
    :entity/type {:db/valueType :db.type/keyword
                  :db/index true}
 
