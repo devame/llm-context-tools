@@ -35,6 +35,7 @@
        "  init [--yes]         Confirm the project root and write llm-context.edn\n"
        "  analyze              Update the semantic graph\n"
        "  query                Query the semantic graph\n"
+       "  semantic             Inspect or synchronize LateOn indexing\n"
        "  context              Build an LLM context packet\n"
        "  export               Export graph data\n"
        "  summary              Export a Markdown graph summary\n"
@@ -165,6 +166,13 @@
          (format "Analyzed %d files into %d entities (%d diagnostics)"
                  (:files result) (:entities result)
                  (count (:diagnostics result)))))
+      (when (get-in result [:semantic :enabled?])
+        (println
+         (format
+          "Semantic indexing queued: %d upserts, %d deletions (%d deferred)"
+          (get-in result [:semantic :queued-upserts] 0)
+          (get-in result [:semantic :queued-deletes] 0)
+          (get-in result [:semantic :deferred] 0))))
       (doseq [diagnostic (:diagnostics result)]
         (println "  " (diagnostic-message diagnostic))))
     0))
@@ -174,11 +182,14 @@
       (throw (ex-info (str "query " subcommand " requires an argument")
                       {:exit-code 2}))))
 
-(defn- execute-query [graph subcommand args]
+(defn- execute-query [graph semantic-client settings subcommand args]
   (case subcommand
     "stats" ((resolve-fn 'llm-context.query/stats) graph)
     "find-symbol" ((resolve-fn 'llm-context.query/symbols)
                    graph (require-argument subcommand args))
+    "search" ((resolve-fn 'llm-context.query/search)
+              graph semantic-client settings
+              (require-argument subcommand args))
     "callers" ((resolve-fn 'llm-context.query/callers)
                graph (require-argument subcommand args))
     "callees" ((resolve-fn 'llm-context.query/callees)
@@ -199,7 +210,86 @@
       (pprint/pprint remote)
       (let [settings (config/load-config context)]
         (with-graph context settings
-          #(pprint/pprint (execute-query % subcommand command-args)))))
+          #(pprint/pprint
+            (execute-query % nil settings subcommand command-args)))))
+    0))
+
+(defn- local-semantic-status [context settings]
+  (with-graph
+    context settings
+    #((resolve-fn 'llm-context.semantic.state/semantic-summary)
+      % :lateon-code (System/currentTimeMillis))))
+
+(defn- semantic-status [context settings]
+  (let [remote (remote-value context {:op :semantic-status})]
+    (if (= unavailable remote)
+      (assoc (local-semantic-status context settings)
+             :runtime {:status :not-running})
+      remote)))
+
+(defn- semantic-synchronized? [status]
+  (and (zero? (:pending status))
+       (zero? (:leased status))
+       (zero? (:dirty status))))
+
+(defmethod execute "semantic" [context _ args]
+  (let [subcommand (or (first args) "status")
+        options (set (next args))
+        settings (config/load-config context)]
+    (case subcommand
+      "status"
+      (do
+        (when (seq options)
+          (throw (ex-info "semantic status does not accept options"
+                          {:exit-code 2})))
+        (pprint/pprint (semantic-status context settings)))
+
+      "sync"
+      (do
+        (when-let [unknown (first (remove #{"--wait"} options))]
+          (throw (ex-info (str "Unknown semantic sync option: " unknown)
+                          {:exit-code 2})))
+        (let [initial (remote-value context {:op :semantic-sync})]
+          (when (= unavailable initial)
+            (throw
+             (ex-info "Semantic synchronization requires a running project service"
+                      {:exit-code 2})))
+          (if-not (contains? options "--wait")
+            (pprint/pprint initial)
+            (let [timeout-ms (+ (get-in settings
+                                        [:semantic :lateon-code
+                                         :startup-timeout-ms])
+                                (get-in settings
+                                        [:semantic :lateon-code
+                                         :visibility-timeout-ms]))
+                  deadline (+ (System/currentTimeMillis) timeout-ms)]
+              (loop [status initial]
+                (cond
+                  (semantic-synchronized? status)
+                  (pprint/pprint status)
+
+                  (pos? (:failed status))
+                  (throw
+                   (ex-info "Semantic synchronization has failed jobs"
+                            {:exit-code 1 :status status}))
+
+                  (not= :ready (get-in status [:runtime :status]))
+                  (throw
+                   (ex-info "LateOn semantic runtime is not ready"
+                            {:exit-code 1 :status status}))
+
+                  (>= (System/currentTimeMillis) deadline)
+                  (throw
+                   (ex-info "Timed out waiting for semantic synchronization"
+                            {:exit-code 1 :status status}))
+
+                  :else
+                  (do
+                    (Thread/sleep 250)
+                    (recur (semantic-status context settings)))))))))
+
+      (throw (ex-info (str "Unknown semantic command: " subcommand)
+                      {:exit-code 2})))
     0))
 
 (defmethod execute "stats" [context _ _]

@@ -74,6 +74,11 @@
               (re-matches #"\d+\.\d+\.\d+" (:next-plaid-version lateon))))
     (conj ":semantic/:lateon-code/:next-plaid-version must be a semantic version")
 
+    (not (and (vector? (:next-plaid-command lateon))
+              (seq (:next-plaid-command lateon))
+              (every? non-blank-string? (:next-plaid-command lateon))))
+    (conj ":semantic/:lateon-code/:next-plaid-command must be a non-empty command vector")
+
     (not (non-blank-string? (:model lateon)))
     (conj ":semantic/:lateon-code/:model must be a non-blank string")
 
@@ -83,6 +88,10 @@
 
     (not (contains? semantic-quantizations (:quantization lateon)))
     (conj ":semantic/:lateon-code/:quantization must be :int8")
+
+    (not (or (nil? (:model-path lateon))
+             (non-blank-string? (:model-path lateon))))
+    (conj ":semantic/:lateon-code/:model-path must be nil or a non-blank path")
 
     (not (non-blank-string? (:index-path lateon)))
     (conj ":semantic/:lateon-code/:index-path must be a non-blank path")
@@ -115,11 +124,17 @@
     (not (pos-int? (:encoding-batch-size lateon)))
     (conj ":semantic/:lateon-code/:encoding-batch-size must be a positive integer")
 
+    (not (pos-int? (:model-document-length lateon)))
+    (conj ":semantic/:lateon-code/:model-document-length must be a positive integer")
+
     (not (pos-int? (:update-batch-size lateon)))
     (conj ":semantic/:lateon-code/:update-batch-size must be a positive integer")
 
     (not (pos-int? (:health-timeout-ms lateon)))
     (conj ":semantic/:lateon-code/:health-timeout-ms must be a positive integer")
+
+    (not (pos-int? (:startup-timeout-ms lateon)))
+    (conj ":semantic/:lateon-code/:startup-timeout-ms must be a positive integer")
 
     (not (pos-int? (:update-timeout-ms lateon)))
     (conj ":semantic/:lateon-code/:update-timeout-ms must be a positive integer")

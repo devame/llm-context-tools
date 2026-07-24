@@ -44,6 +44,26 @@
                     (throw (ex-info "analysis contacted the service" {})))]
       (is (zero? (cli/execute context "analyze" ["--full"]))))))
 
+(deftest semantic-status-remains-available-without-a-service
+  (let [root (Files/createTempDirectory
+              "llm-context-semantic-status-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        context (assoc (project/context (str root)) :options {:quiet? true})
+        output (with-out-str
+                 (is (zero? (cli/execute context "semantic" ["status"]))))]
+    (is (str/includes? output ":pending 0"))
+    (is (str/includes? output ":status :not-running"))))
+
+(deftest semantic-sync-requires-the-project-service
+  (let [root (Files/createTempDirectory
+              "llm-context-semantic-sync-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        context (assoc (project/context (str root)) :options {:quiet? true})]
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"requires a running project service"
+         (cli/execute context "semantic" ["sync"])))))
+
 (deftest initialization-confirms-the-project-root
   (let [root (Files/createTempDirectory
               "llm-context-init-"

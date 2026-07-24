@@ -15,8 +15,10 @@
   {:enabled true
    :mode :background
    :next-plaid-version "1.6.4"
+   :next-plaid-command ["next-plaid-api"]
    :model "lightonai/LateOn-Code"
    :model-revision "734b659a57935ef50562d79581c3ff1f8d825c93"
+   :model-path nil
    :quantization :int8
    :index-path ".llm-context/semantic/next-plaid"
    :index-name "llm-context"
@@ -28,7 +30,9 @@
    :pool-factor 2
    :encoding-sessions 1
    :encoding-batch-size 1
+   :model-document-length 2048
    :update-batch-size 10
+   :startup-timeout-ms 120000
    :health-timeout-ms 2000
    :update-timeout-ms 120000
    :query-timeout-ms 350

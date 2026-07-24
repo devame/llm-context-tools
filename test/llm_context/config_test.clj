@@ -15,7 +15,13 @@
     (is (= "lightonai/LateOn-Code"
            (get-in loaded [:semantic :lateon-code :model])))
     (is (= 40
-           (count (get-in loaded [:semantic :lateon-code :model-revision]))))))
+           (count (get-in loaded [:semantic :lateon-code :model-revision]))))
+    (is (= ["next-plaid-api"]
+           (get-in loaded [:semantic :lateon-code :next-plaid-command])))
+    (is (= 2048
+           (get-in loaded [:semantic :lateon-code :model-document-length])))
+    (is (= 120000
+           (get-in loaded [:semantic :lateon-code :startup-timeout-ms])))))
 
 (deftest user-configuration-deep-merges
   (let [context (temp-project)]
@@ -49,6 +55,9 @@
                    {:providers "lateon"
                     :lateon-code
                     {:model-revision "main"
+                     :next-plaid-command []
+                     :model-document-length 0
+                     :startup-timeout-ms 0
                      :query-timeout-ms 0
                      :centroid-score-threshold -1}}}))
     (let [error (try (config/load-config context) nil
@@ -57,5 +66,8 @@
       (is (= 2 (:exit-code (ex-data error))))
       (is (some #(re-find #":providers" %) errors))
       (is (some #(re-find #":model-revision" %) errors))
+      (is (some #(re-find #":next-plaid-command" %) errors))
+      (is (some #(re-find #":model-document-length" %) errors))
+      (is (some #(re-find #":startup-timeout-ms" %) errors))
       (is (some #(re-find #":query-timeout-ms" %) errors))
       (is (some #(re-find #":centroid-score-threshold" %) errors)))))
