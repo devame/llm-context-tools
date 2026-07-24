@@ -86,6 +86,12 @@
     (not (pos-int? (:document-version lateon)))
     (conj ":semantic/:lateon-code/:document-version must be a positive integer")
 
+    (not (pos-int? (:max-document-bytes lateon)))
+    (conj ":semantic/:lateon-code/:max-document-bytes must be a positive integer")
+
+    (not (nat-int? (:chunk-overlap-lines lateon)))
+    (conj ":semantic/:lateon-code/:chunk-overlap-lines must be a non-negative integer")
+
     (not (pos-int? (:pool-factor lateon)))
     (conj ":semantic/:lateon-code/:pool-factor must be a positive integer")
 

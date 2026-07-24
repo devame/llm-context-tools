@@ -19,6 +19,8 @@
    :quantization :int8
    :index-path ".llm-context/semantic/next-plaid"
    :document-version 1
+   :max-document-bytes 6000
+   :chunk-overlap-lines 8
    :pool-factor 2
    :encoding-sessions 1
    :encoding-batch-size 1
