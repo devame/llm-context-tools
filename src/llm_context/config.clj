@@ -143,6 +143,26 @@
     (not (pos-int? (:lease-ms lateon)))
     (conj ":semantic/:lateon-code/:lease-ms must be a positive integer")
 
+    (not (pos-int? (:visibility-timeout-ms lateon)))
+    (conj ":semantic/:lateon-code/:visibility-timeout-ms must be a positive integer")
+
+    (not (pos-int? (:visibility-poll-ms lateon)))
+    (conj ":semantic/:lateon-code/:visibility-poll-ms must be a positive integer")
+
+    (not (pos-int? (:idle-poll-ms lateon)))
+    (conj ":semantic/:lateon-code/:idle-poll-ms must be a positive integer")
+
+    (not (pos-int? (:retry-base-ms lateon)))
+    (conj ":semantic/:lateon-code/:retry-base-ms must be a positive integer")
+
+    (not (pos-int? (:retry-max-ms lateon)))
+    (conj ":semantic/:lateon-code/:retry-max-ms must be a positive integer")
+
+    (and (pos-int? (:retry-base-ms lateon))
+         (pos-int? (:retry-max-ms lateon))
+         (> (:retry-base-ms lateon) (:retry-max-ms lateon)))
+    (conj ":semantic/:lateon-code/:retry-base-ms must not exceed :retry-max-ms")
+
     (not (pos-int? (:max-attempts lateon)))
     (conj ":semantic/:lateon-code/:max-attempts must be a positive integer"))))
 

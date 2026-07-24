@@ -77,6 +77,23 @@
       (let [leased (state/lease-jobs! graph provider "worker-b" 110 100 5)]
         (is (= "worker-b" (:semantic.job/lease-owner (first leased))))))))
 
+(deftest worker-can-renew-only-its-current-lease
+  (let [project (fixture/temp-project)]
+    (store/with-store [graph project (config/defaults)]
+      (state/enqueue-job! graph (job "symbol:a" "sha256:a" 10))
+      (state/lease-jobs! graph provider "worker-a" 10 100 1)
+      (is (nil? (state/renew-job-lease!
+                 graph (state/job-id provider "symbol:a")
+                 "worker-b" 50 100)))
+      (is (true? (state/renew-job-lease!
+                  graph (state/job-id provider "symbol:a")
+                  "worker-a" 50 100)))
+      (is (= 0 (state/recover-expired-leases! graph provider 149)))
+      (is (= 1 (state/recover-expired-leases! graph provider 150)))
+      (is (nil? (state/renew-job-lease!
+                 graph (state/job-id provider "symbol:a")
+                 "worker-a" 160 100))))))
+
 (deftest stale-worker-cannot-complete-superseded-job
   (let [project (fixture/temp-project)]
     (store/with-store [graph project (config/defaults)]

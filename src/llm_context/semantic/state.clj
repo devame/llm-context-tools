@@ -127,6 +127,8 @@
     "Remove queued or leased work that is no longer desired.")
   (lease-jobs! [graph provider owner now lease-ms limit]
     "Atomically lease up to limit currently available jobs.")
+  (renew-job-lease! [graph job-id owner now lease-ms]
+    "Extend a worker-owned lease during a long model or visibility operation.")
   (recover-expired-leases! [graph provider now]
     "Return expired leases to pending and report how many were recovered.")
   (complete-job! [graph completion]
@@ -265,6 +267,27 @@
                leased
                (throw error)))))
        [] candidates)))
+
+  (renew-job-lease! [graph job-id owner now lease-ms]
+    (let [conn (connection graph)
+          db (d/db conn)
+          eid (eid-by db :semantic.job/id job-id)
+          job (when eid (d/pull db '[*] eid))]
+      (when (and job
+                 (= :leased (:semantic.job/status job))
+                 (= owner (:semantic.job/lease-owner job)))
+        (try
+          (d/transact!
+           conn
+           [[:db.fn/cas eid :semantic.job/lease-owner owner owner]
+            {:db/id eid
+             :semantic.job/lease-until (+ now lease-ms)
+             :semantic.job/updated-at now}])
+          true
+          (catch clojure.lang.ExceptionInfo error
+            (if (= :transact/cas (:error (ex-data error)))
+              false
+              (throw error)))))))
 
   (recover-expired-leases! [graph provider now]
     (when-not (nat-int? now)

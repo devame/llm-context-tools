@@ -37,6 +37,11 @@
    :centroid-score-threshold nil
    :n-full-scores 4096
    :lease-ms 120000
+   :visibility-timeout-ms 180000
+   :visibility-poll-ms 250
+   :idle-poll-ms 500
+   :retry-base-ms 1000
+   :retry-max-ms 60000
    :max-attempts 5}}
 
  :context
