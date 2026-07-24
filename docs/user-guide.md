@@ -177,8 +177,8 @@ also checksum-verified. Model inference and indexing are local; source text is
 sent only over the loopback connection between the project coordinator and its
 child process.
 
-Supported semantic-runtime targets are Linux x86-64, macOS x86-64/Apple
-Silicon, and Windows x86-64. Set `LLM_CONTEXT_SKIP_SEMANTIC=1` during
+Supported semantic-runtime targets are Linux x86-64, macOS Apple Silicon,
+and Windows x86-64. Set `LLM_CONTEXT_SKIP_SEMANTIC=1` during
 installation on other systems or whenever only the structural graph is
 wanted. Runtime memory and index size depend on codebase size and symbol
 length; pooling factor 2 is the default space/quality tradeoff.

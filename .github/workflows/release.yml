@@ -35,16 +35,6 @@ jobs:
             ort_source: lib/libonnxruntime.1.23.0.dylib
             ort_name: libonnxruntime.dylib
             ort_sha256: 8182db0ebb5caa21036a3c78178f17fabb98a7916bdab454467c8f4cf34bcfdf
-          - runner: macos-15-intel
-            target: x86_64-apple-darwin
-            features: model,accelerate
-            executable: next-plaid-api
-            archive: tar
-            ort_archive: onnxruntime-osx-x86_64-1.23.0.tgz
-            ort_root: onnxruntime-osx-x86_64-1.23.0
-            ort_source: lib/libonnxruntime.1.23.0.dylib
-            ort_name: libonnxruntime.dylib
-            ort_sha256: a8e43edcaa349cbfc51578a7fc61ea2b88793ccf077b4bc65aca58999d20cf0f
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
             features: model

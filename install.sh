@@ -83,8 +83,6 @@ if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
       NEXT_PLAID_TARGET="x86_64-unknown-linux-gnu" ;;
     Darwin:arm64|Darwin:aarch64)
       NEXT_PLAID_TARGET="aarch64-apple-darwin" ;;
-    Darwin:x86_64|Darwin:amd64)
-      NEXT_PLAID_TARGET="x86_64-apple-darwin" ;;
     *)
       fail "LateOn runtime is not packaged for $(uname -s) $(uname -m); rerun with LLM_CONTEXT_SKIP_SEMANTIC=1"
       ;;

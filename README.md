@@ -35,8 +35,8 @@ tool does not present naming guesses as compiler facts.
 - Clojure CLI 1.12+ when running from source.
 - Node.js 20+ only when using the npm launcher or optional
   `scip-typescript` provider. Node is not the application runtime.
-- The bundled LateOn runtime supports Linux x86-64, macOS x86-64/Apple
-  Silicon, and Windows x86-64. Structural graph analysis works elsewhere.
+- The bundled LateOn runtime supports Linux x86-64, macOS Apple Silicon,
+  and Windows x86-64. Structural graph analysis works elsewhere.
 
 ## Install
 
