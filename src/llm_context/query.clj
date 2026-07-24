@@ -1,5 +1,6 @@
 (ns llm-context.query
   (:require [clojure.string :as str]
+            [llm-context.semantic.hybrid :as hybrid]
             [llm-context.store :as store]))
 
 (defn- frequencies-query [graph query-form]
@@ -78,6 +79,12 @@
                           0.0)
                        :qualified-name))
          (mapv #(dissoc % ::exact? ::substring? ::score)))))
+
+(defn search
+  "Hybrid lexical and semantic code search. Pass nil as semantic-client for a
+  deterministic Datalevin-only fallback."
+  [graph semantic-client config term]
+  (hybrid/search graph semantic-client config term (symbols graph term)))
 
 (defn callers [graph target]
   (->> (store/query
