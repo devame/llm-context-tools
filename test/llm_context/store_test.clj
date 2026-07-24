@@ -5,6 +5,8 @@
             [llm-context.model.ids :as ids]
             [llm-context.model.schema :as schema]
             [llm-context.project :as project]
+            [llm-context.semantic.reconcile :as semantic-reconcile]
+            [llm-context.semantic.state :as semantic-state]
             [llm-context.store :as store])
   (:import [java.nio.file Files]))
 
@@ -116,6 +118,37 @@
                                '[:find [?entity ...]
                                  :where [?entity :entity/type _]]
                                []))))))
+
+(deftest file-mutations-can-atomically-assert-semantic-dirty-markers
+  (let [project (temp-project)
+        file (file-entity "src/a.clj" "old")
+        symbol (symbol-entity file "sample/a" 1)]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-file-and-mark!
+       graph file [symbol]
+       [(semantic-reconcile/dirty-entity
+         (:file/id file) (:file/content-hash file) :upsert 10)])
+      (is (= #{["sample/a"]}
+             (store/query graph
+                          '[:find ?name
+                            :where [_ :symbol/qualified-name ?name]]
+                          [])))
+      (is (= :upsert
+             (:semantic.dirty/operation
+              (first (semantic-state/dirty-records
+                      graph :lateon-code)))))
+      (store/delete-file-and-mark!
+       graph (:file/id file)
+       [(semantic-reconcile/dirty-entity
+         (:file/id file) nil :delete 20)])
+      (is (empty? (store/query graph
+                               '[:find [?entity ...]
+                                 :where [?entity :entity/type _]]
+                               [])))
+      (let [marker (first (semantic-state/dirty-records
+                           graph :lateon-code))]
+        (is (= :delete (:semantic.dirty/operation marker)))
+        (is (nil? (:semantic.dirty/file-hash marker)))))))
 
 (deftest whole-graph-replacement-resolves-forward-cross-file-references
   (let [project (temp-project)

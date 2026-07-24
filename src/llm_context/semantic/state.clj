@@ -50,6 +50,18 @@
                     {:marker marker})))
   marker)
 
+(defn dirty-entity
+  "Validate and convert a public dirty marker into its Datalevin entity."
+  [marker]
+  (let [{:keys [provider file-id file-hash operation created-at]}
+        (validate-dirty! marker)]
+    (cond-> {:semantic.dirty/id (dirty-id provider file-id)
+             :semantic.dirty/provider provider
+             :semantic.dirty/file-id file-id
+             :semantic.dirty/operation operation
+             :semantic.dirty/created-at created-at}
+      file-hash (assoc :semantic.dirty/file-hash file-hash))))
+
 (defn- validate-job! [{:keys [provider symbol-id file-id operation
                                document-hash available-at updated-at] :as job}]
   (require-key! job :provider keyword? "Semantic job provider must be a keyword")
@@ -111,6 +123,8 @@
     "Remove a dirty marker after it has been reconciled.")
   (enqueue-job! [graph job]
     "Create or supersede one coalesced symbol job.")
+  (cancel-job! [graph provider symbol-id]
+    "Remove queued or leased work that is no longer desired.")
   (lease-jobs! [graph provider owner now lease-ms limit]
     "Atomically lease up to limit currently available jobs.")
   (recover-expired-leases! [graph provider now]
@@ -136,8 +150,8 @@
   SemanticState
 
   (mark-dirty! [graph marker]
-    (let [{:keys [provider file-id file-hash operation created-at]}
-          (validate-dirty! marker)
+    (let [{:semantic.dirty/keys [provider file-id file-hash] :as entity}
+          (dirty-entity marker)
           conn (connection graph)
           db (d/db conn)
           existing-eid (eid-by db :semantic.dirty/id
@@ -152,13 +166,7 @@
                     (nil? file-hash))
            [[:db/retract existing-eid :semantic.dirty/file-hash
              (:semantic.dirty/file-hash existing)]])
-         [(cond-> {:semantic.dirty/id (dirty-id provider file-id)
-                   :semantic.dirty/provider provider
-                   :semantic.dirty/file-id file-id
-                   :semantic.dirty/operation operation
-                   :semantic.dirty/created-at created-at}
-            file-hash
-            (assoc :semantic.dirty/file-hash file-hash))])))
+         [entity])))
       marker))
 
   (dirty-records [graph provider]
@@ -213,6 +221,14 @@
           (d/transact! conn (vec (concat obsolete [entity])))
           (d/pull (d/db conn) '[*]
                   (eid-by (d/db conn) :semantic.job/id id))))))
+
+  (cancel-job! [graph provider symbol-id]
+    (let [conn (connection graph)
+          db (d/db conn)]
+      (when-let [eid (eid-by db :semantic.job/id
+                             (job-id provider symbol-id))]
+        (d/transact! conn [[:db/retractEntity eid]])
+        true)))
 
   (lease-jobs! [graph provider owner now lease-ms limit]
     (when-not (and (string? owner) (seq owner))

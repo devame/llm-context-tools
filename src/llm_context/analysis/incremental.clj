@@ -6,6 +6,7 @@
             [llm-context.indexer :as indexer]
             [llm-context.model.ids :as ids]
             [llm-context.parser.jtreesitter :as jtreesitter]
+            [llm-context.semantic.reconcile :as semantic-reconcile]
             [llm-context.semantic.scip :as scip]
             [llm-context.store :as store]))
 
@@ -105,9 +106,19 @@
                         changed)))
               [])]
         (doseq [path deleted]
-          (store/delete-file! graph (get-in existing [path :id])))
+          (let [file-id (get-in existing [path :id])]
+            (if (semantic-reconcile/enabled? config)
+              (store/delete-file-and-mark!
+               graph file-id
+               [(semantic-reconcile/dirty-entity file-id nil :delete)])
+              (store/delete-file! graph file-id))))
         (doseq [{:keys [file entities]} extracted]
-          (store/replace-file! graph file entities))
+          (if (semantic-reconcile/enabled? config)
+            (store/replace-file-and-mark!
+             graph file entities
+             [(semantic-reconcile/dirty-entity
+               (:file/id file) (:file/content-hash file) :upsert)])
+            (store/replace-file! graph file entities)))
         (let [semantic (semantic-index project config changed)
               symbols (graph-symbols graph)
               edges (graph-edges graph)
@@ -116,11 +127,16 @@
                       {})]
           (store/reconcile-edges!
            graph (resolve/resolution-decisions symbols edges exact))
-          {:mode :incremental
+          (let [semantic-plan
+                (semantic-reconcile/reconcile! graph project config)]
+            {:mode :incremental
            :files (count files)
            :changed (count changed)
            :deleted (count deleted)
            :entities (reduce + (map #(inc (count (:entities %))) extracted))
+           :semantic semantic-plan
            :diagnostics (cond-> (vec (concat diagnostics
-                                             (mapcat :diagnostics extracted)))
-                          (:diagnostic semantic) (conj (:diagnostic semantic)))})))))
+                                             (mapcat :diagnostics extracted)
+                                             (:diagnostics semantic-plan)))
+                          (:diagnostic semantic)
+                          (conj (:diagnostic semantic)))}))))))

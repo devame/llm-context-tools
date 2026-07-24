@@ -6,6 +6,7 @@
             [llm-context.indexer :as indexer]
             [llm-context.parser.jtreesitter :as jtreesitter]
             [llm-context.parser.provider :as parser]
+            [llm-context.semantic.reconcile :as semantic-reconcile]
             [llm-context.semantic.scip :as scip]
             [llm-context.store :as store]))
 
@@ -30,11 +31,14 @@
 
 (defn- persist! [project config entities progress]
   (store/with-store [graph project config]
+    (when (semantic-reconcile/enabled? config)
+      (semantic-reconcile/mark-full! graph))
     (store/replace-all! graph entities
                         {:batch-size persistence-batch-size
                          :on-progress
                          (when progress
-                           #(emit! progress :persist-progress %))})))
+                           #(emit! progress :persist-progress %))})
+    (semantic-reconcile/reconcile! graph project config)))
 
 (defn analyze!
   "Perform a complete project scan and replace Datalevin facts in bounded
@@ -76,13 +80,16 @@
              _ (emit! progress :persist-start
                       {:entities (count all-entities)
                        :batch-size persistence-batch-size})]
-         (persist! project config all-entities progress)
-         (emit! progress :complete
-                {:elapsed-seconds
-                 (long (/ (- (System/nanoTime) started) 1000000000))})
-         {:mode :full
-          :files total
-          :entities (count all-entities)
-          :diagnostics (cond-> (vec (concat diagnostics
-                                            (mapcat :diagnostics resolved)))
-                         (:diagnostic semantic) (conj (:diagnostic semantic)))})))))
+         (let [semantic-plan (persist! project config all-entities progress)]
+           (emit! progress :complete
+                  {:elapsed-seconds
+                   (long (/ (- (System/nanoTime) started) 1000000000))})
+           {:mode :full
+            :files total
+            :entities (count all-entities)
+            :semantic semantic-plan
+            :diagnostics (cond-> (vec (concat diagnostics
+                                              (mapcat :diagnostics resolved)
+                                              (:diagnostics semantic-plan)))
+                           (:diagnostic semantic)
+                           (conj (:diagnostic semantic)))}))))))

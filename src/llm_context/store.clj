@@ -11,8 +11,12 @@
     "Replace the complete graph in bounded, dependency-ordered transactions.")
   (replace-file! [store file entities]
     "Atomically replace one file and every graph fact owned by it.")
+  (replace-file-and-mark! [store file entities dirty-markers]
+    "Atomically replace one file and assert semantic dirty markers.")
   (delete-file! [store file-id]
     "Atomically retract a file and every graph fact connected to its symbols.")
+  (delete-file-and-mark! [store file-id dirty-markers]
+    "Atomically retract one file and assert semantic dirty markers.")
   (reconcile-edges! [store decisions]
     "Update edge targets and resolution states after the symbol set changes.")
   (query [store query-form inputs] "Run a Datalog query against the store."))
@@ -182,6 +186,24 @@
                       :edge/confidence 0.0}])
                   inbound))))
 
+(defn- dirty-marker-tx [db markers]
+  (mapcat
+   (fn [marker]
+     (let [id (:semantic.dirty/id marker)
+           existing (when id (existing-eid db [:semantic.dirty/id id]))
+           old-hash (when existing
+                      (d/q '[:find ?hash .
+                             :in $ ?entity
+                             :where [?entity :semantic.dirty/file-hash ?hash]]
+                           db existing))]
+       (cond-> []
+         (and old-hash (nil? (:semantic.dirty/file-hash marker)))
+         (conj [:db/retract existing :semantic.dirty/file-hash old-hash])
+
+         true
+         (conj marker))))
+   markers))
+
 (defrecord DatalevinStore [connection path]
   GraphStore
   (database [_] (d/db connection))
@@ -227,12 +249,36 @@
           assertions (entities->tx db all-entities force-new)]
       (d/transact! connection (into retractions assertions))))
 
+  (replace-file-and-mark! [_ file entities dirty-markers]
+    (schema/validate-entity! file)
+    (doseq [entity entities]
+      (schema/validate-entity! entity))
+    (let [db (d/db connection)
+          retractions (retract-owned-tx db (:file/id file))
+          all-entities (vec (cons file entities))
+          force-new (set (map entity-identity entities))
+          assertions (entities->tx db all-entities force-new)
+          markers (dirty-marker-tx db dirty-markers)]
+      (d/transact! connection
+                   (vec (concat retractions assertions markers)))))
+
   (delete-file! [_ file-id]
     (let [db (d/db connection)
           owned (retract-owned-tx db file-id)
           tx (cond-> owned
                (file-eid db file-id)
                (conj [:db/retractEntity (file-eid db file-id)]))]
+      (when (seq tx)
+        (d/transact! connection tx))))
+
+  (delete-file-and-mark! [_ file-id dirty-markers]
+    (let [db (d/db connection)
+          owned (retract-owned-tx db file-id)
+          graph-tx (cond-> owned
+                     (file-eid db file-id)
+                     (conj [:db/retractEntity (file-eid db file-id)]))
+          marker-tx (dirty-marker-tx db dirty-markers)
+          tx (vec (concat graph-tx marker-tx))]
       (when (seq tx)
         (d/transact! connection tx))))
 
