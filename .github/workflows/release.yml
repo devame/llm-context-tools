@@ -82,8 +82,12 @@ jobs:
           curl --fail --location \
             "https://github.com/microsoft/onnxruntime/releases/download/v1.23.0/${{ matrix.ort_archive }}" \
             --output onnxruntime-archive
-          test "$(shasum -a 256 onnxruntime-archive | cut -d ' ' -f 1)" = \
-            "${{ matrix.ort_sha256 }}"
+          if command -v sha256sum >/dev/null 2>&1; then
+            ort_actual_sha256="$(sha256sum onnxruntime-archive | cut -d ' ' -f 1)"
+          else
+            ort_actual_sha256="$(shasum -a 256 onnxruntime-archive | cut -d ' ' -f 1)"
+          fi
+          test "$ort_actual_sha256" = "${{ matrix.ort_sha256 }}"
           mkdir -p onnxruntime
           if [ "${{ matrix.archive }}" = "zip" ]; then
             7z x onnxruntime-archive -oonnxruntime
