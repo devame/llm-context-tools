@@ -1,6 +1,7 @@
 (ns llm-context.service.server-test
   (:require [clojure.test :refer [deftest is]]
             [llm-context.semantic.fake-index :as fake]
+            [llm-context.semantic.worker :as semantic-worker]
             [llm-context.project :as project]
             [llm-context.service.client :as client]
             [llm-context.service.server :as server])
@@ -39,7 +40,8 @@
     (is (await-semantic-status project :unavailable))
     (is (= {:status :unavailable
             :reason :model-missing
-            :detail "/missing/model"}
+            :detail "/missing/model"
+            :worker-status :not-running}
            (get-in (client/request project {:op :semantic-status})
                    [:value :runtime])))
     (is (= 0 (get-in (client/request project
@@ -78,6 +80,38 @@
            (client/request project {:op :stop})))
     (is (not= ::timeout (deref running 5000 ::timeout)))
     (is (:closed? (fake/snapshot semantic-index)))))
+
+(deftest service-reports-background-worker-failure-separately
+  (let [root (Files/createTempDirectory
+              "llm-context-failed-worker-service-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        project (project/context (str root))
+        semantic-index (fake/create)
+        runtime-factory (fn [_ _]
+                          {:status :ready
+                           :endpoint "http://127.0.0.1:12345"
+                           :client semantic-index})]
+    (with-redefs [semantic-worker/run!
+                  (fn [_] (throw (ex-info "fixture decoding failed" {})))]
+      (let [running (future
+                      (with-out-str
+                        (server/start! project
+                                       {:runtime-factory runtime-factory})))]
+        (is (await-service project))
+        (loop [attempt 0]
+          (let [runtime
+                (get-in (client/request project {:op :semantic-status})
+                        [:value :runtime])]
+            (if (or (= :failed (:worker-status runtime))
+                    (>= attempt 100))
+              (do
+                (is (= :ready (:status runtime)))
+                (is (= :failed (:worker-status runtime)))
+                (is (= "fixture decoding failed" (:worker-detail runtime))))
+              (do (Thread/sleep 20) (recur (inc attempt))))))
+        (is (= {:ok true :value :stopping}
+               (client/request project {:op :stop})))
+        (is (not= ::timeout (deref running 5000 ::timeout)))))))
 
 (deftest unreadable-service-response-is-treated-as-unavailable
   (let [root (Files/createTempDirectory

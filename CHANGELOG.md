@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.1
+
+- Fixed malformed UTF-8 handling by sharing deterministic replacement decoding
+  between structural and semantic analysis and emitting per-file diagnostics.
+- Isolated semantic reconciliation failures so one problematic source file no
+  longer strands unrelated LateOn jobs or terminates the background worker.
+- Added worker-health reporting to `semantic status`, `semantic sync --wait`,
+  and `doctor` with actionable failure details.
+
 ## 0.7.0
 
 - Added a durable, coalesced Datalevin outbox for asynchronous LateOn-Code

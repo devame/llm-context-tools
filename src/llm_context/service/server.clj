@@ -38,7 +38,8 @@
 
 (defn- semantic-status [graph runtime-state]
   (let [runtime (select-keys runtime-state
-                             [:status :reason :detail :endpoint :log-path])]
+                             [:status :reason :detail :endpoint :log-path
+                              :worker-status :worker-detail])]
     (assoc (semantic-state/semantic-summary
             graph semantic-reconcile/provider (System/currentTimeMillis))
            :runtime
@@ -112,7 +113,9 @@
           running (atom true)
           semantic-enabled? (semantic-reconcile/enabled? settings)
           runtime-state (atom {:status (if semantic-enabled?
-                                         :starting :disabled)})
+                                         :starting :disabled)
+                               :worker-status (if semantic-enabled?
+                                                :starting :disabled)})
           worker-state (atom nil)]
       (try
         (with-open [graph (store/open project settings)
@@ -131,13 +134,17 @@
                 (when semantic-enabled?
                   (future
                     (try
-                      (reset! runtime-state
-                              (runtime-factory project settings))
+                      (let [runtime (runtime-factory project settings)]
+                        (reset! runtime-state
+                                (assoc runtime :worker-status
+                                       (if (= :ready (:status runtime))
+                                         :starting :not-running))))
                       (catch Throwable error
                         (reset! runtime-state
                                 {:status :failed
                                  :reason :startup-failed
-                                 :detail (.getMessage error)})))))
+                                 :detail (.getMessage error)
+                                 :worker-status :not-running})))))
                 worker-future
                 (when semantic-enabled?
                   (future
@@ -149,9 +156,13 @@
                              graph project settings
                              (:client @runtime-state))]
                         (reset! worker-state worker)
+                        (swap! runtime-state assoc :worker-status :running)
                         (try
                           (semantic-worker/run! worker)
                           (catch Throwable error
+                            (swap! runtime-state assoc
+                                   :worker-status :failed
+                                   :worker-detail (.getMessage error))
                             (semantic-state/record-watermark!
                              graph {:provider semantic-reconcile/provider
                                     :state :failed

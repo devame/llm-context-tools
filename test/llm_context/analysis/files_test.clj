@@ -66,3 +66,26 @@
         result (files/discover context settings (jtreesitter/available-languages))]
     (is (empty? (:files result)))
     (is (= :missing-include (get-in result [:diagnostics 0 :kind])))))
+
+(deftest malformed-utf8-is-analyzable-with-an-actionable-diagnostic
+  (let [root (Files/createTempDirectory
+              "llm-context-malformed-source-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        context (project/context (str root))
+        path (.resolve root "fixture.clj")
+        bytes (byte-array
+               (concat (.getBytes "(def value \""
+                                  java.nio.charset.StandardCharsets/UTF_8)
+                       [(unchecked-byte 0xc4)]
+                       (.getBytes "\")"
+                                  java.nio.charset.StandardCharsets/UTF_8)))]
+    (Files/write path bytes (make-array java.nio.file.OpenOption 0))
+    (let [{:keys [files diagnostics]}
+          (files/discover context (config/defaults)
+                          (jtreesitter/available-languages))
+          diagnostic (first (filter #(= :invalid-utf8 (:kind %))
+                                    diagnostics))]
+      (is (= ["fixture.clj"] (mapv :relative-path files)))
+      (is (= "(def value \"\uFFFD\")" (:content (first files))))
+      (is (= "fixture.clj" (:file diagnostic)))
+      (is (= 12 (:byte-offset diagnostic))))))

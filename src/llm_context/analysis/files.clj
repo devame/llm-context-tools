@@ -1,7 +1,8 @@
 (ns llm-context.analysis.files
   (:require [clojure.string :as str]
             [llm-context.parser.provider :as parser]
-            [llm-context.project :as project])
+            [llm-context.project :as project]
+            [llm-context.source :as source])
   (:import [java.nio.charset StandardCharsets]
            [java.nio.file FileVisitResult Files LinkOption Path SimpleFileVisitor]
            [java.nio.file.attribute BasicFileAttributes]))
@@ -125,15 +126,27 @@
                  (if (binary? bytes)
                    (update result :diagnostics conj
                            {:level :warning :kind :binary-file :file relative})
-                   (update result :files conj
-                           {:path path
-                            :relative-path relative
-                            :language language
-                            :content (String. bytes StandardCharsets/UTF_8)
-                            :size size
-                            :modified-at
-                            (.toMillis
-                             (Files/getLastModifiedTime
-                              path (make-array LinkOption 0)))}))))))))
+                   (let [{:keys [content malformed? malformed-offset]}
+                         (source/decode-utf8 bytes)]
+                     (cond->
+                      (update result :files conj
+                              {:path path
+                               :relative-path relative
+                               :language language
+                               :content content
+                               :size size
+                               :modified-at
+                               (.toMillis
+                                (Files/getLastModifiedTime
+                                 path (make-array LinkOption 0)))})
+                       malformed?
+                       (update :diagnostics conj
+                               {:level :warning
+                                :kind :invalid-utf8
+                                :file relative
+                                :byte-offset malformed-offset
+                                :message
+                                (str "Malformed UTF-8 was replaced with "
+                                     "U+FFFD for deterministic analysis")}))))))))))
      {:files [] :diagnostics (vec missing)}
      candidates)))

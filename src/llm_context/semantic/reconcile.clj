@@ -53,6 +53,15 @@
         (map (juxt :semantic.job/symbol-id identity))
         (state/job-records graph provider)))
 
+(defn- path-for-file [graph file-id]
+  (ffirst
+   (store/query graph
+                '[:find ?path
+                  :in $ ?id
+                  :where [?file :file/id ?id]
+                         [?file :file/path ?path]]
+                [file-id])))
+
 (defn- same-indexed? [lateon indexed desired]
   (and indexed
        (= (:document-hash desired)
@@ -148,6 +157,24 @@
                :file-id file-id
                :diagnostics (:diagnostics built))))))
 
+(defn- reconcile-file-safely!
+  [graph project lateon marker now indexed jobs]
+  (try
+    (reconcile-file! graph project lateon marker now indexed jobs)
+    (catch Exception error
+      (let [file-id (:semantic.dirty/file-id marker)
+            file-path (path-for-file graph file-id)]
+        {:status :deferred
+         :file-id file-id
+         :diagnostics
+         [(cond-> {:level :warning
+                   :kind :semantic-file-failed
+                   :file-id file-id
+                   :message (.getMessage error)}
+            file-path (assoc :file file-path))]
+         :queued-upserts 0 :queued-deletes 0
+         :cancelled 0 :unchanged 0}))))
+
 (defn reconcile!
   "Reconcile all durable LateOn dirty markers. Safe to call after every
   analysis and on every service start."
@@ -188,8 +215,8 @@
                      (sort-by :semantic.dirty/file-id)
                      vec)
            jobs (jobs-by-symbol graph)
-           results (mapv #(reconcile-file! graph project lateon % now
-                                            indexed jobs)
+           results (mapv #(reconcile-file-safely! graph project lateon % now
+                                                   indexed jobs)
                          work)
            deferred (count (filter #(= :deferred (:status %)) results))]
        (when (and full? (zero? deferred))

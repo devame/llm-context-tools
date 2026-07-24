@@ -264,36 +264,53 @@
                                          :visibility-timeout-ms]))
                   deadline (+ (System/currentTimeMillis) timeout-ms)]
               (loop [status initial]
-                (cond
-                  (semantic-synchronized? status)
-                  (pprint/pprint status)
+                (let [runtime (:runtime status)
+                      worker-status (:worker-status runtime)]
+                  (cond
+                    (= :failed worker-status)
+                    (throw
+                     (ex-info
+                      (str "LateOn semantic worker failed"
+                           (when-let [detail (:worker-detail runtime)]
+                             (str ": " detail)))
+                      {:exit-code 1 :status status}))
 
-                  (pos? (:failed status))
-                  (throw
-                   (ex-info "Semantic synchronization has failed jobs"
-                            {:exit-code 1 :status status}))
+                    (pos? (:failed status))
+                    (throw
+                     (ex-info "Semantic synchronization has failed jobs"
+                              {:exit-code 1 :status status}))
 
-                  (contains? #{:disabled :unavailable :failed :not-running}
-                             (get-in status [:runtime :status]))
-                  (throw
-                   (ex-info "LateOn semantic runtime is not ready"
-                            {:exit-code 1 :status status}))
+                    (contains? #{:disabled :unavailable :failed :not-running}
+                               (:status runtime))
+                    (throw
+                     (ex-info
+                      (str "LateOn semantic runtime is not ready: "
+                           (name (:status runtime))
+                           (when-let [reason (:reason runtime)]
+                             (str " (" (name reason) ")"))
+                           (when-let [detail (:detail runtime)]
+                             (str " - " detail)))
+                      {:exit-code 1 :status status}))
 
-                  (not (contains? #{:starting :ready}
-                                  (get-in status [:runtime :status])))
-                  (throw
-                   (ex-info "LateOn semantic runtime reported an unknown state"
-                            {:exit-code 1 :status status}))
+                    (not (contains? #{:starting :ready}
+                                    (:status runtime)))
+                    (throw
+                     (ex-info
+                      "LateOn semantic runtime reported an unknown state"
+                      {:exit-code 1 :status status}))
 
-                  (>= (System/currentTimeMillis) deadline)
-                  (throw
-                   (ex-info "Timed out waiting for semantic synchronization"
-                            {:exit-code 1 :status status}))
+                    (semantic-synchronized? status)
+                    (pprint/pprint status)
 
-                  :else
-                  (do
-                    (Thread/sleep 250)
-                    (recur (semantic-status context settings)))))))))
+                    (>= (System/currentTimeMillis) deadline)
+                    (throw
+                     (ex-info "Timed out waiting for semantic synchronization"
+                              {:exit-code 1 :status status}))
+
+                    :else
+                    (do
+                      (Thread/sleep 250)
+                      (recur (semantic-status context settings))))))))))
 
       (throw (ex-info (str "Unknown semantic command: " subcommand)
                       {:exit-code 2})))

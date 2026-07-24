@@ -5,6 +5,7 @@
             [llm-context.analysis.incremental :as incremental]
             [llm-context.config :as config]
             [llm-context.project :as project]
+            [llm-context.semantic.document :as document]
             [llm-context.semantic.reconcile :as reconcile]
             [llm-context.semantic.state :as state]
             [llm-context.store :as store])
@@ -133,3 +134,41 @@
           (is (empty? (state/job-records graph reconcile/provider)))
           (is (= 1 (count (state/dirty-records
                            graph reconcile/provider)))))))))
+
+(deftest one-file-failure-does-not-block-unrelated-semantic-work
+  (let [{:keys [project]} (project-with-source
+                           "(ns sample.app)\n(defn useful [] :ok)")
+        second-path (.resolve (:root project) "src/other.clj")]
+    (spit (str second-path) "(ns sample.other)\n(defn healthy [] :ok)")
+    (full/analyze! project settings)
+    (store/with-store [graph project settings]
+      (doseq [record (state/job-records graph reconcile/provider)]
+        (state/cancel-job! graph reconcile/provider
+                           (:semantic.job/symbol-id record)))
+      (let [files (store/query
+                   graph
+                   '[:find ?id ?path ?hash
+                     :where [?file :file/id ?id]
+                            [?file :file/path ?path]
+                            [?file :file/content-hash ?hash]]
+                   [])
+            failed-id (ffirst (filter #(= "src/app.clj" (second %)) files))
+            original document/build-file]
+        (doseq [[file-id _ file-hash] files]
+          (state/mark-dirty!
+           graph (reconcile/dirty-marker file-id file-hash :upsert 20)))
+        (with-redefs [document/build-file
+                      (fn [graph project lateon file-id]
+                        (if (= failed-id file-id)
+                          (throw (java.nio.charset.MalformedInputException. 1))
+                          (original graph project lateon file-id)))]
+          (let [result (reconcile/reconcile! graph project settings 30)
+                dirty (state/dirty-records graph reconcile/provider)]
+            (is (= 1 (:deferred result)))
+            (is (= 1 (:queued-upserts result)))
+            (is (= :semantic-file-failed
+                   (get-in result [:diagnostics 0 :kind])))
+            (is (= "src/app.clj"
+                   (get-in result [:diagnostics 0 :file])))
+            (is (= [failed-id]
+                   (mapv :semantic.dirty/file-id dirty)))))))))

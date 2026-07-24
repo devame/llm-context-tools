@@ -4,6 +4,7 @@
   (:require [clojure.string :as str]
             [datalevin.core :as d]
             [llm-context.model.ids :as ids]
+            [llm-context.source :as source]
             [llm-context.store :as store])
   (:import [java.nio.charset StandardCharsets]
            [java.nio.file Files LinkOption Path]))
@@ -256,8 +257,8 @@
            :documents []
            :diagnostics [{:level :warning :kind :semantic-source-missing
                           :file (:file/path file)}]}
-          (let [source (Files/readString path StandardCharsets/UTF_8)
-                actual-hash (ids/content-hash source)]
+          (let [source-text (:content (source/read-utf8 path))
+                actual-hash (ids/content-hash source-text)]
             (if-not (= actual-hash (:file/content-hash file))
               {:status :source-changed
                :file-id file-id
@@ -272,7 +273,7 @@
                      (fn [symbol]
                        (try
                          {:document
-                          (build lateon symbol file source
+                          (build lateon symbol file source-text
                                  (relationships-for db (:symbol/id symbol)))}
                          (catch clojure.lang.ExceptionInfo error
                            {:diagnostic

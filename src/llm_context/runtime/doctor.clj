@@ -122,18 +122,26 @@
         (when (service-client/available? project)
           (service-client/request project {:op :semantic-status}))
         service-runtime (get-in service-response [:value :runtime])
+        worker-failed? (= :failed (:worker-status service-runtime))
         service-check
         {:check :project-service
          :required? false
          :ok? (if lateon-enabled?
-                (= :ready (:status service-runtime))
+                (and (= :ready (:status service-runtime))
+                     (not worker-failed?))
                 (boolean (:ok service-response)))
          :detail
          (cond
            (not (:ok service-response)) "not running"
+           worker-failed?
+           (str "running; LateOn ready; worker failed"
+                (when-let [detail (:worker-detail service-runtime)]
+                  (str ": " detail)))
            lateon-enabled?
            (str "running; LateOn "
-                (name (or (:status service-runtime) :unknown)))
+                (name (or (:status service-runtime) :unknown))
+                "; worker "
+                (name (or (:worker-status service-runtime) :unknown)))
            :else "running")}]
     [java-check writable-check datalevin-check scip-check runtime-check
      onnx-check model-check service-check]))

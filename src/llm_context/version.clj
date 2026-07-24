@@ -1,3 +1,3 @@
 (ns llm-context.version)
 
-(def value "0.7.0")
+(def value "0.7.1")

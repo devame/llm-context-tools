@@ -127,3 +127,29 @@
       (is (= {:status :deleted :file-id "file:missing"
               :documents [] :diagnostics []}
              (document/build-file graph project lateon "file:missing"))))))
+
+(deftest build-file-uses-the-same-replacement-decoding-as-analysis
+  (let [root (Files/createTempDirectory
+              "llm-context-malformed-document-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        project (project/context (str root))
+        path (.resolve root "src/app.clj")
+        bytes (byte-array
+               (concat (.getBytes "(defn useful [] \""
+                                  java.nio.charset.StandardCharsets/UTF_8)
+                       [(unchecked-byte 0xc4)]
+                       (.getBytes "\")"
+                                  java.nio.charset.StandardCharsets/UTF_8)))
+        source "(defn useful [] \"\uFFFD\")"
+        file (file "src/app.clj" source :language/clojure)
+        function (symbol-entity file "symbol:useful" "useful" 1 1 1 20)]
+    (Files/createDirectories (.getParent path)
+                             (make-array java.nio.file.attribute.FileAttribute 0))
+    (Files/write path bytes (make-array java.nio.file.OpenOption 0))
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-file! graph file [function])
+      (let [result (document/build-file graph project lateon (:file/id file))]
+        (is (= :ready (:status result)))
+        (is (= 1 (count (:documents result))))
+        (is (str/includes? (get-in result [:documents 0 :chunks 0 :text])
+                           "\uFFFD"))))))

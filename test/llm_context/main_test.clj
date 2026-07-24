@@ -64,6 +64,22 @@
          #"requires a running project service"
          (cli/execute context "semantic" ["sync"])))))
 
+(deftest semantic-sync-reports-the-worker-failure-detail
+  (let [root (Files/createTempDirectory
+              "llm-context-semantic-worker-failure-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        context (assoc (project/context (str root)) :options {:quiet? true})
+        status {:indexed 0 :dirty 1 :pending 10 :leased 0 :failed 0
+                :runtime {:status :ready
+                          :worker-status :failed
+                          :worker-detail "fixture decoding failed"}}]
+    (with-redefs [service-client/request
+                  (fn [_ _] {:ok true :value status})]
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"LateOn semantic worker failed: fixture decoding failed"
+           (cli/execute context "semantic" ["sync" "--wait"]))))))
+
 (deftest initialization-confirms-the-project-root
   (let [root (Files/createTempDirectory
               "llm-context-init-"
