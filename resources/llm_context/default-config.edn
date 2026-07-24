@@ -9,8 +9,27 @@
  {:path ".llm-context/db"}
 
  :semantic
- {:providers [:scip-typescript]
-  :scip-typescript-command ["npx" "--no-install" "scip-typescript" "index"]}
+ {:providers [:scip-typescript :lateon-code]
+  :scip-typescript-command ["npx" "--no-install" "scip-typescript" "index"]
+  :lateon-code
+  {:enabled true
+   :mode :background
+   :model "lightonai/LateOn-Code"
+   :model-revision "734b659a57935ef50562d79581c3ff1f8d825c93"
+   :quantization :int8
+   :index-path ".llm-context/semantic/next-plaid"
+   :document-version 1
+   :pool-factor 2
+   :encoding-sessions 1
+   :encoding-batch-size 1
+   :update-batch-size 10
+   :query-timeout-ms 350
+   :candidate-count 50
+   :n-ivf-probe 8
+   :centroid-score-threshold nil
+   :n-full-scores 4096
+   :lease-ms 120000
+   :max-attempts 5}}
 
  :context
  {:default-max-tokens 8000

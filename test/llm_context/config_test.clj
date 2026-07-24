@@ -11,7 +11,11 @@
 (deftest defaults-are-valid
   (let [loaded (config/load-config (temp-project))]
     (is (= ["."] (get-in loaded [:analysis :include])))
-    (is (= ".llm-context/db" (get-in loaded [:store :path])))))
+    (is (= ".llm-context/db" (get-in loaded [:store :path])))
+    (is (= "lightonai/LateOn-Code"
+           (get-in loaded [:semantic :lateon-code :model])))
+    (is (= 40
+           (count (get-in loaded [:semantic :lateon-code :model-revision]))))))
 
 (deftest user-configuration-deep-merges
   (let [context (temp-project)]
@@ -37,3 +41,21 @@
                      (catch clojure.lang.ExceptionInfo error error))]
       (is (= 2 (:exit-code (ex-data error))))
       (is (= 2 (count (:errors (ex-data error))))))))
+
+(deftest invalid-lateon-settings-are-reported-together
+  (let [context (temp-project)]
+    (spit (str (:config-file context))
+          (pr-str {:semantic
+                   {:providers "lateon"
+                    :lateon-code
+                    {:model-revision "main"
+                     :query-timeout-ms 0
+                     :centroid-score-threshold -1}}}))
+    (let [error (try (config/load-config context) nil
+                     (catch clojure.lang.ExceptionInfo error error))
+          errors (:errors (ex-data error))]
+      (is (= 2 (:exit-code (ex-data error))))
+      (is (some #(re-find #":providers" %) errors))
+      (is (some #(re-find #":model-revision" %) errors))
+      (is (some #(re-find #":query-timeout-ms" %) errors))
+      (is (some #(re-find #":centroid-score-threshold" %) errors)))))

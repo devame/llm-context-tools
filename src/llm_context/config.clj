@@ -7,6 +7,15 @@
 
 (def default-resource "llm_context/default-config.edn")
 
+(def ^:private semantic-modes #{:background :disabled})
+(def ^:private semantic-quantizations #{:int8})
+
+(defn- non-blank-string? [value]
+  (and (string? value) (not (str/blank? value))))
+
+(defn- positive-number? [value]
+  (and (number? value) (pos? value)))
+
 (defn deep-merge
   "Recursively merge configuration maps; user scalars and collections replace
   defaults rather than being concatenated implicitly."
@@ -26,7 +35,8 @@
   (read-edn (io/resource default-resource)))
 
 (defn- validation-errors [config]
-  (cond-> []
+  (let [lateon (get-in config [:semantic :lateon-code])]
+    (cond-> []
     (not (map? config))
     (conj "configuration must be an EDN map")
 
@@ -45,7 +55,70 @@
     (conj ":store/:path must be a path string")
 
     (not (pos-int? (get-in config [:context :default-max-tokens])))
-    (conj ":context/:default-max-tokens must be a positive integer")))
+    (conj ":context/:default-max-tokens must be a positive integer")
+
+    (not (and (vector? (get-in config [:semantic :providers]))
+              (every? keyword? (get-in config [:semantic :providers]))))
+    (conj ":semantic/:providers must be a vector of keywords")
+
+    (not (map? lateon))
+    (conj ":semantic/:lateon-code must be a map")
+
+    (not (boolean? (:enabled lateon)))
+    (conj ":semantic/:lateon-code/:enabled must be true or false")
+
+    (not (contains? semantic-modes (:mode lateon)))
+    (conj ":semantic/:lateon-code/:mode must be :background or :disabled")
+
+    (not (non-blank-string? (:model lateon)))
+    (conj ":semantic/:lateon-code/:model must be a non-blank string")
+
+    (not (and (non-blank-string? (:model-revision lateon))
+              (re-matches #"[0-9a-f]{40}" (:model-revision lateon))))
+    (conj ":semantic/:lateon-code/:model-revision must be a 40-character commit hash")
+
+    (not (contains? semantic-quantizations (:quantization lateon)))
+    (conj ":semantic/:lateon-code/:quantization must be :int8")
+
+    (not (non-blank-string? (:index-path lateon)))
+    (conj ":semantic/:lateon-code/:index-path must be a non-blank path")
+
+    (not (pos-int? (:document-version lateon)))
+    (conj ":semantic/:lateon-code/:document-version must be a positive integer")
+
+    (not (pos-int? (:pool-factor lateon)))
+    (conj ":semantic/:lateon-code/:pool-factor must be a positive integer")
+
+    (not (pos-int? (:encoding-sessions lateon)))
+    (conj ":semantic/:lateon-code/:encoding-sessions must be a positive integer")
+
+    (not (pos-int? (:encoding-batch-size lateon)))
+    (conj ":semantic/:lateon-code/:encoding-batch-size must be a positive integer")
+
+    (not (pos-int? (:update-batch-size lateon)))
+    (conj ":semantic/:lateon-code/:update-batch-size must be a positive integer")
+
+    (not (pos-int? (:query-timeout-ms lateon)))
+    (conj ":semantic/:lateon-code/:query-timeout-ms must be a positive integer")
+
+    (not (pos-int? (:candidate-count lateon)))
+    (conj ":semantic/:lateon-code/:candidate-count must be a positive integer")
+
+    (not (pos-int? (:n-ivf-probe lateon)))
+    (conj ":semantic/:lateon-code/:n-ivf-probe must be a positive integer")
+
+    (not (or (nil? (:centroid-score-threshold lateon))
+             (positive-number? (:centroid-score-threshold lateon))))
+    (conj ":semantic/:lateon-code/:centroid-score-threshold must be nil or positive")
+
+    (not (pos-int? (:n-full-scores lateon)))
+    (conj ":semantic/:lateon-code/:n-full-scores must be a positive integer")
+
+    (not (pos-int? (:lease-ms lateon)))
+    (conj ":semantic/:lateon-code/:lease-ms must be a positive integer")
+
+    (not (pos-int? (:max-attempts lateon)))
+    (conj ":semantic/:lateon-code/:max-attempts must be a positive integer"))))
 
 (defn validate! [config]
   (when-let [errors (seq (validation-errors config))]
