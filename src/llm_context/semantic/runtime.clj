@@ -28,11 +28,35 @@
                    (into-array String [(str command extension)]))))))
 
 (defn find-executable [command]
-  (some #(when (and (Files/isRegularFile ^Path %
-                                         (make-array LinkOption 0))
-                    (or (windows?) (Files/isExecutable ^Path %)))
-           (.toAbsolutePath ^Path %))
-        (executable-candidates command)))
+  (let [installed (System/getenv "LLM_CONTEXT_INSTALL_DIR")
+        candidates
+        (if (and installed
+                 (not (.isAbsolute
+                       (Paths/get command (make-array String 0))))
+                 (not (str/includes? command File/separator)))
+          (concat
+           (executable-candidates
+            (str (.resolve (Paths/get installed (make-array String 0))
+                           command)))
+           (executable-candidates command))
+          (executable-candidates command))]
+    (some #(when (and (Files/isRegularFile ^Path %
+                                           (make-array LinkOption 0))
+                      (or (windows?) (Files/isExecutable ^Path %)))
+             (.toAbsolutePath ^Path %))
+          candidates)))
+
+(defn- default-model-cache []
+  (if (windows?)
+    (str (.resolve
+          (Paths/get (or (System/getenv "LOCALAPPDATA")
+                         (System/getProperty "user.home"))
+                     (make-array String 0))
+          "llm-context/models"))
+    (str (.resolve
+          (Paths/get (System/getProperty "user.home")
+                     (make-array String 0))
+          ".cache/llm-context/models"))))
 
 (defn model-path [project settings]
   (if-let [configured (:model-path settings)]
@@ -43,10 +67,7 @@
          (.resolve ^Path (:root project) path))))
     (let [cache-root
           (or (System/getenv "LLM_CONTEXT_MODEL_CACHE")
-              (str (.resolve
-                    (Paths/get (System/getProperty "user.home")
-                               (make-array String 0))
-                    ".cache/llm-context/models")))
+              (default-model-cache))
           model-directory (str/replace (:model settings) "/" "--")]
       (.resolve
        (.resolve
@@ -70,6 +91,18 @@
     ["--parallel" (str (:encoding-sessions settings))
      "--batch-size" (str (:encoding-batch-size settings))
      "--document-length" (str (:model-document-length settings))])))
+
+(defn- onnx-runtime-path [^Path executable]
+  (let [name (cond
+               (windows?) "onnxruntime.dll"
+               (str/includes?
+                (str/lower-case (System/getProperty "os.name"))
+                "mac")
+               "libonnxruntime.dylib"
+               :else "libonnxruntime.so")
+        path (.resolve (.getParent executable) name)]
+    (when (Files/isRegularFile path (make-array LinkOption 0))
+      path)))
 
 (defn- await-ready! [runtime settings]
   (let [deadline (+ (System/currentTimeMillis)
@@ -143,6 +176,9 @@
                       (.redirectErrorStream true)
                       (.redirectOutput
                        (ProcessBuilder$Redirect/appendTo (.toFile log-path))))
+            _ (when-let [onnx-runtime (onnx-runtime-path executable)]
+                (.put (.environment builder)
+                      "ORT_DYLIB_PATH" (str onnx-runtime)))
             process (.start builder)
             endpoint (str "http://127.0.0.1:" port)
             client (next-plaid/create endpoint settings)

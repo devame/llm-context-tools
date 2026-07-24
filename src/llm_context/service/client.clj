@@ -30,7 +30,10 @@
           (edn/read {:eof nil} reader)))
       (catch java.net.ConnectException _ nil)
       (catch java.net.SocketTimeoutException _ nil)
-      (catch java.io.IOException _ nil))))
+      (catch java.io.IOException _ nil)
+      ;; A service terminated between descriptor lookup and response parsing,
+      ;; or an older service emitted a value not readable as plain EDN.
+      (catch RuntimeException _ nil))))
 
 (defn available? [project]
   (= {:ok true :value :pong} (request project {:op :ping})))

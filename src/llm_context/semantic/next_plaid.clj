@@ -222,7 +222,8 @@
                (cond-> [symbol-id] with-hash? (conj document-hash))}})
             (catch clojure.lang.ExceptionInfo error
               (if (and (= 404 (:status (ex-data error)))
-                       (= "METADATA_NOT_FOUND" (:code (ex-data error))))
+                       (contains? #{"INDEX_NOT_FOUND" "METADATA_NOT_FOUND"}
+                                  (:code (ex-data error))))
                 {:count 0}
                 (throw error))))]
       (long (:count result 0))))

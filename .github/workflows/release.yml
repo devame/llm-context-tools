@@ -9,7 +9,100 @@ permissions:
   contents: write
 
 jobs:
+  semantic-runtime:
+    name: NextPlaid API (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            features: model
+            executable: next-plaid-api
+            archive: tar
+            ort_archive: onnxruntime-linux-x64-1.23.0.tgz
+            ort_root: onnxruntime-linux-x64-1.23.0
+            ort_source: lib/libonnxruntime.so.1.23.0
+            ort_name: libonnxruntime.so
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            features: model,accelerate
+            executable: next-plaid-api
+            archive: tar
+            ort_archive: onnxruntime-osx-arm64-1.23.0.tgz
+            ort_root: onnxruntime-osx-arm64-1.23.0
+            ort_source: lib/libonnxruntime.1.23.0.dylib
+            ort_name: libonnxruntime.dylib
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            features: model,accelerate
+            executable: next-plaid-api
+            archive: tar
+            ort_archive: onnxruntime-osx-x86_64-1.23.0.tgz
+            ort_root: onnxruntime-osx-x86_64-1.23.0
+            ort_source: lib/libonnxruntime.1.23.0.dylib
+            ort_name: libonnxruntime.dylib
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            features: model
+            executable: next-plaid-api.exe
+            archive: zip
+            ort_archive: onnxruntime-win-x64-1.23.0.zip
+            ort_root: onnxruntime-win-x64-1.23.0
+            ort_source: lib/onnxruntime.dll
+            ort_name: onnxruntime.dll
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out pinned NextPlaid source
+        uses: actions/checkout@v4
+        with:
+          repository: lightonai/next-plaid
+          ref: v1.6.4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Build NextPlaid API
+        shell: bash
+        run: >-
+          cargo build --locked --release
+          --target "${{ matrix.target }}"
+          -p next-plaid-api
+          --features "${{ matrix.features }}"
+      - name: Package NextPlaid API
+        shell: bash
+        run: |
+          mkdir -p package
+          cp "target/${{ matrix.target }}/release/${{ matrix.executable }}" package/
+          cp LICENSE package/next-plaid-LICENSE
+          curl --fail --location \
+            "https://github.com/microsoft/onnxruntime/releases/download/v1.23.0/${{ matrix.ort_archive }}" \
+            --output onnxruntime-archive
+          mkdir -p onnxruntime
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            7z x onnxruntime-archive -oonnxruntime
+          else
+            tar -xzf onnxruntime-archive -C onnxruntime
+          fi
+          cp "onnxruntime/${{ matrix.ort_root }}/${{ matrix.ort_source }}" \
+            "package/${{ matrix.ort_name }}"
+          cp "onnxruntime/${{ matrix.ort_root }}/LICENSE" \
+            package/onnxruntime-LICENSE
+          cp "onnxruntime/${{ matrix.ort_root }}/ThirdPartyNotices.txt" \
+            package/onnxruntime-ThirdPartyNotices.txt
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            (cd package && 7z a "../next-plaid-api-1.6.4-${{ matrix.target }}.zip" .)
+          else
+            tar -C package -czf "next-plaid-api-1.6.4-${{ matrix.target }}.tar.gz" .
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: next-plaid-api-${{ matrix.target }}
+          path: next-plaid-api-1.6.4-${{ matrix.target }}.*
+          if-no-files-found: error
+
   release:
+    needs: semantic-runtime
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,6 +128,18 @@ jobs:
           test "$GITHUB_REF_NAME" = "v$APP_VERSION"
           cd dist
           sha256sum llm-context.jar > llm-context.jar.sha256
+      - name: Download semantic runtime artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: next-plaid-api-*
+          path: dist/semantic
+          merge-multiple: true
+      - name: Checksum semantic runtime artifacts
+        run: |
+          cd dist/semantic
+          for artifact in next-plaid-api-*; do
+            sha256sum "$artifact" > "$artifact.sha256"
+          done
       - name: Smoke-test installer against release artifacts
         run: test/install-unix.sh
       - name: Publish GitHub release
@@ -44,6 +149,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             dist/llm-context.jar \
             dist/llm-context.jar.sha256 \
+            dist/semantic/* \
             install.sh \
             install.ps1 \
             --generate-notes \

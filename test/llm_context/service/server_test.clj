@@ -60,6 +60,7 @@
         runtime-factory (fn [_ _]
                           {:status :ready
                            :endpoint "http://127.0.0.1:12345"
+                           :log-path (.resolve root "next-plaid.log")
                            :client semantic-index})
         running (future
                   (with-out-str
@@ -70,7 +71,40 @@
     (is (= :ready
            (get-in (client/request project {:op :semantic-status})
                    [:value :runtime :status])))
+    (is (= (str (.resolve root "next-plaid.log"))
+           (get-in (client/request project {:op :semantic-status})
+                   [:value :runtime :log-path])))
     (is (= {:ok true :value :stopping}
            (client/request project {:op :stop})))
     (is (not= ::timeout (deref running 5000 ::timeout)))
     (is (:closed? (fake/snapshot semantic-index)))))
+
+(deftest unreadable-service-response-is-treated-as-unavailable
+  (let [root (Files/createTempDirectory
+              "llm-context-unreadable-service-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        project (project/context (str root))
+        running
+        (future
+          (with-open [server (java.net.ServerSocket.
+                              0 1 (java.net.InetAddress/getLoopbackAddress))]
+            (Files/createDirectories
+             (:state-dir project)
+             (make-array java.nio.file.attribute.FileAttribute 0))
+            (Files/writeString
+             (client/descriptor-path project)
+             (pr-str {:port (.getLocalPort server) :token "test"})
+             (make-array java.nio.file.OpenOption 0))
+            (with-open [socket (.accept server)
+                        writer (java.io.PrintWriter.
+                                (.getOutputStream socket) true)]
+              (.println writer "#object[unreadable]"))))]
+    (loop [attempt 0]
+      (when (and (not (Files/exists
+                       (client/descriptor-path project)
+                       (make-array LinkOption 0)))
+                 (< attempt 100))
+        (Thread/sleep 10)
+        (recur (inc attempt))))
+    (is (nil? (client/request project {:op :ping})))
+    (is (not= ::timeout (deref running 5000 ::timeout)))))

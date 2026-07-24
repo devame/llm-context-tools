@@ -121,6 +121,14 @@
                 (atom []))]
     (is (zero? (index/indexed-chunk-count client "symbol:a" nil)))))
 
+(deftest asynchronously-declared-index-means-no-visible-chunks
+  (let [client (scripted-client
+                (atom [(response 404 {:code "INDEX_NOT_FOUND"
+                                      :message "not materialized yet"})])
+                (atom []))]
+    (is (zero? (index/indexed-chunk-count
+                client "symbol:a" "sha256:document")))))
+
 (deftest search-options-and-results-are-normalized
   (let [requests (atom [])
         client

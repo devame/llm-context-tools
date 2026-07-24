@@ -37,11 +37,14 @@
     (throw (ex-info (str "Unknown query: " subcommand) {:exit-code 2})))))
 
 (defn- semantic-status [graph runtime-state]
-  (assoc (semantic-state/semantic-summary
-          graph semantic-reconcile/provider (System/currentTimeMillis))
-         :runtime
-         (select-keys runtime-state
-                      [:status :reason :detail :endpoint :log-path])))
+  (let [runtime (select-keys runtime-state
+                             [:status :reason :detail :endpoint :log-path])]
+    (assoc (semantic-state/semantic-summary
+            graph semantic-reconcile/provider (System/currentTimeMillis))
+           :runtime
+           (cond-> runtime
+             (:log-path runtime)
+             (update :log-path str)))))
 
 (defn- analyze! [graph project settings]
   (locking graph
@@ -64,6 +67,10 @@
     :semantic-status (semantic-status graph runtime)
     :semantic-sync
     (do
+      ;; An explicit sync is also the operator's repair action for exhausted
+      ;; jobs. A full desired-state pass safely resets failed jobs while
+      ;; leaving already-current indexed symbols unchanged.
+      (semantic-reconcile/mark-full! graph)
       (semantic-reconcile/reconcile! graph project settings)
       (semantic-status graph runtime))
     :stop :stopping

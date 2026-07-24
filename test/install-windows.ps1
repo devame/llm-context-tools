@@ -14,6 +14,7 @@ try {
 
     $env:LLM_CONTEXT_RELEASE_URL = ([uri]$ReleaseDir).AbsoluteUri.TrimEnd("/")
     $env:LLM_CONTEXT_INSTALL_DIR = $InstallDir
+    $env:LLM_CONTEXT_SKIP_SEMANTIC = "1"
     & (Join-Path $ProjectDir "install.ps1")
 
     $Launcher = Join-Path $InstallDir "llm-context.cmd"
@@ -40,6 +41,7 @@ try {
 } finally {
     Remove-Item Env:LLM_CONTEXT_RELEASE_URL -ErrorAction SilentlyContinue
     Remove-Item Env:LLM_CONTEXT_INSTALL_DIR -ErrorAction SilentlyContinue
+    Remove-Item Env:LLM_CONTEXT_SKIP_SEMANTIC -ErrorAction SilentlyContinue
     if (Test-Path $TestDir) {
         Remove-Item -Recurse -Force $TestDir
     }

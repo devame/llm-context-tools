@@ -12,6 +12,7 @@ cp "$PROJECT_DIR/dist/llm-context.jar" "$TEST_DIR/release/llm-context.jar"
 
 LLM_CONTEXT_RELEASE_URL="file://$TEST_DIR/release" \
 LLM_CONTEXT_INSTALL_DIR="$TEST_DIR/bin" \
+LLM_CONTEXT_SKIP_SEMANTIC=1 \
   sh "$PROJECT_DIR/install.sh"
 
 test -x "$TEST_DIR/bin/llm-context"
@@ -24,6 +25,7 @@ INSTALLED_HASH=$(sha256sum "$TEST_DIR/bin/llm-context.jar" | sed 's/[[:space:]].
 printf '%064d  llm-context.jar\n' 0 >"$TEST_DIR/release/llm-context.jar.sha256"
 if LLM_CONTEXT_RELEASE_URL="file://$TEST_DIR/release" \
    LLM_CONTEXT_INSTALL_DIR="$TEST_DIR/bin" \
+   LLM_CONTEXT_SKIP_SEMANTIC=1 \
      sh "$PROJECT_DIR/install.sh"; then
   echo "installer accepted an invalid checksum" >&2
   exit 1

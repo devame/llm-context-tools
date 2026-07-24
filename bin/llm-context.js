@@ -14,6 +14,10 @@ const args = existsSync(jar)
 
 const result = spawnSync(command, args, {
   cwd: process.cwd(),
+  env: {
+    ...process.env,
+    LLM_CONTEXT_INSTALL_DIR: packageRoot,
+  },
   stdio: 'inherit',
   shell: false,
 });

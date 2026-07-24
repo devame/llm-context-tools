@@ -273,9 +273,16 @@
                    (ex-info "Semantic synchronization has failed jobs"
                             {:exit-code 1 :status status}))
 
-                  (not= :ready (get-in status [:runtime :status]))
+                  (contains? #{:disabled :unavailable :failed :not-running}
+                             (get-in status [:runtime :status]))
                   (throw
                    (ex-info "LateOn semantic runtime is not ready"
+                            {:exit-code 1 :status status}))
+
+                  (not (contains? #{:starting :ready}
+                                  (get-in status [:runtime :status])))
+                  (throw
+                   (ex-info "LateOn semantic runtime reported an unknown state"
                             {:exit-code 1 :status status}))
 
                   (>= (System/currentTimeMillis) deadline)
