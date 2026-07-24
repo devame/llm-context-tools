@@ -1,6 +1,10 @@
 (ns llm-context.runtime.doctor
   (:require [clojure.string :as str]
             [llm-context.config :as config]
+            [llm-context.semantic.artifacts :as artifacts]
+            [llm-context.semantic.reconcile :as semantic-reconcile]
+            [llm-context.semantic.runtime :as semantic-runtime]
+            [llm-context.service.client :as service-client]
             [llm-context.store :as store])
   (:import [java.nio.file Files LinkOption Path Paths]))
 
@@ -57,8 +61,82 @@
                     :ok? (and scip-command (executable? scip-command))
                     :detail (if scip-command
                               (str "launcher " scip-command)
-                              "provider disabled")}]
-    [java-check writable-check datalevin-check scip-check]))
+                              "provider disabled")}
+        lateon-enabled? (semantic-reconcile/enabled? config)
+        lateon-settings (get-in config [:semantic :lateon-code])
+        executable (when lateon-enabled?
+                     (semantic-runtime/find-executable
+                      (first (:next-plaid-command lateon-settings))))
+        runtime-check
+        {:check :next-plaid-api
+         :required? false
+         :ok? (or (not lateon-enabled?) (some? executable))
+         :detail
+         (cond
+           (not lateon-enabled?) "provider disabled"
+           executable
+           (str executable " (requires "
+                artifacts/next-plaid-version ")")
+           :else
+           (str (first (:next-plaid-command lateon-settings))
+                " not found"))}
+        onnx-path (when executable
+                    (semantic-runtime/onnx-runtime-path executable))
+        onnx-check
+        {:check :onnx-runtime
+         :required? false
+         :ok? (or (not lateon-enabled?) (some? onnx-path))
+         :detail
+         (cond
+           (not lateon-enabled?) "provider disabled"
+           onnx-path
+           (str onnx-path " (requires "
+                artifacts/onnx-runtime-version ")")
+           :else "library not found beside next-plaid-api")}
+        model-path (when lateon-enabled?
+                     (semantic-runtime/model-path project lateon-settings))
+        model-verification
+        (when model-path
+          (artifacts/verify-model model-path))
+        model-ok? (and model-path
+                       (empty? (:missing model-verification))
+                       (empty? (:mismatched model-verification)))
+        model-check
+        {:check :lateon-model
+         :required? false
+         :ok? (or (not lateon-enabled?) model-ok?)
+         :detail
+         (cond
+           (not lateon-enabled?) "provider disabled"
+           model-ok?
+           (str model-path " @ "
+                (subs artifacts/model-revision 0 12))
+           (seq (:missing model-verification))
+           (str "missing "
+                (str/join ", " (:missing model-verification))
+                " below " model-path)
+           :else
+           (str "checksum mismatch: "
+                (str/join ", " (:mismatched model-verification))))}
+        service-response
+        (when (service-client/available? project)
+          (service-client/request project {:op :semantic-status}))
+        service-runtime (get-in service-response [:value :runtime])
+        service-check
+        {:check :project-service
+         :required? false
+         :ok? (if lateon-enabled?
+                (= :ready (:status service-runtime))
+                (boolean (:ok service-response)))
+         :detail
+         (cond
+           (not (:ok service-response)) "not running"
+           lateon-enabled?
+           (str "running; LateOn "
+                (name (or (:status service-runtime) :unknown)))
+           :else "running")}]
+    [java-check writable-check datalevin-check scip-check runtime-check
+     onnx-check model-check service-check]))
 
 (defn healthy? [checks]
   (every? #(or (not (:required? %)) (:ok? %)) checks))

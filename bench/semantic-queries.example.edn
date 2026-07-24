@@ -1,0 +1,4 @@
+[{:query "where is a user session authenticated?"
+  :expected ["authenticate-user" "auth.core/authenticate-user"]}
+ {:query "which function persists a graph transaction?"
+  :expected ["transact!" "llm-context.store/transact!"]}]

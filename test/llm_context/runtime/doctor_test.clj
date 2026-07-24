@@ -19,4 +19,11 @@
   (let [root (Files/createTempDirectory "llm-context-doctor-"
                                         (make-array java.nio.file.attribute.FileAttribute 0))
         checks (doctor/check (project/context (str root)) (config/defaults))]
-    (is (:ok? (first (filter #(= :datalevin (:check %)) checks))))))
+    (is (:ok? (first (filter #(= :datalevin (:check %)) checks))))
+    (is (= #{:next-plaid-api :onnx-runtime :lateon-model :project-service}
+           (->> checks
+                (remove :required?)
+                (map :check)
+                (filter #{:next-plaid-api :onnx-runtime
+                          :lateon-model :project-service})
+                set)))))

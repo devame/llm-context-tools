@@ -132,16 +132,18 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: next-plaid-api-*
-          path: dist/semantic
+          path: dist
           merge-multiple: true
       - name: Checksum semantic runtime artifacts
         run: |
-          cd dist/semantic
+          cd dist
           for artifact in next-plaid-api-*; do
             sha256sum "$artifact" > "$artifact.sha256"
           done
       - name: Smoke-test installer against release artifacts
         run: test/install-unix.sh
+      - name: Smoke-test installed LateOn pipeline
+        run: test/install-semantic-unix.sh "$GITHUB_WORKSPACE/dist"
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -149,7 +151,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             dist/llm-context.jar \
             dist/llm-context.jar.sha256 \
-            dist/semantic/* \
+            dist/next-plaid-api-* \
             install.sh \
             install.ps1 \
             --generate-notes \

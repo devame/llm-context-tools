@@ -92,7 +92,7 @@
      "--batch-size" (str (:encoding-batch-size settings))
      "--document-length" (str (:model-document-length settings))])))
 
-(defn- onnx-runtime-path [^Path executable]
+(defn onnx-runtime-path [^Path executable]
   (let [name (cond
                (windows?) "onnxruntime.dll"
                (str/includes?
