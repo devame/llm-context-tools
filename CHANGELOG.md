@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.0
+
+- Added a durable, coalesced Datalevin outbox for asynchronous LateOn-Code
+  indexing with leases, bounded retries, recovery, and freshness watermarks.
+- Added deterministic, versioned symbol documents and a supervised
+  NextPlaid 1.6.4/ONNX Runtime 1.23.0 sidecar using the immutable INT8
+  LateOn-Code model revision.
+- Added freshness-safe hybrid `query search`, semantic status/synchronization,
+  and deterministic lexical fallback when the model is unavailable.
+- Changed the resident service into a detached project coordinator with an
+  initial scan, recursive debounced file watching, background ingestion, and
+  loopback-only authenticated model queries.
+- Extended the Unix and Windows installers to provision and checksum the
+  platform runtime and required model files without Docker, Python, or Rust.
+- Added component-level doctor checks, a real release-time model/index/search
+  gate, and an EDN-driven larger-query benchmark harness.
+
 ## 0.6.0
 
 - Added model-free Datalevin full-text indexing for symbol names, qualified

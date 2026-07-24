@@ -7,7 +7,9 @@ assistants.
 The application core is Clojure. [Datalevin](https://datalevin.org/) is the
 authoritative embedded database and Datalog query engine. Tree-sitter provides
 structural syntax facts, while SCIP TypeScript can optionally supply
-compiler-backed JavaScript and TypeScript symbol evidence.
+compiler-backed JavaScript and TypeScript symbol evidence. A local LateOn-Code
+sidecar adds multi-vector semantic retrieval without sending source code to a
+remote service.
 
 ## Why a graph?
 
@@ -33,6 +35,8 @@ tool does not present naming guesses as compiler facts.
 - Clojure CLI 1.12+ when running from source.
 - Node.js 20+ only when using the npm launcher or optional
   `scip-typescript` provider. Node is not the application runtime.
+- The bundled LateOn runtime supports Linux x86-64, macOS x86-64/Apple
+  Silicon, and Windows x86-64. Structural graph analysis works elsewhere.
 
 ## Install
 
@@ -48,17 +52,24 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/devame/llm-context-tools/main/install.ps1 | iex
 ```
 
-Both installers require Java 23 or newer, download the latest release jar,
-verify its SHA-256 checksum, install a launcher, and run a version smoke check.
-The PowerShell installer adds its per-user installation directory to `PATH`.
-The Unix installer uses `~/.local/bin` and adds it to the appropriate user
-shell profile when needed. Open a new terminal after either installer changes
-`PATH`.
+Both installers require Java 23 or newer and verify every downloaded release
+artifact. By default they install the jar, NextPlaid API 1.6.4, ONNX Runtime
+1.23.0, and the five files needed by the immutable INT8 LateOn-Code snapshot.
+The model download is about 154 MB. No Docker, Python, Rust, Datalevin server,
+or separate model manager is required.
 
-Set `LLM_CONTEXT_VERSION=0.6.0` to pin a release or
+Executables are installed once per user (`~/.local/bin` on Unix and the local
+application-data Programs directory on Windows), and the immutable model is
+cached once per user. Repository-derived data is not stored there: every
+project owns its graph and semantic index below its own `.llm-context/`
+directory. Open a new terminal after an installer changes `PATH`.
+
+Set `LLM_CONTEXT_VERSION=0.7.0` to pin a release or
 `LLM_CONTEXT_INSTALL_DIR` to choose another destination. The installers are
 idempotent: running them again replaces the jar and launcher only after
-checksum validation.
+checksum validation and reuse a verified model snapshot. Set
+`LLM_CONTEXT_MODEL_CACHE` to relocate the model, or
+`LLM_CONTEXT_SKIP_SEMANTIC=1` for a structural-only installation.
 
 To install the optional compiler-backed JavaScript/TypeScript provider in the
 same run, set `LLM_CONTEXT_INSTALL_SCIP=1`; this option also requires Node.js
@@ -70,7 +81,9 @@ After installation:
 ```bash
 llm-context doctor
 llm-context init [--yes]
-llm-context analyze
+llm-context service start
+llm-context semantic sync --wait
+llm-context query search "where is authentication handled?"
 ```
 
 ## Quick start from source
@@ -96,7 +109,7 @@ around the same jar:
 
 ```bash
 npm pack
-npm install --global ./llm-context-0.6.0.tgz
+npm install --global ./llm-context-0.7.0.tgz
 llm-context doctor
 ```
 
@@ -112,6 +125,7 @@ llm-context doctor
 llm-context analyze [--full]
 llm-context query stats
 llm-context query find-symbol <name-or-id>
+llm-context query search <natural-language-query>
 llm-context query callers <symbol-id>
 llm-context query callees <symbol-id>
 llm-context query trace <symbol-id>
@@ -122,15 +136,17 @@ llm-context context <name-or-id> [--depth N] [--max-tokens N]
 llm-context export --format edn|json|jsonl|markdown [--output PATH]
 llm-context summary [--output PATH]
 llm-context integrate claude|codex|generic [--force]
+llm-context semantic status
+llm-context semantic sync [--wait]
 llm-context service start|status|stop
 ```
 
 `find-symbol` and `context` use Datalevin's embedded full-text index across
 symbol names, qualified names, signatures, and documentation. This search is
-local and model-free. Exact identifiers and literal substrings remain
-supported, while natural-language terms can locate symbols through their
-signatures or documentation. Existing project databases are backfilled
-automatically the first time this version opens them.
+local and model-free. `query search` fuses those lexical results with the local
+LateOn multi-vector index. It preserves exact identifiers, rejects semantic
+candidates whose content hash or model revision is stale, and falls back to
+Datalevin whenever the sidecar is unavailable.
 
 `analyze` runs a full scan when no graph exists and content-hash incremental
 analysis afterward. Incremental updates parse only changed files, cascade
@@ -157,10 +173,21 @@ rebuild the partial graph.
 
  :store {:path ".llm-context/db"}
 
+ :service {:watch true
+           :watch-initial true
+           :watch-debounce-ms 750}
+
  :semantic
- {:providers [:scip-typescript]
+ {:providers [:scip-typescript :lateon-code]
   :scip-typescript-command ["npx" "--no-install"
-                            "scip-typescript" "index"]}
+                            "scip-typescript" "index"]
+  :lateon-code
+  {:enabled true
+   :mode :background
+   :next-plaid-version "1.6.4"
+   :model "lightonai/LateOn-Code"
+   :model-revision "734b659a57935ef50562d79581c3ff1f8d825c93"
+   :quantization :int8}}
 
  :context {:default-max-tokens 8000
            :trace-depth 4}}
@@ -187,33 +214,41 @@ not claim compiler-accurate cross-file semantics.
 ## Persistent data and exports
 
 The project database lives under `.llm-context/db/`. Datalevin is the only
-source of truth. JSONL, JSON, EDN, and Markdown are deterministic projections
-for interoperability, debugging, and artifacts.
+source of truth. The disposable LateOn index lives under
+`.llm-context/semantic/next-plaid/`. JSONL, JSON, EDN, and Markdown are
+deterministic projections for interoperability, debugging, and artifacts.
 
 Because this is a greenfield release, delete `.llm-context/` and analyze again
 after an incompatible pre-release schema change.
 
 ## Resident service
 
-Cold JVM startup remains materially slower than warm Datalog queries. For
-interactive sessions, run this in a dedicated terminal:
+Cold JVM startup remains materially slower than warm Datalog and model queries.
+Start the detached project coordinator once:
 
 ```bash
 llm-context service start
 ```
 
-Query, context, and export commands automatically use the warm service. Analysis
-runs in the invoking process so progress stays visible and a client timeout
-cannot start a second database writer. The service listens only on the loopback
-interface and requires a random token stored in the ignored
-`.llm-context/service.edn` descriptor. Supported commands fall back to direct
-execution when no service is available.
+The coordinator watches included source trees, debounces changes, runs the same
+content-hash analyzer as the CLI, drains durable LateOn jobs in the background,
+and supervises a loopback-only NextPlaid child. Query, context, and export
+commands automatically use the warm service. A random token in the ignored
+`.llm-context/service.edn` descriptor authenticates local requests. Structural
+commands and lexical search remain available when the model is loading or
+unavailable.
+
+Use `llm-context semantic status` to inspect lag and
+`llm-context semantic sync --wait` when automation needs all queued embeddings
+visible before continuing. Logs are under `.llm-context/logs/`; they contain
+identifiers and bounded errors, not source documents.
 
 ## Development
 
 ```bash
 clojure -M:test
 clojure -M:bench 50
+clojure -M:semantic-bench /path/to/project queries.edn
 clojure -T:build dist
 npm pack --dry-run
 ```

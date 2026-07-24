@@ -3,7 +3,8 @@
 This guide assumes `llm-context` is installed and `llm-context doctor` reports
 Java and Datalevin as healthy. The installed jar already contains Datalevin,
 the graph schema, and the native Tree-sitter grammars; users do not install a
-separate Datalevin server or database.
+separate Datalevin server or database. The normal installer also supplies the
+local NextPlaid/ONNX runtime and pinned LateOn-Code model.
 
 ## 1. Initialize a project
 
@@ -23,8 +24,9 @@ descent. In a Git repository it honors `.gitignore` by analyzing tracked files
 plus non-ignored untracked files. The default database location is
 `.llm-context/db/`.
 
-For a structural-only installation that does not use the optional SCIP
-TypeScript provider, set the semantic providers to an empty vector:
+The executable and model installation is per user, but all source-derived
+state is per project under `.llm-context/`. For a structural-only project that
+does not use SCIP or LateOn, set the semantic providers to an empty vector:
 
 ```clojure
 {:semantic {:providers []}}
@@ -63,12 +65,18 @@ llm-context query stats
 llm-context summary --output .llm-context/summary.md
 ```
 
+Analysis commits structural graph changes without waiting for model inference.
+When the project service is running, a durable background queue brings the
+LateOn index up to date. The analyzer's “Semantic indexing queued” line reports
+that work; it does not mean the CLI synchronously embedded the source.
+
 ## 3. Find relevant code
 
 Search symbols and inspect graph relationships:
 
 ```bash
 llm-context query find-symbol authenticate
+llm-context query search "where is authentication handled?"
 llm-context query callers symbol:...
 llm-context query callees symbol:...
 llm-context query trace symbol:...
@@ -77,12 +85,13 @@ llm-context query effects
 llm-context query unresolved
 ```
 
-Symbol lookup combines exact identifiers and case-insensitive substrings with
+`find-symbol` combines exact identifiers and case-insensitive substrings with
 Datalevin's local full-text relevance ranking over names, qualified names,
-signatures, and documentation. It does not download or call an embedding
-model. The same lookup selects the starting symbols for `context`. Graphs from
-older releases are backfilled automatically in bounded transactions when they
-are first opened.
+signatures, and documentation. It does not call an embedding model. `search`
+adds local LateOn similarity and deterministically fuses both rankings. Results
+show `:matched-by #{:fts :lateon}` (or the available subset), and stale LateOn
+candidates are rejected against current Datalevin hashes before they are
+returned.
 
 Resolution is deliberately explicit. `exact` means semantic evidence supports
 the target; `heuristic`, `ambiguous`, and `unresolved` indicate weaker or
@@ -116,8 +125,7 @@ asks the agent to query the graph before broad source exploration.
 
 ## 6. Keep interactive sessions warm
 
-For repeated queries, start the loopback-only resident service in another
-terminal:
+Start the detached, loopback-only project coordinator:
 
 ```bash
 llm-context service start
@@ -127,12 +135,24 @@ llm-context context authenticate --max-tokens 4000
 llm-context service stop
 ```
 
-The service accelerates query, context, and export commands. Analysis remains in
-the invoking process so its progress is visible and a service-client timeout
-cannot launch a duplicate database writer. The service uses a per-project
-random token in the ignored state directory and supported commands fall back to
-direct execution when it is not running. It is not a network service and does
-not expose the database beyond loopback.
+`start` returns after the graph endpoint is reachable; the model may still be
+loading. The service performs an initial scan, watches included directories,
+coalesces bursts of edits, and incrementally updates the graph and LateOn
+queue. It accelerates query, context, and export commands and uses a
+per-project random token in the ignored state directory. It is not exposed
+beyond loopback.
+
+Inspect or wait for semantic freshness with:
+
+```bash
+llm-context semantic status
+llm-context semantic sync --wait
+```
+
+`sync --wait` is useful in CI or before an evaluation. It also retries
+previously exhausted jobs by reconciling the entire desired semantic state.
+If NextPlaid is absent or unhealthy, graph analysis and Datalevin search
+continue to work.
 
 ## 7. Export or inspect the graph
 
@@ -149,9 +169,23 @@ The database itself is under `.llm-context/db/`. Keep that directory out of
 source control unless you intentionally want to distribute a generated graph;
 it is already ignored by the default configuration.
 
-## 8. JavaScript and TypeScript projects
+## 8. Installation, privacy, and resource use
 
-The base installer is Java-only. To install the optional compiler-backed SCIP
+The default one-script install downloads the INT8 LateOn snapshot (about
+154 MB) once and verifies fixed SHA-256 hashes. NextPlaid and ONNX Runtime are
+also checksum-verified. Model inference and indexing are local; source text is
+sent only over the loopback connection between the project coordinator and its
+child process.
+
+Supported semantic-runtime targets are Linux x86-64, macOS x86-64/Apple
+Silicon, and Windows x86-64. Set `LLM_CONTEXT_SKIP_SEMANTIC=1` during
+installation on other systems or whenever only the structural graph is
+wanted. Runtime memory and index size depend on codebase size and symbol
+length; pooling factor 2 is the default space/quality tradeoff.
+
+## 9. JavaScript and TypeScript projects
+
+To install the optional compiler-backed SCIP
 provider in the same setup command, provide Node.js 20+ and npm, then set
 `LLM_CONTEXT_INSTALL_SCIP=1` when running the installer. Otherwise the tool
 still performs structural analysis and records semantic links as heuristic,
@@ -161,7 +195,7 @@ SCIP is used only for JavaScript and TypeScript enrichment. It is not required
 for Python, Java, Go, Rust, C, C++, Ruby, PHP, Bash, Clojure, or Janet
 structural analysis.
 
-## 9. Janet projects
+## 10. Janet projects
 
 Janet support is included in the normal installation. No Janet executable,
 package manager, Tree-sitter CLI, or C compiler is required. A normal project
@@ -181,12 +215,21 @@ unresolved, and cross-file links are labelled heuristic unless exact evidence
 exists in the graph. This is deliberate: structural evidence is not presented
 as compiler evidence.
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 - `doctor` reports Java failure: install JDK 23 or newer and reopen the shell.
 - `doctor` reports SCIP as optional/unavailable: install Node/npm and rerun the
   installer with `LLM_CONTEXT_INSTALL_SCIP=1`, or disable the provider in
   `llm-context.edn`.
+- `doctor` reports NextPlaid, ONNX Runtime, or model failure: rerun the normal
+  installer. It verifies and repairs the pinned components. Check
+  `.llm-context/logs/next-plaid.log` if the runtime is installed but cannot
+  load.
+- `semantic status` reports failed jobs: run
+  `llm-context semantic sync --wait`. Graph and lexical queries remain usable
+  while semantic indexing is repaired.
+- `analyze` finds no files: verify that `init` was run at the repository root,
+  then inspect `:analysis :include` and `:exclude`.
 - A project has stale graph data after a pre-release schema change: remove
   `.llm-context/` and run `llm-context analyze --full`.
 - A file is skipped: inspect `:analysis :include`, `:exclude`, language

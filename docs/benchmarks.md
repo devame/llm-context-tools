@@ -19,10 +19,29 @@ Measure JVM process startup separately:
 
 Cold JVM measurements in the development WSL workspace exceeded the one-second
 plan threshold by a wide margin, so the project includes an authenticated,
-loopback-only resident service. Run `llm-context service start` in a dedicated
-terminal; subsequent analyze, query, context, and export commands discover it
+loopback-only resident service. `llm-context service start` launches it as a
+detached project coordinator; query, context, and export commands discover it
 through `.llm-context/service.edn` and fall back to direct execution when it is
 absent.
+
+For a repository-specific semantic query set, use:
+
+```bash
+clojure -M:semantic-bench /path/to/project query-set.edn
+```
+
+The EDN input is a vector of natural-language queries and acceptable symbol
+IDs/names:
+
+```clojure
+[{:query "where is a user session authenticated?"
+  :expected ["authenticate-user" "auth.core/authenticate-user"]}]
+```
+
+The harness requires a running, synchronized project service and reports
+recall-at-k, the fraction of queries with LateOn candidates, mean/p50/p95/max
+latency, and misses. Keep the same graph, model revision, query set, and
+hardware when comparing changes.
 
 Benchmark output is descriptive rather than a universal release gate because
 filesystem location, JDK, native architecture, and project language mix have

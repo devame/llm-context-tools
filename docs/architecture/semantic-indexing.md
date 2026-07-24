@@ -20,11 +20,13 @@ Project state lives below `.llm-context/`:
 .llm-context/
   db/                         authoritative Datalevin database
   semantic/next-plaid/        derived LateOn index
+  logs/                       coordinator and sidecar logs
   service.edn                 authenticated local service descriptor
 ```
 
-The installed NextPlaid executable and immutable model files may use a
-per-user cache. Source-derived index state remains project-local.
+NextPlaid API and ONNX Runtime are installed with the user-level launcher. The
+immutable model files use a per-user cache. Source-derived graph and index
+state remains project-local.
 
 ## Change flow
 

@@ -24,6 +24,7 @@ jobs:
             ort_root: onnxruntime-linux-x64-1.23.0
             ort_source: lib/libonnxruntime.so.1.23.0
             ort_name: libonnxruntime.so
+            ort_sha256: b6deea7f2e22c10c043019f294a0ea4d2a6c0ae52a009c34847640db75ec5580
           - runner: macos-15
             target: aarch64-apple-darwin
             features: model,accelerate
@@ -33,6 +34,7 @@ jobs:
             ort_root: onnxruntime-osx-arm64-1.23.0
             ort_source: lib/libonnxruntime.1.23.0.dylib
             ort_name: libonnxruntime.dylib
+            ort_sha256: 8182db0ebb5caa21036a3c78178f17fabb98a7916bdab454467c8f4cf34bcfdf
           - runner: macos-15-intel
             target: x86_64-apple-darwin
             features: model,accelerate
@@ -42,6 +44,7 @@ jobs:
             ort_root: onnxruntime-osx-x86_64-1.23.0
             ort_source: lib/libonnxruntime.1.23.0.dylib
             ort_name: libonnxruntime.dylib
+            ort_sha256: a8e43edcaa349cbfc51578a7fc61ea2b88793ccf077b4bc65aca58999d20cf0f
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
             features: model
@@ -51,14 +54,15 @@ jobs:
             ort_root: onnxruntime-win-x64-1.23.0
             ort_source: lib/onnxruntime.dll
             ort_name: onnxruntime.dll
+            ort_sha256: 72c23470310ec79a7d42d27fe9d257e6c98540c73fa5a1db1f67f538c6c16f2f
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out pinned NextPlaid source
         uses: actions/checkout@v4
         with:
           repository: lightonai/next-plaid
-          ref: v1.6.4
-      - uses: dtolnay/rust-toolchain@stable
+          ref: dba1539dd0b725c9bbd61db1920a28ea85787b17
+      - uses: dtolnay/rust-toolchain@1.91.1
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
@@ -78,6 +82,8 @@ jobs:
           curl --fail --location \
             "https://github.com/microsoft/onnxruntime/releases/download/v1.23.0/${{ matrix.ort_archive }}" \
             --output onnxruntime-archive
+          test "$(shasum -a 256 onnxruntime-archive | cut -d ' ' -f 1)" = \
+            "${{ matrix.ort_sha256 }}"
           mkdir -p onnxruntime
           if [ "${{ matrix.archive }}" = "zip" ]; then
             7z x onnxruntime-archive -oonnxruntime
