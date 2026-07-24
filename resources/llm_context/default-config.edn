@@ -8,6 +8,11 @@
  :store
  {:path ".llm-context/db"}
 
+ :service
+ {:watch true
+  :watch-initial true
+  :watch-debounce-ms 750}
+
  :semantic
  {:providers [:scip-typescript :lateon-code]
   :scip-typescript-command ["npx" "--no-install" "scip-typescript" "index"]

@@ -13,6 +13,15 @@
       (>= attempt 100) false
       :else (do (Thread/sleep 20) (recur (inc attempt))))))
 
+(defn- await-semantic-status [project expected]
+  (loop [attempt 0]
+    (let [status (get-in (client/request project {:op :semantic-status})
+                         [:value :runtime :status])]
+      (cond
+        (= expected status) true
+        (>= attempt 100) false
+        :else (do (Thread/sleep 20) (recur (inc attempt)))))))
+
 (deftest authenticated-loopback-service-round-trip
   (let [root (Files/createTempDirectory "llm-context-service-"
                                         (make-array java.nio.file.attribute.FileAttribute 0))
@@ -27,6 +36,7 @@
                                    {:runtime-factory runtime-factory})))]
     (is (await-service project))
     (is (= {:ok true :value :pong} (client/request project {:op :ping})))
+    (is (await-semantic-status project :unavailable))
     (is (= {:status :unavailable
             :reason :model-missing
             :detail "/missing/model"}
@@ -56,6 +66,7 @@
                     (server/start! project
                                    {:runtime-factory runtime-factory})))]
     (is (await-service project))
+    (is (await-semantic-status project :ready))
     (is (= :ready
            (get-in (client/request project {:op :semantic-status})
                    [:value :runtime :status])))

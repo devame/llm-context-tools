@@ -231,9 +231,11 @@
 (defn run!
   "Prepare and consume jobs until stop! is requested."
   [worker]
-  (prepare! worker)
+  (locking (:graph worker)
+    (prepare! worker))
   (while (not @(:stop? worker))
-    (let [result (process-once! worker)]
+    (let [result (locking (:graph worker)
+                   (process-once! worker))]
       (when (zero? (:leased result))
         (sleep! worker (:idle-poll-ms (:settings worker))))))
   :stopped)

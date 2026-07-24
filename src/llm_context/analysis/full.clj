@@ -29,16 +29,15 @@
   (when progress
     (progress (assoc data :stage stage))))
 
-(defn- persist! [project config entities progress]
-  (store/with-store [graph project config]
-    (when (semantic-reconcile/enabled? config)
-      (semantic-reconcile/mark-full! graph))
-    (store/replace-all! graph entities
-                        {:batch-size persistence-batch-size
-                         :on-progress
-                         (when progress
-                           #(emit! progress :persist-progress %))})
-    (semantic-reconcile/reconcile! graph project config)))
+(defn- persist! [graph project config entities progress]
+  (when (semantic-reconcile/enabled? config)
+    (semantic-reconcile/mark-full! graph))
+  (store/replace-all! graph entities
+                      {:batch-size persistence-batch-size
+                       :on-progress
+                       (when progress
+                         #(emit! progress :persist-progress %))})
+  (semantic-reconcile/reconcile! graph project config))
 
 (defn analyze!
   "Perform a complete project scan and replace Datalevin facts in bounded
@@ -47,6 +46,9 @@
   ([project config]
    (analyze! project config nil))
   ([project config progress]
+   (store/with-store [graph project config]
+     (analyze! graph project config progress)))
+  ([graph project config progress]
    (let [started (System/nanoTime)]
      (emit! progress :discover-start {})
      (with-open [parser-provider (jtreesitter/open project)]
@@ -80,7 +82,8 @@
              _ (emit! progress :persist-start
                       {:entities (count all-entities)
                        :batch-size persistence-batch-size})]
-         (let [semantic-plan (persist! project config all-entities progress)]
+         (let [semantic-plan (persist! graph project config
+                                       all-entities progress)]
            (emit! progress :complete
                   {:elapsed-seconds
                    (long (/ (- (System/nanoTime) started) 1000000000))})

@@ -10,10 +10,13 @@
             [llm-context.semantic.scip :as scip]
             [llm-context.store :as store]))
 
-(defn index-present? [project config]
-  (store/with-store [graph project config]
-    (boolean (seq (store/query graph
-                               '[:find [?id ...] :where [_ :file/id ?id]] [])))))
+(defn index-present?
+  ([project config]
+   (store/with-store [graph project config]
+     (index-present? graph)))
+  ([graph]
+   (boolean (seq (store/query graph
+                              '[:find [?id ...] :where [_ :file/id ?id]] [])))))
 
 (defn- existing-files [graph]
   (into {}
@@ -83,53 +86,52 @@
         {:diagnostic {:level :warning :kind :semantic-provider-failed
                       :provider :scip-typescript :message (.getMessage error)}}))))
 
-(defn analyze! [project config]
+(defn- analyze-graph! [graph project config]
   (let [{:keys [files diagnostics]}
         (files/discover project config (jtreesitter/available-languages))
-        scanned (into {} (map (juxt :relative-path identity) files))]
-    (store/with-store [graph project config]
-      (let [existing (existing-files graph)
-            changed (->> files
-                         (filter #(not= (ids/content-hash (:content %))
-                                        (get-in existing [(:relative-path %) :hash])))
-                         vec)
-            deleted (->> (keys existing) (remove (set (keys scanned))) vec)
-            extracted
-            (if (seq changed)
-              (with-open [parser (jtreesitter/open project)]
-                (let [analyzer (structural/create parser)]
-                  (mapv (fn [file]
-                          (let [output (indexer/index-file analyzer file)
-                                edges (filter :edge/id (:entities output))]
-                            (update output :entities into
-                                    (effects/analyze (:language file) edges))))
-                        changed)))
-              [])]
-        (doseq [path deleted]
-          (let [file-id (get-in existing [path :id])]
-            (if (semantic-reconcile/enabled? config)
-              (store/delete-file-and-mark!
-               graph file-id
-               [(semantic-reconcile/dirty-entity file-id nil :delete)])
-              (store/delete-file! graph file-id))))
-        (doseq [{:keys [file entities]} extracted]
-          (if (semantic-reconcile/enabled? config)
-            (store/replace-file-and-mark!
-             graph file entities
-             [(semantic-reconcile/dirty-entity
-               (:file/id file) (:file/content-hash file) :upsert)])
-            (store/replace-file! graph file entities)))
-        (let [semantic (semantic-index project config changed)
-              symbols (graph-symbols graph)
-              edges (graph-edges graph)
-              exact (if (:index semantic)
-                      (resolve/scip-exact-targets symbols edges (:index semantic))
-                      {})]
-          (store/reconcile-edges!
-           graph (resolve/resolution-decisions symbols edges exact))
-          (let [semantic-plan
-                (semantic-reconcile/reconcile! graph project config)]
-            {:mode :incremental
+        scanned (into {} (map (juxt :relative-path identity) files))
+        existing (existing-files graph)
+        changed (->> files
+                     (filter #(not= (ids/content-hash (:content %))
+                                    (get-in existing [(:relative-path %) :hash])))
+                     vec)
+        deleted (->> (keys existing) (remove (set (keys scanned))) vec)
+        extracted
+        (if (seq changed)
+          (with-open [parser (jtreesitter/open project)]
+            (let [analyzer (structural/create parser)]
+              (mapv (fn [file]
+                      (let [output (indexer/index-file analyzer file)
+                            edges (filter :edge/id (:entities output))]
+                        (update output :entities into
+                                (effects/analyze (:language file) edges))))
+                    changed)))
+          [])]
+    (doseq [path deleted]
+      (let [file-id (get-in existing [path :id])]
+        (if (semantic-reconcile/enabled? config)
+          (store/delete-file-and-mark!
+           graph file-id
+           [(semantic-reconcile/dirty-entity file-id nil :delete)])
+          (store/delete-file! graph file-id))))
+    (doseq [{:keys [file entities]} extracted]
+      (if (semantic-reconcile/enabled? config)
+        (store/replace-file-and-mark!
+         graph file entities
+         [(semantic-reconcile/dirty-entity
+           (:file/id file) (:file/content-hash file) :upsert)])
+        (store/replace-file! graph file entities)))
+    (let [semantic (semantic-index project config changed)
+          symbols (graph-symbols graph)
+          edges (graph-edges graph)
+          exact (if (:index semantic)
+                  (resolve/scip-exact-targets symbols edges (:index semantic))
+                  {})]
+      (store/reconcile-edges!
+       graph (resolve/resolution-decisions symbols edges exact))
+      (let [semantic-plan
+            (semantic-reconcile/reconcile! graph project config)]
+        {:mode :incremental
            :files (count files)
            :changed (count changed)
            :deleted (count deleted)
@@ -139,4 +141,13 @@
                                              (mapcat :diagnostics extracted)
                                              (:diagnostics semantic-plan)))
                           (:diagnostic semantic)
-                          (conj (:diagnostic semantic)))}))))))
+                          (conj (:diagnostic semantic)))}))))
+
+(defn analyze!
+  "Incrementally analyze into either a caller-owned graph or a temporary
+  project connection."
+  ([project config]
+   (store/with-store [graph project config]
+     (analyze-graph! graph project config)))
+  ([graph project config]
+   (analyze-graph! graph project config)))

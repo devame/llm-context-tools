@@ -1,5 +1,7 @@
 (ns llm-context.service.server
   (:require [clojure.edn :as edn]
+            [llm-context.analysis.full :as full]
+            [llm-context.analysis.incremental :as incremental]
             [llm-context.config :as config]
             [llm-context.context :as context]
             [llm-context.export :as export]
@@ -9,6 +11,7 @@
             [llm-context.semantic.state :as semantic-state]
             [llm-context.semantic.worker :as semantic-worker]
             [llm-context.service.client :as client]
+            [llm-context.service.watcher :as watcher]
             [llm-context.store :as store])
   (:import [java.io PushbackReader]
            [java.lang ProcessHandle]
@@ -40,10 +43,17 @@
          (select-keys runtime-state
                       [:status :reason :detail :endpoint :log-path])))
 
+(defn- analyze! [graph project settings]
+  (locking graph
+    (if (incremental/index-present? graph)
+      (incremental/analyze! graph project settings)
+      (full/analyze! graph project settings nil))))
+
 (defn- dispatch [project settings graph runtime-state request]
-  (case (:op request)
+  (let [runtime @runtime-state]
+    (case (:op request)
     :ping :pong
-    :query (query-value graph (:client runtime-state) settings
+    :query (query-value graph (:client runtime) settings
                         (:subcommand request) (:args request))
     :context
     (let [packet (context/build graph (:options request))]
@@ -51,14 +61,14 @@
         (context/markdown packet)
         packet))
     :export (export/render graph (:format request))
-    :semantic-status (semantic-status graph runtime-state)
+    :semantic-status (semantic-status graph runtime)
     :semantic-sync
     (do
       (semantic-reconcile/reconcile! graph project settings)
-      (semantic-status graph runtime-state))
+      (semantic-status graph runtime))
     :stop :stopping
     (throw (ex-info (str "Unknown service operation: " (:op request))
-                    {:exit-code 2}))))
+                    {:exit-code 2})))))
 
 (defn- handle! [socket token project settings graph runtime-state]
   (with-open [socket socket
@@ -93,60 +103,97 @@
     (let [settings (config/load-config project)
           token (str (UUID/randomUUID))
           running (atom true)
-          runtime-state
-          (if (semantic-reconcile/enabled? settings)
-            (try
-              (runtime-factory project settings)
-              (catch Throwable error
-                {:status :failed :reason :startup-failed
-                 :detail (.getMessage error)}))
-            {:status :disabled})]
+          semantic-enabled? (semantic-reconcile/enabled? settings)
+          runtime-state (atom {:status (if semantic-enabled?
+                                         :starting :disabled)})
+          worker-state (atom nil)]
       (try
         (with-open [graph (store/open project settings)
                     server (ServerSocket. 0 50
                                          (InetAddress/getLoopbackAddress))]
-          (let [worker (when (= :ready (:status runtime-state))
-                         (semantic-worker/create
-                          graph project settings (:client runtime-state)))
-                worker-future
-                (when worker
+          (Files/writeString
+           descriptor-path
+           (pr-str {:port (.getLocalPort server)
+                    :token token
+                    :pid (.pid (ProcessHandle/current))
+                    :semantic-status (:status @runtime-state)})
+           (into-array OpenOption [StandardOpenOption/CREATE
+                                   StandardOpenOption/TRUNCATE_EXISTING
+                                   StandardOpenOption/WRITE]))
+          (let [runtime-future
+                (when semantic-enabled?
                   (future
                     (try
-                      (semantic-worker/run! worker)
+                      (reset! runtime-state
+                              (runtime-factory project settings))
                       (catch Throwable error
-                        (semantic-state/record-watermark!
-                         graph {:provider semantic-reconcile/provider
-                                :state :failed
-                                :last-error-at (System/currentTimeMillis)
-                                :last-error (.getMessage error)})
-                        :failed))))]
-            (Files/writeString
-             descriptor-path
-             (pr-str {:port (.getLocalPort server)
-                      :token token
-                      :pid (.pid (ProcessHandle/current))
-                      :semantic-status (:status runtime-state)})
-             (into-array OpenOption [StandardOpenOption/CREATE
-                                     StandardOpenOption/TRUNCATE_EXISTING
-                                     StandardOpenOption/WRITE]))
+                        (reset! runtime-state
+                                {:status :failed
+                                 :reason :startup-failed
+                                 :detail (.getMessage error)})))))
+                worker-future
+                (when semantic-enabled?
+                  (future
+                    (when runtime-future
+                      @runtime-future)
+                    (when (= :ready (:status @runtime-state))
+                      (let [worker
+                            (semantic-worker/create
+                             graph project settings
+                             (:client @runtime-state))]
+                        (reset! worker-state worker)
+                        (try
+                          (semantic-worker/run! worker)
+                          (catch Throwable error
+                            (semantic-state/record-watermark!
+                             graph {:provider semantic-reconcile/provider
+                                    :state :failed
+                                    :last-error-at
+                                    (System/currentTimeMillis)
+                                    :last-error (.getMessage error)})
+                            :failed))))))
+                project-watcher
+                (when (get-in settings [:service :watch])
+                  (watcher/start!
+                   (watcher/create
+                    project settings
+                    (fn []
+                      (try
+                        (let [result (analyze! graph project settings)]
+                          (println
+                           (format
+                            "Watched analysis: %d files, %d changed, %d deleted"
+                            (:files result)
+                            (or (:changed result) (:files result))
+                            (or (:deleted result) 0))))
+                        (catch Throwable error
+                          (binding [*out* *err*]
+                            (println "Watched analysis failed:"
+                                     (.getMessage error)))))))))]
             (println "llm-context service listening on loopback port"
                      (.getLocalPort server))
-            (when-not (= :ready (:status runtime-state))
+            (when-not semantic-enabled?
               (println "LateOn semantic runtime:"
-                       (name (:status runtime-state))
-                       (or (:detail runtime-state)
-                           (some-> (:reason runtime-state) name))))
+                       (name (:status @runtime-state))))
             (try
               (while @running
                 (when (handle! (.accept server) token project settings
                                graph runtime-state)
                   (reset! running false)))
               (finally
-                (when worker
+                (when-let [worker @worker-state]
                   (semantic-worker/stop! worker))
+                (when project-watcher
+                  (watcher/stop! project-watcher))
                 (when worker-future
-                  (deref worker-future 10000 :timeout))
+                  (when (= :timeout (deref worker-future 10000 :timeout))
+                    (future-cancel worker-future)))
+                ;; Wait for an in-flight watched analysis before closing graph.
+                (locking graph nil)
+                (when (and runtime-future
+                           (not (future-done? runtime-future)))
+                  (future-cancel runtime-future))
                 (Files/deleteIfExists descriptor-path)))))
         (finally
-          (semantic-runtime/stop! runtime-state)))))
+          (semantic-runtime/stop! @runtime-state)))))
    0))

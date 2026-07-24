@@ -54,6 +54,15 @@
     (not (string? (get-in config [:store :path])))
     (conj ":store/:path must be a path string")
 
+    (not (boolean? (get-in config [:service :watch])))
+    (conj ":service/:watch must be true or false")
+
+    (not (boolean? (get-in config [:service :watch-initial])))
+    (conj ":service/:watch-initial must be true or false")
+
+    (not (pos-int? (get-in config [:service :watch-debounce-ms])))
+    (conj ":service/:watch-debounce-ms must be a positive integer")
+
     (not (pos-int? (get-in config [:context :default-max-tokens])))
     (conj ":context/:default-max-tokens must be a positive integer")
 

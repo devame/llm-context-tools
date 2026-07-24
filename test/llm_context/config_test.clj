@@ -42,11 +42,14 @@
 (deftest invalid-settings-are-reported-together
   (let [context (temp-project)]
     (spit (str (:config-file context))
-          "{:analysis {:include :everything :max-file-bytes 0}}")
+          (pr-str {:analysis {:include :everything :max-file-bytes 0}
+                   :service {:watch :sometimes
+                             :watch-initial :sometimes
+                             :watch-debounce-ms 0}}))
     (let [error (try (config/load-config context) nil
                      (catch clojure.lang.ExceptionInfo error error))]
       (is (= 2 (:exit-code (ex-data error))))
-      (is (= 2 (count (:errors (ex-data error))))))))
+      (is (= 5 (count (:errors (ex-data error))))))))
 
 (deftest invalid-lateon-settings-are-reported-together
   (let [context (temp-project)]

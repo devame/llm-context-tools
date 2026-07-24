@@ -401,9 +401,22 @@
 
 (defmethod execute "service" [cli-context _ args]
   (case (or (first args) "status")
-    "start" ((resolve-fn 'llm-context.service.server/start!) cli-context)
-    "status" (do (println (if (service-client/available? cli-context)
-                            "running" "not running")) 0)
+    "start"
+    (let [result ((resolve-fn 'llm-context.service.daemon/start!)
+                  cli-context)]
+      (println (format "service %s (pid %d); log: %s"
+                       (name (:status result)) (:pid result)
+                       (:log-path result)))
+      0)
+    "foreground"
+    ((resolve-fn 'llm-context.service.server/start!) cli-context)
+    "status"
+    (do
+      (if (service-client/available? cli-context)
+        (pprint/pprint
+         (remote-value cli-context {:op :semantic-status}))
+        (println "not running"))
+      0)
     "stop" (let [response (service-client/request cli-context {:op :stop})]
              (if (:ok response)
                (do (println "stopped") 0)
