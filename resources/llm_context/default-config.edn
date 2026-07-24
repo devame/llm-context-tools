@@ -14,10 +14,14 @@
   :lateon-code
   {:enabled true
    :mode :background
+   :next-plaid-version "1.6.4"
    :model "lightonai/LateOn-Code"
    :model-revision "734b659a57935ef50562d79581c3ff1f8d825c93"
    :quantization :int8
    :index-path ".llm-context/semantic/next-plaid"
+   :index-name "llm-context"
+   :nbits 4
+   :start-from-scratch 0
    :document-version 1
    :max-document-bytes 6000
    :chunk-overlap-lines 8
@@ -25,6 +29,8 @@
    :encoding-sessions 1
    :encoding-batch-size 1
    :update-batch-size 10
+   :health-timeout-ms 2000
+   :update-timeout-ms 120000
    :query-timeout-ms 350
    :candidate-count 50
    :n-ivf-probe 8

@@ -70,6 +70,10 @@
     (not (contains? semantic-modes (:mode lateon)))
     (conj ":semantic/:lateon-code/:mode must be :background or :disabled")
 
+    (not (and (non-blank-string? (:next-plaid-version lateon))
+              (re-matches #"\d+\.\d+\.\d+" (:next-plaid-version lateon))))
+    (conj ":semantic/:lateon-code/:next-plaid-version must be a semantic version")
+
     (not (non-blank-string? (:model lateon)))
     (conj ":semantic/:lateon-code/:model must be a non-blank string")
 
@@ -82,6 +86,16 @@
 
     (not (non-blank-string? (:index-path lateon)))
     (conj ":semantic/:lateon-code/:index-path must be a non-blank path")
+
+    (not (and (non-blank-string? (:index-name lateon))
+              (re-matches #"[A-Za-z0-9_-]+" (:index-name lateon))))
+    (conj ":semantic/:lateon-code/:index-name must contain letters, digits, _ or -")
+
+    (not (contains? #{2 4} (:nbits lateon)))
+    (conj ":semantic/:lateon-code/:nbits must be 2 or 4")
+
+    (not (nat-int? (:start-from-scratch lateon)))
+    (conj ":semantic/:lateon-code/:start-from-scratch must be non-negative")
 
     (not (pos-int? (:document-version lateon)))
     (conj ":semantic/:lateon-code/:document-version must be a positive integer")
@@ -103,6 +117,12 @@
 
     (not (pos-int? (:update-batch-size lateon)))
     (conj ":semantic/:lateon-code/:update-batch-size must be a positive integer")
+
+    (not (pos-int? (:health-timeout-ms lateon)))
+    (conj ":semantic/:lateon-code/:health-timeout-ms must be a positive integer")
+
+    (not (pos-int? (:update-timeout-ms lateon)))
+    (conj ":semantic/:lateon-code/:update-timeout-ms must be a positive integer")
 
     (not (pos-int? (:query-timeout-ms lateon)))
     (conj ":semantic/:lateon-code/:query-timeout-ms must be a positive integer")
