@@ -18,18 +18,6 @@
   (is (nil? (provider/language-for-path "config.edn")))
   (is (nil? (provider/language-for-path "README"))))
 
-(deftest clojure-parses-through-jtreesitter
-  (let [root (Files/createTempDirectory "llm-context-parser-"
-                                        (make-array java.nio.file.attribute.FileAttribute 0))]
-    (with-open [parser (jtreesitter/open (project/context (str root)))]
-      (let [parsed (provider/parse-source parser :language/clojure
-                                          "(ns app) (defn greet [name] name)")]
-        (is (= :language/clojure (:language parsed)))
-        (is (= "source" (get-in parsed [:root :type])))
-        (is (false? (get-in parsed [:root :error?])))
-        (is (some #(= "list_lit" (:type %))
-                  (get-in parsed [:root :children])))))))
-
 (deftest janet-native-libraries-cover-supported-platforms
   (doseq [resource ["lib/x86_64-linux-gnu-tree-sitter-janet.so"
                     "lib/aarch64-linux-gnu-tree-sitter-janet.so"
@@ -41,11 +29,8 @@
 (deftest packaged-language-matrix
   (let [root (Files/createTempDirectory "llm-context-languages-"
                                         (make-array java.nio.file.attribute.FileAttribute 0))
-        samples {:language/clojure "(ns app) (defn greet [name] name)"
-                 :language/clojurescript "(ns app) (defn greet [name] name)"
-                 :language/clojure-common "(ns app) (defn greet [name] name)"
-                 :language/edn-data "{:paths [\"src\"]}"
-                 :language/janet "(import path)\n(defn greet [name] (print name))\n``long string``"}]
+        samples {:language/janet
+                 "(import path)\n(defn greet [name] (print name))\n``long string``"}]
     (with-open [parser (jtreesitter/open (project/context (str root)))]
       (is (= (set (keys samples)) (provider/supported-languages parser)))
       (doseq [[language source] samples]

@@ -18,8 +18,6 @@
     "Atomically retract a file and every graph fact connected to its symbols.")
   (delete-file-and-mark! [store file-id dirty-markers]
     "Atomically retract one file and assert semantic dirty markers.")
-  (reconcile-edges! [store decisions] [store decisions options]
-    "Update edge targets and resolution states after the symbol set changes.")
   (query [store query-form inputs] "Run a Datalog query against the store."))
 
 (defn- entity-identity [entity]
@@ -63,6 +61,45 @@
     (when (seq duplicates)
       (throw (ex-info "Duplicate canonical entity identities in transaction"
                       {:duplicates duplicates})))))
+
+(defn- edge-target-identities [entities]
+  (set (keep (fn [entity]
+               (when (= :entity.type/edge (:entity/type entity))
+                 (:edge/to entity)))
+             entities)))
+
+(defn- asserted-target-identities [entities]
+  (set (concat (keep :symbol/id entities)
+               (keep :topic/id entities))))
+
+(defn- existing-target-identities [db targets]
+  (if-not (seq targets)
+    #{}
+    (set
+     (concat
+      (d/q '[:find [?id ...]
+             :in $ ?targets
+             :where
+             [?entity :symbol/id ?id]
+             [(contains? ?targets ?id)]]
+           db targets)
+      (d/q '[:find [?id ...]
+             :in $ ?targets
+             :where
+             [?entity :topic/id ?id]
+             [(contains? ?targets ?id)]]
+           db targets)))))
+
+(defn- validate-edge-targets! [db entities replace-all?]
+  (let [targets (edge-target-identities entities)
+        asserted (asserted-target-identities entities)
+        available (if replace-all?
+                    asserted
+                    (into asserted (existing-target-identities db targets)))
+        missing (vec (sort (remove available targets)))]
+    (when (seq missing)
+      (throw (ex-info "Exact graph edge targets do not exist"
+                      {:missing-targets missing})))))
 
 (defn- transact-batches!
   [connection items batch-size tx-fn phase on-progress]
@@ -151,36 +188,6 @@
                      [{:llm-context/meta-key "search-index"
                        :llm-context/search-schema-version 1}])))))
 
-(defn- backfill-edge-target-names! [connection]
-  (let [db (d/db connection)
-        current-version
-        (d/q '[:find ?version .
-               :where [?meta :llm-context/meta-key "edge-target-name"]
-                      [?meta :llm-context/search-schema-version ?version]]
-             db)]
-    (when-not (= 1 current-version)
-      (let [missing
-            (d/q '[:find ?edge ?target
-                   :where
-                   [?edge :edge/target-text ?target]
-                   [(missing? $ ?edge :edge/target-name)]]
-                 db)]
-        (doseq [batch (partition-all 100
-                                     (keep (fn [[edge target]]
-                                             (let [name (schema/edge-target-name target)]
-                                               (when (seq name) [edge name])))
-                                           missing))]
-          (d/transact!
-           connection
-           (mapv (fn [[edge name]]
-                   {:db/id edge
-                    :edge/target-name name})
-                 batch)))
-        (d/transact!
-         connection
-         [{:llm-context/meta-key "edge-target-name"
-           :llm-context/search-schema-version 1}])))))
-
 (defn- file-retraction-plan [db file-id]
   (let [symbols (d/q '[:find [?symbol ...]
                        :in $ ?file-id
@@ -257,56 +264,6 @@
          (conj marker))))
    markers))
 
-(defn- edge-reconciliation-tx [db decisions]
-  (let [edge-ids (set (map :edge-id decisions))
-        target-ids (set (keep :target-id decisions))
-        edge-eids
-        (if (seq edge-ids)
-          (into {}
-                (d/q '[:find ?id ?edge
-                       :in $ ?ids
-                       :where
-                       [?edge :edge/id ?id]
-                       [(contains? ?ids ?id)]]
-                     db edge-ids))
-          {})
-        current-targets
-        (if (seq edge-ids)
-          (into {}
-                (d/q '[:find ?id ?target
-                       :in $ ?ids
-                       :where
-                       [?edge :edge/id ?id]
-                       [(contains? ?ids ?id)]
-                       [?edge :edge/to ?target]]
-                     db edge-ids))
-          {})
-        target-eids
-        (if (seq target-ids)
-          (into {}
-                (d/q '[:find ?id ?symbol
-                       :in $ ?ids
-                       :where
-                       [?symbol :symbol/id ?id]
-                       [(contains? ?ids ?id)]]
-                     db target-ids))
-          {})]
-    (mapcat
-     (fn [{:keys [edge-id target-id resolution confidence]}]
-       (when-let [edge-eid (get edge-eids edge-id)]
-         (let [current-target (get current-targets edge-id)
-               target-eid (get target-eids target-id)]
-           (cond-> []
-             (and current-target (not= current-target target-eid))
-             (conj [:db/retract edge-eid :edge/to current-target])
-
-             true
-             (conj (cond-> {:db/id edge-eid
-                            :edge/resolution resolution
-                            :edge/confidence (double confidence)}
-                     target-eid (assoc :edge/to target-eid)))))))
-     decisions)))
-
 (defrecord DatalevinStore [connection path]
   GraphStore
   (database [_] (d/db connection))
@@ -314,6 +271,7 @@
   (transact! [_ entities]
     (doseq [entity entities]
       (schema/validate-entity! entity))
+    (validate-edge-targets! (d/db connection) entities false)
     (when (seq entities)
       (d/transact! connection (entities->tx (d/db connection) entities #{}))))
 
@@ -327,6 +285,7 @@
                       {:batch-size batch-size})))
     (doseq [entity entities]
       (schema/validate-entity! entity))
+    (validate-edge-targets! (d/db connection) entities true)
     (let [ordered (vec (dependency-order entities))
           _ (validate-identities! ordered)
           existing (vec (d/q '[:find [?entity ...]
@@ -345,6 +304,7 @@
     (schema/validate-entity! file)
     (doseq [entity entities]
       (schema/validate-entity! entity))
+    (validate-edge-targets! (d/db connection) entities false)
     (let [db (d/db connection)
           preserved (set (keep :symbol/id entities))
           retractions (retract-owned-tx db (:file/id file) preserved)
@@ -359,6 +319,7 @@
     (schema/validate-entity! file)
     (doseq [entity entities]
       (schema/validate-entity! entity))
+    (validate-edge-targets! (d/db connection) entities false)
     (let [db (d/db connection)
           preserved (set (keep :symbol/id entities))
           retractions (retract-owned-tx db (:file/id file) preserved)
@@ -391,29 +352,6 @@
       (when (seq tx)
         (d/transact! connection tx))))
 
-  (reconcile-edges! [this decisions]
-    (reconcile-edges! this decisions {}))
-
-  (reconcile-edges! [_ decisions {:keys [batch-size on-progress]}]
-    (let [decisions (vec decisions)
-          total (count decisions)
-          batch-size (or batch-size (max 1 total))]
-      (when-not (pos-int? batch-size)
-        (throw (ex-info "Edge reconciliation batch size must be positive"
-                        {:batch-size batch-size})))
-      (loop [batches (seq (partition-all batch-size decisions))
-             completed 0]
-        (when-let [batch (first batches)]
-          (let [tx (vec (edge-reconciliation-tx (d/db connection) batch))]
-            (when (seq tx)
-              (d/transact! connection tx))
-            (let [next-completed (+ completed (count batch))]
-              (when on-progress
-                (on-progress {:phase :resolve
-                              :completed next-completed
-                              :total total}))
-              (recur (next batches) next-completed)))))))
-
   (query [_ query-form inputs]
     (apply d/q query-form (d/db connection) inputs))
 
@@ -430,7 +368,6 @@
     (let [connection (d/get-conn (str path) schema/datalevin-schema)]
       (try
         (backfill-symbol-search-text! connection)
-        (backfill-edge-target-names! connection)
         (->DatalevinStore connection path)
         (catch Throwable error
           (d/close connection)

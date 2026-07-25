@@ -9,15 +9,7 @@
            [java.nio.file CopyOption Files LinkOption Path StandardCopyOption]))
 
 (def language-definitions
-  {:language/clojure {:library "tree-sitter-clojure"
-                      :symbol "tree_sitter_clojure"}
-   :language/clojurescript {:library "tree-sitter-clojure"
-                            :symbol "tree_sitter_clojure"}
-   :language/clojure-common {:library "tree-sitter-clojure"
-                             :symbol "tree_sitter_clojure"}
-   :language/edn-data {:library "tree-sitter-clojure"
-                       :symbol "tree_sitter_clojure"}
-   :language/janet {:library "tree-sitter-janet"
+  {:language/janet {:library "tree-sitter-janet"
                     :symbol "tree_sitter_janet_simple"}})
 
 (defonce ^:private loaded-core (atom nil))

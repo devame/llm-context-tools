@@ -36,7 +36,7 @@
 
 (defn check
   "Return structured runtime checks. Optional semantic providers are reported
-  without making structural analysis unavailable."
+  without making exact graph analysis unavailable."
   [project config]
   (let [java (java-feature)
         java-check {:check :java

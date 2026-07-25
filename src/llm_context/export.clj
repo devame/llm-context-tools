@@ -93,7 +93,7 @@
         stats (query/stats graph)
         entries (graph-read/summary-entry-points db)
         effects (graph-read/summary-effects db)
-        unresolved-count (graph-read/unresolved-edge-count db)]
+        unresolved-count (graph-read/unresolved-reference-count db)]
     (str "# Semantic graph summary\n\n"
          "Generated from the Datalevin graph; no claims are inferred beyond stored facts.\n\n"
          "## Counts\n\n"

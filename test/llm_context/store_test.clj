@@ -202,6 +202,25 @@
            #"Duplicate canonical entity identities"
            (store/replace-all! graph [file file]))))))
 
+(deftest exact-edges-cannot-target-missing-graph-identities
+  (let [project (temp-project)
+        file (file-entity "src/a.clj" "source")
+        source (symbol-entity file "sample/source" 1)
+        edge {:entity/type :entity.type/edge
+              :edge/id "edge:missing"
+              :edge/kind :edge.kind/calls
+              :edge/from (:symbol/id source)
+              :edge/to "symbol:missing"
+              :edge/target-text "sample/missing"
+              :edge/resolution :resolution/exact
+              :edge/confidence 1.0
+              :edge/evidence :test-exact}]
+    (store/with-store [graph project (config/defaults)]
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"Exact graph edge targets do not exist"
+           (store/replace-all! graph [file source edge]))))))
+
 (deftest whole-graph-replacement-commits-bounded-batches
   (let [project (temp-project)
         file-a (file-entity "src/a.clj" "source-a")

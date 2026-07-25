@@ -2,7 +2,6 @@
   (:require [clojure.test :refer [deftest is]]
             [llm-context.analysis.files :as files]
             [llm-context.config :as config]
-            [llm-context.parser.jtreesitter :as jtreesitter]
             [llm-context.project :as project])
   (:import [java.nio.file Files]))
 
@@ -20,6 +19,10 @@
       (throw (ex-info "git fixture command failed"
                       {:command command :output output})))))
 
+(def supported-languages
+  #{:language/clojure :language/clojurescript :language/clojure-common
+    :language/janet :language/edn-data})
+
 (deftest whole-root-discovery-prunes-generated-content
   (let [root (Files/createTempDirectory
               "llm-context-files-"
@@ -34,7 +37,7 @@
     (spit (str (.resolve root "node_modules/dependency/hidden.clj"))
           "(defn hidden [])")
     (let [{:keys [files diagnostics]}
-          (files/discover context settings (jtreesitter/available-languages))]
+          (files/discover context settings supported-languages)]
       (is (= ["frontend/src/app.cljs" "frontend/src/build.janet"]
              (mapv :relative-path files)))
       (is (empty? diagnostics)))))
@@ -52,8 +55,7 @@
     (spit (str (.resolve root "generated/hidden.clj"))
           "(defn hidden [])")
     (run-git! root "init" "--quiet")
-    (let [result (files/discover context settings
-                                 (jtreesitter/available-languages))]
+    (let [result (files/discover context settings supported-languages)]
       (is (= ["src/app.clj"] (mapv :relative-path (:files result))))
       (is (empty? (:diagnostics result))))))
 
@@ -63,7 +65,7 @@
                        "llm-context-missing-"
                        (make-array java.nio.file.attribute.FileAttribute 0))))
         settings (assoc-in (config/defaults) [:analysis :include] ["missing"])
-        result (files/discover context settings (jtreesitter/available-languages))]
+        result (files/discover context settings supported-languages)]
     (is (empty? (:files result)))
     (is (= :missing-include (get-in result [:diagnostics 0 :kind])))))
 
@@ -81,8 +83,7 @@
                                   java.nio.charset.StandardCharsets/UTF_8)))]
     (Files/write path bytes (make-array java.nio.file.OpenOption 0))
     (let [{:keys [files diagnostics]}
-          (files/discover context (config/defaults)
-                          (jtreesitter/available-languages))
+          (files/discover context (config/defaults) supported-languages)
           diagnostic (first (filter #(= :invalid-utf8 (:kind %))
                                     diagnostics))]
       (is (= ["fixture.clj"] (mapv :relative-path files)))

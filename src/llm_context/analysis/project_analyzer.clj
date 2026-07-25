@@ -38,7 +38,10 @@
         janet-files (filterv #(= :language/janet (:language %)) files)
         edn-files (filterv #(= :language/edn-data (:language %)) files)
         clojure-snapshot (clj-kondo/analyze! project clojure-files)
-        janet-snapshot (janet/analyze project janet-files)
+        janet-snapshot
+        (if (seq janet-files)
+          (janet/analyze project janet-files)
+          {:outputs [] :diagnostics [] :catalog-version janet/catalog-version})
         janet-outputs (:outputs janet-snapshot)
         outputs
         (concat

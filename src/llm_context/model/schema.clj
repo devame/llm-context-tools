@@ -18,8 +18,7 @@
                   :edge.kind/event-dispatches :edge.kind/subscribes
                   :edge.kind/topic-registers :edge.kind/state-reads
                   :edge.kind/state-writes})
-(def resolution-states #{:resolution/exact :resolution/heuristic
-                         :resolution/ambiguous :resolution/unresolved})
+(def resolution-states #{:resolution/exact})
 (def effect-kinds #{:effect.kind/file-read :effect.kind/file-write
                     :effect.kind/network :effect.kind/database-read
                     :effect.kind/database-write :effect.kind/process
@@ -177,25 +176,8 @@
     (assoc entity :symbol/search-text (symbol-search-text entity))
     entity))
 
-(defn edge-target-name
-  "Normalize a syntactic edge target to the identifier used for structural
-  candidate lookup."
-  [target]
-  (-> target
-      str/trim
-      (str/replace #"^[`'\"]|[`'\"]$" "")
-      (str/replace #"\(.*$" "")
-      (str/split #"[./]")
-      last))
-
 (defn with-derived-attributes [entity]
-  (let [entity (with-symbol-search-text entity)
-        target-name (when (and (= :entity.type/edge (:entity/type entity))
-                               (:edge/target-text entity))
-                      (edge-target-name (:edge/target-text entity)))]
-    (cond-> entity
-      (seq target-name)
-      (assoc :edge/target-name target-name))))
+  (with-symbol-search-text entity))
 
 (def datalevin-schema
   {:llm-context/meta-key {:db/valueType :db.type/string
@@ -314,8 +296,6 @@
    :edge/to {:db/valueType :db.type/ref
              :db/index true}
    :edge/target-text {:db/valueType :db.type/string
-                      :db/index true}
-   :edge/target-name {:db/valueType :db.type/string
                       :db/index true}
    :edge/resolution {:db/valueType :db.type/keyword
                      :db/index true}

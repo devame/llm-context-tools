@@ -33,9 +33,11 @@
   (let [output
         (with-out-str
           (#'cli/print-analysis-progress!
-           {:stage :resolve-progress :completed 1000 :total 2500}))]
+           {:stage :analyzer-finalize-complete
+            :exact-edges 1000 :references 25
+            :external 20 :dynamic 2 :ambiguous 1 :unresolved 2}))]
     (is (re-find
-         #"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] Resolved 1000/2500 edges"
+         #"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] Graph quality: 1000 exact edges, 25 references"
          output))))
 
 (deftest project-context-is-canonical

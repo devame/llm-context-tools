@@ -1,13 +1,11 @@
 (ns llm-context.analysis.full
   (:require [llm-context.analysis.files :as files]
             [llm-context.analysis.project-analyzer :as project-analyzer]
-            [llm-context.analysis.resolve :as resolve]
-            [llm-context.graph.read :as graph-read]
+            [llm-context.query :as query]
             [llm-context.semantic.reconcile :as semantic-reconcile]
             [llm-context.store :as store]))
 
 (def persistence-batch-size 100)
-(def resolution-batch-size 1000)
 
 (defn- emit! [progress stage data]
   (when progress
@@ -22,31 +20,10 @@
                        (when progress
                          #(emit! progress :persist-progress %))}))
 
-(defn- resolve-persisted! [graph progress]
-  (let [db (store/database graph)
-        edge-ids (graph-read/all-edge-ids db)
-        _ (emit! progress :resolve-edges-selected {:edges (count edge-ids)})
-        edges (graph-read/edge-resolution-inputs db edge-ids)
-        _ (emit! progress :resolve-edges-loaded {:edges (count edges)})
-        symbols (graph-read/resolution-candidate-symbols db edges)
-        _ (emit! progress :resolve-candidates-selected
-                 {:candidates (count symbols)})
-        decisions (resolve/resolution-decisions symbols edges {})]
-    (emit! progress :resolve-plan
-           {:edges (count edges) :candidates (count symbols)
-            :exact 0 :batch-size resolution-batch-size})
-    (store/reconcile-edges!
-     graph decisions
-     {:batch-size resolution-batch-size
-      :on-progress
-      (when progress #(emit! progress :resolve-progress %))})
-    {:edges (count edges) :candidates (count symbols)
-     :exact 0}))
-
 (defn analyze!
   "Perform a complete project scan and replace Datalevin facts in bounded
-  transactions. A missing optional semantic provider degrades resolution, not
-  availability."
+  transactions. Analyzer adapters emit final exact edges and classified
+  references; persistence never promotes syntax into graph relationships."
   ([project config]
    (analyze! project config nil))
   ([project config progress]
@@ -77,8 +54,9 @@
                       {:entities (count all-entities)
                        :batch-size persistence-batch-size})]
          (persist! graph config all-entities progress)
-         (emit! progress :resolve-start {})
-         (let [resolution (resolve-persisted! graph progress)
+         (emit! progress :analyzer-finalize-start {})
+         (let [quality (query/graph-quality graph)
+               _ (emit! progress :analyzer-finalize-complete quality)
                _ (emit! progress :semantic-reconcile-start {})
                semantic-plan
                (semantic-reconcile/reconcile! graph project config)
@@ -92,7 +70,7 @@
            {:mode :full
             :files total
             :entities (count all-entities)
-            :resolution resolution
+            :graph-quality quality
             :semantic semantic-plan
             :diagnostics (vec (concat diagnostics
                                       (:diagnostics project-snapshot)

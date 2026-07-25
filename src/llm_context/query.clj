@@ -20,6 +20,20 @@
      :reference-classification
      (graph-read/grouped-counts db :reference/classification)}))
 
+(defn graph-quality
+  "Return the persisted evidence-quality breakdown. Every traversable edge is
+  exact by schema; weaker observations are counted by reference class."
+  [graph]
+  (let [db (store/database graph)
+        counts (graph-read/entity-counts db)
+        references (graph-read/grouped-counts db :reference/classification)]
+    {:exact-edges (get counts :entity.type/edge 0)
+     :references (get counts :entity.type/reference 0)
+     :external (get references :external 0)
+     :dynamic (get references :dynamic 0)
+     :ambiguous (get references :ambiguous 0)
+     :unresolved (get references :unresolved 0)}))
+
 (defn symbols
   "Find symbols by exact name, case-insensitive substring, or Datalevin
   full-text relevance over identifiers, signatures, and documentation."

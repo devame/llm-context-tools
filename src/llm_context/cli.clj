@@ -118,8 +118,9 @@
     (if ((resolve-fn 'llm-context.runtime.doctor/healthy?) checks) 0 1)))
 
 (defn- analysis-progress-message
-  [{:keys [stage files diagnostics completed total file entities edges
-           candidates exact upserts deletes deferred batch-size phase
+  [{:keys [stage files diagnostics completed total file entities
+           exact-edges references external dynamic ambiguous unresolved
+           upserts deletes deferred batch-size phase
            elapsed-seconds]}]
   (case stage
     :discover-start "Discovering source files..."
@@ -129,16 +130,11 @@
     :parse-complete (format "Parsed %d/%d files" completed total)
     :semantic-start "Running configured semantic providers..."
     :semantic-complete "Semantic provider stage complete"
-    :resolve-start "Resolving graph relationships..."
-    :resolve-edges-selected (format "Selected %d persisted edges" edges)
-    :resolve-edges-loaded (format "Loaded %d edge resolution inputs" edges)
-    :resolve-candidates-selected
-    (format "Selected %d candidate symbols" candidates)
-    :resolve-plan
-    (format
-     "Resolving %d edges against %d candidates (%d exact) in batches of %d..."
-     edges candidates exact batch-size)
-    :resolve-progress (format "Resolved %d/%d edges" completed total)
+    :analyzer-finalize-start "Finalizing analyzer graph facts..."
+    :analyzer-finalize-complete
+    (format (str "Graph quality: %d exact edges, %d references "
+                 "(%d external, %d dynamic, %d ambiguous, %d unresolved)")
+            exact-edges references external dynamic ambiguous unresolved)
     :semantic-reconcile-start "Reconciling semantic indexing jobs..."
     :semantic-reconcile-complete
     (format "Semantic reconciliation queued %d upserts and %d deletions (%d deferred)"

@@ -20,19 +20,18 @@
       (is (= 1 (:files result)))
       (is (pos? (:entities result)))
       (is (= [:discover-start :discover-complete :parse-progress
-              :parse-complete :persist-start :persist-progress :resolve-start
-              :resolve-edges-selected :resolve-edges-loaded
-              :resolve-candidates-selected
-              :resolve-plan
+              :parse-complete :persist-start :persist-progress
+              :analyzer-finalize-start :analyzer-finalize-complete
               :semantic-reconcile-start :semantic-reconcile-complete
               :complete]
              (mapv :stage @events)))
       (is (= full/persistence-batch-size
              (:batch-size (first (filter #(= :persist-start (:stage %))
                                         @events)))))
-      (is (= full/resolution-batch-size
-             (:batch-size (first (filter #(= :resolve-plan (:stage %))
-                                        @events))))))
+      (is (number?
+           (:exact-edges
+            (first (filter #(= :analyzer-finalize-complete (:stage %))
+                           @events))))))
     (store/with-store [graph project settings]
       (is (= #{"greet"}
              (set (store/query graph

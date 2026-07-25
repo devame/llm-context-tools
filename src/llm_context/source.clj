@@ -1,5 +1,5 @@
 (ns llm-context.source
-  "Deterministic source-byte decoding shared by structural and semantic paths."
+  "Deterministic source-byte decoding shared by authoritative analyzers."
   (:import [java.nio ByteBuffer]
            [java.nio.charset CharacterCodingException CodingErrorAction
             StandardCharsets]
