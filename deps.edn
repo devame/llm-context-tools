@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
  :deps {org.clojure/clojure {:mvn/version "1.12.0"}
+        clj-kondo/clj-kondo {:mvn/version "2026.07.24"}
         org.clojure/data.json {:mvn/version "2.5.1"}
         org.datalevin/datalevin-embedded {:mvn/version "1.0.0"}
         io.github.tree-sitter/jtreesitter {:mvn/version "0.26.1"}
