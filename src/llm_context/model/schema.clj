@@ -38,6 +38,8 @@
 (s/def :file/content-hash (s/and string? #(str/starts-with? % "sha256:")))
 (s/def :file/size nat-int?)
 (s/def :file/modified-at int?)
+(s/def :file/semantic-hash
+  (s/and string? #(str/starts-with? % "sha256:")))
 
 (s/def :symbol/id (s/and string? #(str/starts-with? % "symbol:")))
 (s/def :symbol/name (s/and string? seq))
@@ -89,7 +91,8 @@
 
 (s/def ::file
   (s/keys :req [:entity/type :file/id :file/path :file/language
-                :file/content-hash :file/size :file/modified-at]))
+                :file/content-hash :file/size :file/modified-at]
+          :opt [:file/semantic-hash]))
 (s/def ::source-range
   (s/keys :req [:source/start-line :source/start-column
                 :source/end-line :source/end-column]))
@@ -274,6 +277,8 @@
    :file/content-hash {:db/valueType :db.type/string}
    :file/size {:db/valueType :db.type/long}
    :file/modified-at {:db/valueType :db.type/long}
+   :file/semantic-hash {:db/valueType :db.type/string
+                        :db/index true}
 
    :symbol/id {:db/valueType :db.type/string
                :db/unique :db.unique/identity}

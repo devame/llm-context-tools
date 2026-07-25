@@ -36,15 +36,22 @@
         db)))
 
 (defn files-by-path [db]
-  (into {}
-        (map (fn [[path id hash]]
-               [path {:id id :hash hash}]))
-        (d/q '[:find ?path ?id ?hash
-               :where
-               [?file :file/path ?path]
-               [?file :file/id ?id]
-               [?file :file/content-hash ?hash]]
-             db)))
+  (let [semantic (into {}
+                       (d/q '[:find ?id ?semantic
+                              :where
+                              [?file :file/id ?id]
+                              [?file :file/semantic-hash ?semantic]]
+                            db))]
+    (into {}
+          (map (fn [[path id hash]]
+                 [path {:id id :hash hash
+                        :semantic-hash (get semantic id "")}]))
+          (d/q '[:find ?path ?id ?hash
+                 :where
+                 [?file :file/path ?path]
+                 [?file :file/id ?id]
+                 [?file :file/content-hash ?hash]]
+               db))))
 
 (defn file-hashes [db]
   (into (sorted-map)
