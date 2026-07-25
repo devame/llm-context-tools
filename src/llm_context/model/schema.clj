@@ -183,6 +183,12 @@
   {:llm-context/meta-key {:db/valueType :db.type/string
                           :db/unique :db.unique/identity}
    :llm-context/search-schema-version {:db/valueType :db.type/long}
+   :llm-context/graph-format {:db/valueType :db.type/long}
+   :llm-context/analyzer-name {:db/valueType :db.type/string}
+   :llm-context/analyzer-version {:db/valueType :db.type/string}
+   :llm-context/janet-catalog-version {:db/valueType :db.type/string}
+   :llm-context/semantic-document-version {:db/valueType :db.type/long}
+   :llm-context/semantic-index-name {:db/valueType :db.type/string}
 
    ;; Operational semantic state is deliberately not assigned :entity/type.
    ;; Full graph replacement only retracts canonical graph entities, so the

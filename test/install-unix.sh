@@ -8,7 +8,9 @@ trap cleanup EXIT HUP INT TERM
 
 mkdir -p "$TEST_DIR/release" "$TEST_DIR/bin"
 cp "$PROJECT_DIR/dist/llm-context.jar" "$TEST_DIR/release/llm-context.jar"
+cp "$PROJECT_DIR/dist/USER-GUIDE.md" "$TEST_DIR/release/USER-GUIDE.md"
 (cd "$TEST_DIR/release" && sha256sum llm-context.jar > llm-context.jar.sha256)
+(cd "$TEST_DIR/release" && sha256sum USER-GUIDE.md > USER-GUIDE.md.sha256)
 
 LLM_CONTEXT_RELEASE_URL="file://$TEST_DIR/release" \
 LLM_CONTEXT_INSTALL_DIR="$TEST_DIR/bin" \
@@ -17,6 +19,7 @@ LLM_CONTEXT_SKIP_SEMANTIC=1 \
 
 test -x "$TEST_DIR/bin/llm-context"
 test -f "$TEST_DIR/bin/llm-context.jar"
+test -f "$TEST_DIR/bin/USER-GUIDE.md"
 EXPECTED_VERSION=$(java --enable-native-access=ALL-UNNAMED \
   -jar "$PROJECT_DIR/dist/llm-context.jar" version)
 test "$("$TEST_DIR/bin/llm-context" version)" = "$EXPECTED_VERSION"

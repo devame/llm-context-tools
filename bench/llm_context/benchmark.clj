@@ -21,11 +21,13 @@
         src (.resolve root "src")]
     (Files/createDirectories src (make-array java.nio.file.attribute.FileAttribute 0))
     (doseq [index (range file-count)]
-      (spit (str (.resolve src (str "module_" index ".js")))
+      (spit (str (.resolve src (str "module_" index ".clj")))
             (if (zero? index)
-              "export function function0(value) { console.log(value); return value; }"
+              "(ns bench.module-0)\n(defn function0 [value] (println value) value)\n"
               (format
-               "export function function%d(value) { return function0(value); }"
+               (str "(ns bench.module-%1$d "
+                    "(:require [bench.module-0 :as root]))\n"
+                    "(defn function%1$d [value] (root/function0 value))\n")
                index))))
     {:root root :project (project/context (str root))}))
 
@@ -37,9 +39,9 @@
                      (assoc-in [:semantic :providers] []))
         full-result (timed #(full/analyze! project settings))
         unchanged (timed #(incremental/analyze! project settings))
-        changed-path (.resolve (.resolve root "src") "module_0.js")]
+        changed-path (.resolve (.resolve root "src") "module_0.clj")]
     (spit (str changed-path)
-          "export function function0(value) { console.log(value); return value + 1; }")
+          "(ns bench.module-0)\n(defn function0 [value] (println value) (inc value))\n")
     (let [changed (timed #(incremental/analyze! project settings))
           reads (store/with-store [graph project settings]
                   {:stats (timed #(query/stats graph))

@@ -1,5 +1,7 @@
 (ns build
-  (:require [clojure.tools.build.api :as b]))
+  (:require [clojure.tools.build.api :as b])
+  (:import [java.nio.file Files Paths]
+           [java.security MessageDigest]))
 
 (def lib 'devame/llm-context)
 (def version "0.7.8")
@@ -7,6 +9,11 @@
 (def basis (delay (b/create-basis {:project "deps.edn"})))
 (def uber-file (format "target/llm-context-%s-standalone.jar" version))
 (def dist-file "dist/llm-context.jar")
+
+(defn- sha256 [path]
+  (let [digest (.digest (MessageDigest/getInstance "SHA-256")
+                        (Files/readAllBytes (Paths/get path (make-array String 0))))]
+    (apply str (map #(format "%02x" (bit-and % 0xff)) digest))))
 
 (defn clean [_]
   (b/delete {:path "target"}))
@@ -30,4 +37,9 @@
 
 (defn dist [_]
   (b/delete {:path "dist"})
-  (build-uber dist-file))
+  (let [result (build-uber dist-file)
+        guide "dist/USER-GUIDE.md"]
+    (b/copy-file {:src "docs/user-guide.md" :target guide})
+    (spit (str guide ".sha256")
+          (str (sha256 guide) "  USER-GUIDE.md\n"))
+    result))

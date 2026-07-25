@@ -4,8 +4,8 @@
 
 This document defines the implementation contract for LateOn-Code retrieval.
 It is intentionally narrower than the semantic graph model: LateOn improves
-code discovery but does not infer graph entities or replace structural and SCIP
-analysis.
+code discovery but does not infer graph entities or replace clj-kondo and
+Janet semantic analysis.
 
 ## Ownership
 
@@ -34,7 +34,7 @@ state remains project-local.
 file event or analyze command
              |
              v
-structural analysis and edge reconciliation
+focused project analysis and semantic fingerprinting
              |
              v
 Datalevin graph transaction + durable dirty marker
@@ -49,7 +49,7 @@ resident worker encodes and updates NextPlaid
 worker records indexed hash and freshness watermark
 ```
 
-Structural analysis does not wait for model inference. A service outage can
+Graph analysis does not wait for model inference. A service outage can
 increase semantic lag but cannot make graph analysis unavailable.
 
 The filesystem watcher is only a change trigger. It delegates to the same
@@ -78,7 +78,7 @@ Each indexed chunk carries at least:
  :file-id "file:..."
  :document-hash "sha256:..."
  :model-revision "734b659a57935ef50562d79581c3ff1f8d825c93"
- :document-version 1
+ :document-version 2
  :chunk-index 0}
 ```
 
@@ -103,9 +103,9 @@ conditional on the expected document hash: an old worker may finish expensive
 encoding, but it cannot mark a newer document current. Replaying an upsert or
 delete is safe.
 
-A full graph replacement records a project-wide reconciliation marker before
-bounded graph transactions begin. If analysis stops midway, the marker remains
-and the next analysis or service start repairs the semantic plan.
+A full graph replacement resets obsolete semantic state, persists format
+metadata, and reconciles every desired document into the versioned
+`llm-context-v2` NextPlaid index. Older index contents are unreachable.
 
 ## Query consistency
 
@@ -170,7 +170,7 @@ default retrieval and ingestion settings reflect the repository benchmark:
 - centroid score threshold disabled;
 - 4096 full-score candidates;
 - 50 candidates before Datalevin freshness filtering;
-- 350 ms query timeout.
+- 1500 ms query timeout.
 
 Constrained users may explicitly select the edge model later. Automatic model
 selection is not part of the initial implementation because it would make
@@ -178,7 +178,7 @@ retrieval behavior dependent on implicit hardware detection.
 
 ## Non-goals
 
-- generating structural graph edges with a language model;
+- generating graph edges with a language model;
 - remote inference or uploading source code;
 - distributed queues or multiple semantic writers;
 - using LateOn embeddings as Datalevin vector values;

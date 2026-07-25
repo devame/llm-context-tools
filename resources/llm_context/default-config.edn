@@ -26,10 +26,10 @@
    :model-path nil
    :quantization :int8
    :index-path ".llm-context/semantic/next-plaid"
-   :index-name "llm-context"
+   :index-name "llm-context-v2"
    :nbits 4
    :start-from-scratch 0
-   :document-version 1
+   :document-version 2
    :max-document-bytes 6000
    :chunk-overlap-lines 8
    :pool-factor 2

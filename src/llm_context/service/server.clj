@@ -65,24 +65,39 @@
              (if (= :ready (:status runtime)) :available :unavailable)
              :runtime runtime))))
 
-(defn- analyze! [graph project settings]
+(defn- service-progress! [event]
+  (println
+   (pr-str
+    (assoc event
+           :event :analysis-progress
+           :timestamp (str (java.time.Instant/now)))))
+  (flush))
+
+(defn- analyze! [graph project settings force-full?]
   (locking graph
-    (if (incremental/index-present? graph)
+    (if (and (not force-full?)
+             (incremental/index-present? graph))
       (incremental/analyze! graph project settings)
-      (full/analyze! graph project settings nil))))
+      (full/analyze! graph project settings service-progress!))))
 
 (defn- dispatch [project settings graph runtime-state request]
   (let [runtime @runtime-state]
     (case (:op request)
     :ping :pong
-    :query (query-value graph (:client runtime) settings
-                        (:subcommand request) (:args request))
+    :analyze (analyze! graph project settings (:full? request))
+    :query (do
+             (store/assert-query-compatible! graph)
+             (query-value graph (:client runtime) settings
+                          (:subcommand request) (:args request)))
     :context
-    (let [packet (context/build graph (:options request))]
+    (let [_ (store/assert-query-compatible! graph)
+          packet (context/build graph (:options request))]
       (if (= :markdown (get-in request [:options :format]))
         (context/markdown packet)
         packet))
-    :export (export/render graph (:format request))
+    :export (do
+              (store/assert-query-compatible! graph)
+              (export/render graph (:format request)))
     :semantic-status (semantic-status graph runtime)
     :semantic-failures
     (semantic-state/failure-records graph semantic-reconcile/provider)
@@ -254,7 +269,7 @@
                     project settings
                     (fn []
                       (try
-                        (let [result (analyze! graph project settings)]
+                        (let [result (analyze! graph project settings false)]
                           (println
                            (format
                             "Watched analysis: %d files, %d changed, %d deleted"

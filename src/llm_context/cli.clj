@@ -15,14 +15,27 @@
       (f graph)
       (finally (.close ^java.io.Closeable graph)))))
 
+(defn- with-compatible-graph [context settings f]
+  (with-graph
+    context settings
+    (fn [graph]
+      ((resolve-fn 'llm-context.store/assert-query-compatible!) graph)
+      (f graph))))
+
 (def ^:private unavailable ::unavailable)
 
-(defn- remote-value [context request]
-  (if-let [response (service-client/request context request)]
+(defn- response-value [response]
+  (if response
     (if (:ok response)
       (:value response)
       (throw (ex-info (:error response) {:exit-code (:exit-code response)})))
     unavailable))
+
+(defn- remote-value
+  ([context request]
+   (response-value (service-client/request context request)))
+  ([context request options]
+   (response-value (service-client/request context request options))))
 
 (defn usage []
   (str "llm-context " version/value "\n\n"
@@ -159,19 +172,28 @@
     (throw (ex-info (str "Unknown analyze option: " unknown) {:exit-code 2})))
   (let [settings (config/load-config context)
         force-full? (boolean (some #{"--full"} args))
-        full? (or force-full?
-                  (not ((resolve-fn
-                         'llm-context.analysis.incremental/index-present?)
-                        context settings)))
+        graph-state (with-graph
+                      context settings
+                      #((resolve-fn 'llm-context.store/graph-state) %))
+        _ (when (and (= :incompatible graph-state) (not force-full?))
+            (throw
+             (ex-info
+              (str "This project graph uses an incompatible format. "
+                   "Run `llm-context analyze --full` to rebuild it.")
+              {:exit-code 2 :type :graph/rebuild-required})))
+        full? (or force-full? (= :empty graph-state))
         progress (when-not (get-in context [:options :quiet?])
                    print-analysis-progress!)
-        ;; Keep analysis in this process so progress remains observable and a
-        ;; service timeout cannot accidentally launch a second writer.
-        result (if full?
-                 ((resolve-fn 'llm-context.analysis.full/analyze!)
-                  context settings progress)
-                 ((resolve-fn 'llm-context.analysis.incremental/analyze!)
-                  context settings))]
+        remote (remote-value context
+                             {:op :analyze :full? full?}
+                             {:request-timeout 86400000})
+        result (if-not (= unavailable remote)
+                 remote
+                 (if full?
+                   ((resolve-fn 'llm-context.analysis.full/analyze!)
+                    context settings progress)
+                   ((resolve-fn 'llm-context.analysis.incremental/analyze!)
+                    context settings)))]
     (when-not (get-in context [:options :quiet?])
       (println
        (if (= :incremental (:mode result))
@@ -233,7 +255,7 @@
           (if-not (= unavailable remote)
             remote
             (let [settings (config/load-config context)]
-              (with-graph context settings
+              (with-compatible-graph context settings
                 #(execute-query % nil settings subcommand command-args))))]
       (if (= "search" subcommand)
         (let [explain? (some #{"--explain"} command-args)
@@ -462,7 +484,7 @@
                                {:op :context :options (assoc options :format format)})]
       (if-not (= unavailable remote)
         (if (= :edn format) (pprint/pprint remote) (print remote))
-        (with-graph cli-context settings
+        (with-compatible-graph cli-context settings
           (fn [graph]
             (let [packet ((resolve-fn 'llm-context.context/build) graph options)]
               (case format
@@ -492,7 +514,7 @@
         remote (remote-value cli-context {:op :export :format format})]
     (let [rendered (if-not (= unavailable remote)
                      remote
-                     (with-graph cli-context settings
+                     (with-compatible-graph cli-context settings
                        #((resolve-fn 'llm-context.export/render) % format)))]
         (if (or (nil? output) (= "-" output))
           (print rendered)

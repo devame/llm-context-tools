@@ -65,12 +65,19 @@ trap cleanup EXIT HUP INT TERM
 printf 'Downloading llm-context %s...\n' "$VERSION"
 download "$RELEASE_URL/llm-context.jar" "$TEMP_DIR/llm-context.jar"
 download "$RELEASE_URL/llm-context.jar.sha256" "$TEMP_DIR/llm-context.jar.sha256"
+download "$RELEASE_URL/USER-GUIDE.md" "$TEMP_DIR/USER-GUIDE.md"
+download "$RELEASE_URL/USER-GUIDE.md.sha256" "$TEMP_DIR/USER-GUIDE.md.sha256"
 
 EXPECTED_HASH=$(sed -n '1{s/[[:space:]].*//;p;}' "$TEMP_DIR/llm-context.jar.sha256")
 ACTUAL_HASH=$(file_hash "$TEMP_DIR/llm-context.jar")
 
 [ -n "$EXPECTED_HASH" ] && [ "$EXPECTED_HASH" = "$ACTUAL_HASH" ] ||
   fail "release checksum verification failed"
+GUIDE_EXPECTED_HASH=$(sed -n '1{s/[[:space:]].*//;p;}' \
+  "$TEMP_DIR/USER-GUIDE.md.sha256")
+[ -n "$GUIDE_EXPECTED_HASH" ] &&
+  [ "$GUIDE_EXPECTED_HASH" = "$(file_hash "$TEMP_DIR/USER-GUIDE.md")" ] ||
+  fail "user guide checksum verification failed"
 
 INSTALL_SEMANTIC=1
 case "${LLM_CONTEXT_SKIP_SEMANTIC:-0}" in
@@ -152,6 +159,8 @@ fi
 mkdir -p "$INSTALL_DIR"
 cp "$TEMP_DIR/llm-context.jar" "$INSTALL_DIR/.llm-context.jar.new"
 mv -f "$INSTALL_DIR/.llm-context.jar.new" "$INSTALL_DIR/llm-context.jar"
+cp "$TEMP_DIR/USER-GUIDE.md" "$INSTALL_DIR/.USER-GUIDE.md.new"
+mv -f "$INSTALL_DIR/.USER-GUIDE.md.new" "$INSTALL_DIR/USER-GUIDE.md"
 
 cat >"$INSTALL_DIR/.llm-context.new" <<'LAUNCHER'
 #!/usr/bin/env sh
@@ -216,6 +225,7 @@ fi
 
 INSTALLED_VERSION=$("$INSTALL_DIR/llm-context" version)
 printf 'Installed llm-context %s at %s\n' "$INSTALLED_VERSION" "$INSTALL_DIR/llm-context"
+printf 'Installed user guide at %s\n' "$INSTALL_DIR/USER-GUIDE.md"
 if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
   printf 'Installed NextPlaid API %s and LateOn-Code at %s\n' \
     "$NEXT_PLAID_VERSION" "$MODEL_DIR"

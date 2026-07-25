@@ -63,6 +63,27 @@
                                   '[:find [?entity ...]
                                     :where [?entity :entity/type _]] [])))))))
 
+(deftest graph-format-metadata-gates-legacy-derived-state
+  (let [project (temp-project)
+        settings (config/defaults)
+        file (file-entity "src/legacy.clj" "(defn legacy [])")]
+    (store/with-store [graph project settings]
+      (is (= :empty (store/graph-state graph)))
+      (store/replace-file! graph file [])
+      (is (= :incompatible (store/graph-state graph)))
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo #"analyze --full"
+           (store/assert-query-compatible! graph)))
+      (store/write-graph-metadata!
+       graph {:analyzer-name "fixture"
+              :analyzer-version "1"
+              :janet-catalog-version "1.41.2"
+              :semantic-document-version 2
+              :semantic-index-name "llm-context-v2"})
+      (is (= :ready (store/graph-state graph)))
+      (is (= schema/graph-format-version
+             (:llm-context/graph-format (store/graph-metadata graph)))))))
+
 (deftest existing-symbols-are-backfilled-into-full-text-search
   (let [project (temp-project)
         file (file-entity "src/legacy.clj" "legacy")

@@ -45,15 +45,21 @@
     (is (.isAbsolute (:root context)))
     (is (= (.resolve (:root context) ".llm-context/db") (:db-dir context)))))
 
-(deftest analysis-does-not-delegate-to-the-resident-service
+(deftest analysis-delegates-to-the-resident-service-owner
   (let [root (Files/createTempDirectory
               "llm-context-local-analysis-"
               (make-array java.nio.file.attribute.FileAttribute 0))
-        context (assoc (project/context (str root)) :options {:quiet? true})]
+        context (assoc (project/context (str root)) :options {:quiet? true})
+        request (atom nil)]
     (with-redefs [service-client/request
-                  (fn [& _]
-                    (throw (ex-info "analysis contacted the service" {})))]
-      (is (zero? (cli/execute context "analyze" ["--full"]))))))
+                  (fn [_ payload options]
+                    (reset! request [payload options])
+                    {:ok true
+                     :value {:mode :full :files 0 :entities 0
+                             :diagnostics [] :semantic {:enabled? false}}})]
+      (is (zero? (cli/execute context "analyze" ["--full"])))
+      (is (= {:op :analyze :full? true} (first @request)))
+      (is (= 86400000 (:request-timeout (second @request)))))))
 
 (deftest semantic-status-remains-available-without-a-service
   (let [root (Files/createTempDirectory

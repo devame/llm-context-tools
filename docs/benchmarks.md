@@ -6,13 +6,13 @@ Run the repeatable in-process workload with:
 clojure -M:bench 50
 ```
 
-It measures a full structural index, an unchanged incremental scan, a
+It measures a full exact semantic graph, an unchanged incremental scan, a
 single-file incremental update, a Datalog statistics query, a bounded Markdown
 summary, and a bounded context query. Every non-root fixture function calls the
 root function, deliberately creating a high-degree graph. The benchmark fails
 if incremental analysis does not remain single-file or if context construction
-violates its token-derived symbol ceiling. SCIP is disabled so
-network/package-manager behavior does not pollute structural-index measurements.
+violates its token-derived symbol ceiling. The fixture consists only of
+Clojure namespaces with exact cross-namespace calls.
 
 Run at two sizes when reviewing graph-read changes:
 
@@ -71,7 +71,7 @@ after the Datalevin-first read rewrite:
 
 | High-fan-out workload | 50 files | 500 files |
 |---|---:|---:|
-| Full structural index | 1,524 ms | 4,039 ms |
+| Full semantic graph (historical pre-0.8 implementation) | 1,524 ms | 4,039 ms |
 | Unchanged incremental scan | 70 ms | 182 ms |
 | Single-file incremental update and affected-edge reconciliation | 210 ms | 455 ms |
 | In-process Datalog statistics query | 12 ms | 29 ms |
@@ -89,7 +89,7 @@ For historical comparison, the earlier disconnected fixture measured on
 | Workload | Result |
 |---|---:|
 | Cold `version` process, median of 3 | 1.88 s |
-| Full structural index, 20 JavaScript files | 1,354 ms |
+| Full legacy graph, 20 JavaScript files | 1,354 ms |
 | Unchanged incremental scan, 20 files | 272 ms |
 | Single-file incremental update | 296 ms |
 | In-process Datalog statistics query | 12 ms |

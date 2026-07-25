@@ -2,118 +2,72 @@
 
 ## Runtime shape
 
-The CLI resolves the project root and validated EDN configuration once. Full or
-incremental analysis discovers source files, parses supported files through the
-the focused language providers, converts analyzer evidence into canonical
-entities, classifies effects, and transacts file-owned facts into Datalevin.
-Relationship and context queries start from immutable Datalevin snapshots.
-
 ```text
-source files ──> focused analyzers ──> canonical facts/effects ──> Datalevin
-                                                               │
-                              ┌────────────────────────────────┤
-                              ├─> focused Datalog queries
-                              ├─> bounded context traversal
-                              ├─> semantic indexing jobs
-                              └─> explicit full exports/repairs
+Clojure files ─> embedded clj-kondo ─┐
+Janet files  ─> parser + resolver ───┼─> exact facts/references ─> Datalevin
+selected EDN ─> data facts ──────────┘                              │
+                         ┌───────────────────────────────────────────┤
+                         ├─> bounded Datalog queries and traversal
+                         ├─> durable LateOn indexing jobs
+                         └─> deterministic exports
 ```
 
-Three boundaries keep the implementation replaceable:
+Clj-kondo runs once over the explicit Clojure-family source set. It uses its
+own cache but no inferred build classpath, project command, or macro execution.
+Janet uses a two-pass analyzer: collect modules, definitions, imports, exports,
+and lexical scopes, then resolve uses against those facts and the pinned Janet
+1.41.2 catalog. Focused source readers inspect arguments only after an API has
+already been resolved, enabling re-frame and literal application-state topics.
 
-- `ParserProvider` converts language source into provider-neutral syntax data.
-- `SemanticIndexer` converts one file into canonical graph entities.
-- `GraphStore` owns validation, transactions, replacement, deletion, and
-  Datalog execution.
-- `graph.read` owns snapshot-consistent selection, joins, aggregates, and
-  bounded graph projections used across commands and background work.
+Analyzer adapters emit their final exact edges and classified references.
+There is no generic syntax-to-call index, global `by-name` promotion, or
+post-persistence relationship resolver.
 
-## Datalevin-first execution rules
+## Datalevin-first execution
 
-Datalevin is the graph execution engine, not merely the final persistence
-format:
+Datalevin is the graph execution engine, not a serialized backing file:
 
-- focused commands resolve an exact identity first, traverse only the requested
-  frontier, and pull records only after Datalevin has selected their IDs;
-- incremental analysis records changed file and symbol identities, asks
-  Datalevin for edges affected by those identities, and reconciles that set in
-  one batched transaction;
-- full analysis explicitly persists unresolved canonical edges before selecting
-  all edge IDs for database-backed resolution;
-- semantic reconciliation reads jobs, indexed state, and symbols by dirty file
-  or requested symbol; only an explicit full repair enumerates all files;
-- summaries use aggregates and database limits. Whole-graph exports and full
-  repair are named full operations and use one immutable snapshot.
+- query filters, joins, ordering, limits, and aggregates stay in Datalog;
+- callers and callees traverse only exact project edges;
+- references remain independently queryable but cannot become neighbours;
+- context selects each bounded frontier from one immutable snapshot and ranks
+  typed paths by cost and evidence;
+- file replacement, deletion, dirty marking, and semantic job transitions are
+  transactions;
+- only explicit export, full rebuild, and desired-state reconciliation
+  enumerate project-wide facts.
 
-Production code must not rebuild global `group-by` indexes from parser output,
-pull every symbol before applying a focus, or issue one scalar database query
-per edge. In-memory operations are limited to already-selected bounded
-candidates, deterministic formatting, and external embedding evidence.
+The resident project service owns one warm Datalevin connection. Clients use
+an owner-only Unix socket on Linux/macOS and authenticated loopback TCP on
+Windows. Analysis is delegated to the owner, and graph plus semantic mutations
+synchronize on that shared store, preventing competing writers. Requests use a
+bounded pool so overload is explicit.
 
-The optional service retains a warm JVM and one project Datalevin connection.
-It accepts sockets continuously and dispatches requests through a bounded
-executor, so a slow query does not block unrelated clients. Datalevin queries
-read immutable database values; graph and semantic-state mutations retain their
-single-writer coordination. Analysis deliberately runs in the invoking CLI
-process so stage and transaction progress remain observable. Once a service
-descriptor exists, connection failures and timeouts are explicit errors rather
-than permission to fall back to a second direct database connection.
+Full replacement retracts and asserts graph facts in batches of 100. A rebuild
+also resets obsolete semantic operational state, writes graph-format metadata,
+and queues documents for a versioned NextPlaid index.
 
-The control transport is an owner-only Unix-domain socket on Linux and macOS,
-which remains usable across network namespaces sharing the project filesystem.
-Windows uses authenticated loopback TCP. A process-held file lock defines
-service ownership independently of either transport and makes stale Unix socket
-cleanup safe after a crash.
+## Gains
 
-Full replacement sorts canonical entities by dependency layer (files, symbols,
-edges, effects), retracts the previous graph in bounded transactions, and then
-asserts the replacement in transactions of at most 100 records. This avoids
-Datalevin's pathological cost when resolving many forward temporary-ID
-references in one large transaction. The tradeoff is that a process interrupted
-during persistence can leave a partial graph; the recovery operation is another
-full analysis. The subsequent relationship resolution is persisted in batches
-of 1,000 edges. Each committed batch emits timestamped progress, so a large
-resolution run remains observable and an interruption leaves valid unresolved
-or partially reconciled edges that another full analysis can safely replace.
+- One Clojure data vocabulary spans analyzer snapshots, schema, transactions,
+  Datalog queries, jobs, packets, configuration, and exports.
+- Clj-kondo provides authoritative namespaces, aliases, vars, locals, macros,
+  protocols, and CLJC platform realms without another process.
+- Exact-edge invariants make reverse traversal and context paths trustworthy.
+- Typed event/state topics cross asynchronous ClojureScript boundaries.
+- Stable identities reduce semantic re-embedding after ordinary edits.
+- Embedded FTS remains fast and model-free when LateOn is absent.
 
-Context breadth is also bounded before record pulls. The token budget supplies
-a conservative symbol ceiling, and each Datalog neighbor query has a limit.
-This matters for hub symbols: token truncation after an unbounded traversal
-would still pay the cost of reading the whole connected component.
+## Costs
 
-## What Clojure and Datalevin gain
+- The focused product intentionally ignores non-Clojure/Janet source.
+- JDK 23+ and packaged Janet native grammar binaries are required.
+- Cold JVM startup is visible; the resident service adds lifecycle machinery.
+- Source-first clj-kondo analysis cannot know dependencies that require a
+  project build classpath, and macros are never executed.
+- Dynamic Clojure and Janet calls stay diagnostic instead of being guessed.
+- LateOn improves retrieval but adds local model disk, memory, and background
+  indexing cost.
 
-- Datalevin is called through its native Clojure API without a Node/JVM bridge.
-- The schema, facts, Datalog rules, configuration, context packets, and exports
-  share one immutable-data vocabulary.
-- File replacement and deletion are explicit transactions, including inbound
-  relationships owned by unchanged callers.
-- Recursive reachability and reverse graph questions are database queries, not
-  rebuilt in-memory JSON indexes.
-- Indexed derived attributes such as `:edge/target-name` turn changed symbol
-  identities into focused incremental edge queries.
-- Aggregates, anti-joins, full-text search, immutable snapshots, pull patterns,
-  and bounded ordered queries replace repeated whole-table scans.
-- REPL-oriented development makes extraction and query behavior independently
-  testable.
-- EDN keeps configuration expressive without adding executable configuration.
-
-## What the pivot costs
-
-- JTreeSitter requires JDK 23+, which is a higher runtime floor than the former
-  Node CLI.
-- Cold JVM startup is visible. Lazy command loading and the optional resident
-  service mitigate it but add operational choices.
-- The current npm tarball contains a roughly 50 MB uberjar and native grammar
-  libraries for multiple platforms.
-- Native grammar packaging must be tested for every supported OS/architecture;
-  the Janet grammar is pinned and cross-compiled into all supported packages.
-- The Clojure contributor pool is smaller than the JavaScript contributor pool.
-- Tree-sitter, Clojure, and Datalevin do not automatically provide compiler
-  symbol resolution. Unsupported semantics remain heuristic or unresolved.
-- TSX is detected but has no compatible packaged structural grammar in this
-  release. Janet is structurally analyzed, but—like other languages without a
-  compiler-backed provider—cross-file resolution remains explicitly heuristic
-  or unresolved.
-
-These costs are accepted because the project premise is a persistent semantic
-graph and query engine, not a transient JSON document generator.
+These constraints favor a smaller graph with defensible evidence over broad
+language coverage and noisy apparent connectivity.

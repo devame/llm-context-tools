@@ -1,52 +1,41 @@
 # Semantic graph model
 
-## Entities
+Graph format 2 separates navigable project facts from diagnostic observations.
 
-- Files have deterministic `file:` IDs, project-relative paths, language,
-  SHA-256 content hash, byte size, and modification time.
-- Symbols have deterministic `symbol:` IDs, names, qualified names, kind,
-  owning file, source range, and optional signature/documentation.
-- Edges are first-class entities with deterministic `edge:` IDs, kind, source
-  symbol, target text, optional resolved target, source evidence, resolution
-  state, and confidence.
-- Effects have deterministic `effect:` IDs, owning symbol, effect kind, source
-  evidence, detail, and confidence.
+## Canonical entities
 
-References are Datalevin refs internally and canonical string IDs at the domain
-and export boundaries.
+- Files identify project-relative supported sources and carry content and
+  semantic fingerprints.
+- Symbols use stable platform/file/qualified-name/kind identities. Moving a
+  normal definition or changing its signature does not change its ID.
+- Edges have an exact existing in-project symbol or topic target, resolution
+  `:resolution/exact`, confidence `1.0`, analyzer evidence, and a source range.
+- References record external, dynamic, ambiguous, or unresolved observations.
+  They have no graph target and cannot participate in traversal.
+- Topics identify literal events, subscriptions, effects, coeffects, and
+  application-state keys used by focused ClojureScript adapters.
+- Effects are derived only from resolved qualified APIs and retain evidence.
 
-Derived, indexed attributes are stored when they make a graph operation
-selective. For example, `:edge/target-name` is derived from target text so an
-incremental symbol change can locate potentially affected edges without loading
-every edge. These attributes are deterministic and resumably backfilled when an
-existing database is opened.
+CLJ and CLJS realms of the same CLJC definition have distinct platform-aware
+identities. Datalevin refs are used internally; canonical string IDs are used
+at command and export boundaries.
 
-## Ownership and replacement
+## Ownership and incremental replacement
 
-A file owns its symbols, effects, and edges whose `from` symbol belongs to the
-file. It does not own inbound edges from other files. When a target file changes
-or is deleted, those inbound edges are preserved, their stale `to` references
-are retracted, and graph-wide reconciliation determines whether the new symbol
-set makes them exact, heuristic, ambiguous, or unresolved.
+A file owns its symbols, outgoing edges, references, and effects. Topics are
+project-global and are pruned when no edge references them. Whole-project
+analyzers produce normalized facts grouped by owning file and a deterministic
+semantic fingerprint. An unchanged source file is replaced when another file
+changes its resolution result.
 
-This ownership rule is what makes incremental deletion semantically equivalent
-to a fresh full analysis.
+File replacement and its semantic dirty marker are one Datalevin transaction.
+Deletion retracts every owned fact and inbound exact edges atomically. Full and
+incremental analysis therefore converge without a global name heuristic or a
+post-persistence resolution pass.
 
-## Resolution
+## Compatibility
 
-Analyzer evidence establishes exact project targets. Weaker observations are
-diagnostic data and never justify selecting an arbitrary target merely to make
-the graph appear complete.
-
-Both full and incremental resolution operate on persisted facts. A full run
-selects all persisted edge identities explicitly. An incremental run selects
-only edges owned by changed files or whose indexed target identity intersects
-the old/new symbol names. Candidate symbols and source-point definitions are
-then selected by Datalog before a bounded decision set is transacted.
-
-## Schema evolution
-
-The database schema is colocated with the domain specifications in
-`src/llm_context/model/schema.clj`. Deterministic derived attributes have
-version markers and resumable backfills. There is no legacy JSONL importer;
-JSONL remains an export format rather than a persistence or migration path.
+Datalevin metadata records graph format, analyzer name/version, Janet catalog
+version, semantic document version, and versioned NextPlaid index name. Normal
+queries refuse an incompatible graph with an instruction to run
+`llm-context analyze --full`. The rebuild changes only generated project state.

@@ -19,10 +19,20 @@ fi
 
 command -v gh >/dev/null || { echo "gh is required" >&2; exit 1; }
 [[ -f "$DIST_DIR/llm-context.jar" ]] || { echo "missing $DIST_DIR/llm-context.jar" >&2; exit 1; }
+[[ -f "$DIST_DIR/USER-GUIDE.md" ]] || cp docs/user-guide.md "$DIST_DIR/USER-GUIDE.md"
+if [[ ! -f "$DIST_DIR/USER-GUIDE.md.sha256" ]]; then
+  if command -v sha256sum >/dev/null 2>&1; then
+    (cd "$DIST_DIR" && sha256sum USER-GUIDE.md > USER-GUIDE.md.sha256)
+  else
+    (cd "$DIST_DIR" && shasum -a 256 USER-GUIDE.md > USER-GUIDE.md.sha256)
+  fi
+fi
 
 assets=(
   "$DIST_DIR/llm-context.jar"
   "$DIST_DIR/llm-context.jar.sha256"
+  "$DIST_DIR/USER-GUIDE.md"
+  "$DIST_DIR/USER-GUIDE.md.sha256"
   "$DIST_DIR"/next-plaid-api-*
   install.sh
   install.ps1

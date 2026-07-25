@@ -8,9 +8,13 @@ $InstallDir = Join-Path $TestDir "bin"
 try {
     New-Item -ItemType Directory -Path $ReleaseDir, $InstallDir | Out-Null
     Copy-Item (Join-Path $ProjectDir "dist\llm-context.jar") $ReleaseDir
+    Copy-Item (Join-Path $ProjectDir "dist\USER-GUIDE.md") $ReleaseDir
     $ReleaseJar = Join-Path $ReleaseDir "llm-context.jar"
     $ReleaseHash = (Get-FileHash -Algorithm SHA256 $ReleaseJar).Hash.ToLowerInvariant()
     Set-Content -Encoding Ascii -Path (Join-Path $ReleaseDir "llm-context.jar.sha256") -Value "$ReleaseHash  llm-context.jar"
+    $ReleaseGuide = Join-Path $ReleaseDir "USER-GUIDE.md"
+    $GuideHash = (Get-FileHash -Algorithm SHA256 $ReleaseGuide).Hash.ToLowerInvariant()
+    Set-Content -Encoding Ascii -Path (Join-Path $ReleaseDir "USER-GUIDE.md.sha256") -Value "$GuideHash  USER-GUIDE.md"
 
     $env:LLM_CONTEXT_RELEASE_URL = ([uri]$ReleaseDir).AbsoluteUri.TrimEnd("/")
     $env:LLM_CONTEXT_INSTALL_DIR = $InstallDir
@@ -19,6 +23,9 @@ try {
 
     $Launcher = Join-Path $InstallDir "llm-context.cmd"
     if (-not (Test-Path $Launcher)) { throw "Launcher was not installed" }
+    if (-not (Test-Path (Join-Path $InstallDir "USER-GUIDE.md"))) {
+        throw "User guide was not installed"
+    }
     $ExpectedVersion = & java --enable-native-access=ALL-UNNAMED -jar (Join-Path $ProjectDir "dist\llm-context.jar") version
     $InstalledVersion = & $Launcher version
     if ($InstalledVersion -ne $ExpectedVersion) {

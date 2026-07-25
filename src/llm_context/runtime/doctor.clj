@@ -1,7 +1,13 @@
 (ns llm-context.runtime.doctor
   (:require [clojure.string :as str]
+            [clojure.java.io :as io]
+            [llm-context.analysis.clj-kondo :as clj-kondo]
+            [llm-context.analysis.janet :as janet]
             [llm-context.config :as config]
             [llm-context.graph.read :as graph-read]
+            [llm-context.model.schema :as schema]
+            [llm-context.parser.jtreesitter :as jtreesitter]
+            [llm-context.parser.provider :as parser]
             [llm-context.semantic.artifacts :as artifacts]
             [llm-context.semantic.reconcile :as semantic-reconcile]
             [llm-context.semantic.runtime :as semantic-runtime]
@@ -47,15 +53,48 @@
                         :required? true
                         :ok? (Files/isWritable ^Path (:root project))
                         :detail (:root-str project)}
+        graph-state (atom nil)
         datalevin-check (try
                           (store/with-store [graph project config]
-                            (graph-read/any-entity? (store/database graph)))
+                            (graph-read/any-entity? (store/database graph))
+                            (reset! graph-state (store/graph-state graph)))
                           {:check :datalevin :required? true :ok? true
                            :detail (str (.resolve ^Path (:root project)
                                                  (get-in config [:store :path])))}
                           (catch Throwable error
                             {:check :datalevin :required? true :ok? false
                              :detail (.getMessage error)}))
+        clj-kondo-check
+        {:check :clj-kondo :required? true :ok? true
+         :detail (str "embedded " clj-kondo/analyzer-version)}
+        janet-catalog-check
+        (let [resource (io/resource janet/catalog-resource)]
+          {:check :janet-catalog :required? true :ok? (some? resource)
+           :detail (if resource
+                     (str "Janet " janet/catalog-version)
+                     (str "missing " janet/catalog-resource))})
+        janet-grammar-check
+        (try
+          (with-open [provider (jtreesitter/open project)]
+            (parser/parse-source provider :language/janet "(def x 1)"))
+          {:check :janet-grammar :required? true :ok? true
+           :detail "packaged Tree-sitter Janet grammar"}
+          (catch Throwable error
+            {:check :janet-grammar :required? true :ok? false
+             :detail (.getMessage error)}))
+        graph-format-check
+        {:check :graph-format
+         :required? true
+         :ok? (not= :incompatible @graph-state)
+         :detail
+         (case @graph-state
+           :ready (str "format " schema/graph-format-version)
+           :empty (str "uninitialized; analyze --full creates format "
+                       schema/graph-format-version)
+           :incompatible
+           (str "incompatible; run llm-context analyze --full for format "
+                schema/graph-format-version)
+           "unavailable")}
         lateon-enabled? (semantic-reconcile/enabled? config)
         lateon-settings (get-in config [:semantic :lateon-code])
         executable (when lateon-enabled?
@@ -137,7 +176,8 @@
                 "; worker "
                 (name (or (:worker-status service-runtime) :unknown)))
            :else "running")}]
-    [java-check writable-check datalevin-check runtime-check
+    [java-check writable-check clj-kondo-check janet-catalog-check
+     janet-grammar-check datalevin-check graph-format-check runtime-check
      onnx-check model-check service-check]))
 
 (defn healthy? [checks]

@@ -19,7 +19,8 @@
    :document-hash hash
    :model-revision
    (get-in settings [:semantic :lateon-code :model-revision])
-   :document-version 1
+   :document-version
+   (get-in settings [:semantic :lateon-code :document-version])
    :chunk-count 2
    :updated-at 10})
 
@@ -32,7 +33,8 @@
     :llm_document_hash hash
     :llm_model_revision
     (get-in settings [:semantic :lateon-code :model-revision])
-    :llm_document_version 1
+    :llm_document_version
+    (get-in settings [:semantic :lateon-code :document-version])
     :llm_chunk_index chunk}})
 
 (deftest semantic-only-result-is-hydrated-from-the-graph

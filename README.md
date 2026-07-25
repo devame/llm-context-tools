@@ -19,22 +19,17 @@ makes reverse relationships, transitive reachability, ambiguity, and deletion
 correctness first-class instead of rebuilding ad-hoc JSON indexes for every
 question.
 
-Every relationship records a resolution state:
-
-- `exact` — supported by semantic evidence or an explicit canonical link;
-- `heuristic` — a unique structural name match;
-- `ambiguous` — multiple targets remain possible;
-- `unresolved` — no stored target is justified.
-
-Side effects likewise include evidence, source location, and confidence. The
-tool does not present naming guesses as compiler facts.
+Traversable relationships are exact in-project facts with analyzer evidence.
+External library calls, dynamic calls, ambiguous names, and unresolved names
+are stored separately as non-traversable references. Naming guesses can
+therefore never enter callers, callees, context traversal, or graph paths.
 
 ## Requirements
 
 - JDK 23 or newer. JDK 25 is used for development and release validation.
 - Clojure CLI 1.12+ when running from source.
 - The bundled LateOn runtime supports Linux x86-64, macOS Apple Silicon,
-  and Windows x86-64. Structural graph analysis works elsewhere.
+  and Windows x86-64. Exact graph analysis works elsewhere.
 
 ## Install
 
@@ -54,7 +49,7 @@ Both installers require Java 23 or newer and verify every downloaded release
 artifact. By default they install the jar, NextPlaid API 1.6.4, ONNX Runtime
 1.23.0, and the five files needed by the immutable INT8 LateOn-Code snapshot.
 The model download is about 154 MB. No Docker, Python, Rust, Datalevin server,
-or separate model manager is required.
+separate clj-kondo executable, Janet executable, or model manager is required.
 
 Executables are installed once per user (`~/.local/bin` on Unix and the local
 application-data Programs directory on Windows), and the immutable model is
@@ -62,12 +57,12 @@ cached once per user. Repository-derived data is not stored there: every
 project owns its graph and semantic index below its own `.llm-context/`
 directory. Open a new terminal after an installer changes `PATH`.
 
-Set `LLM_CONTEXT_VERSION=0.7.8` to pin a release or
+Set `LLM_CONTEXT_VERSION=0.8.0` to pin a release or
 `LLM_CONTEXT_INSTALL_DIR` to choose another destination. The installers are
 idempotent: running them again replaces the jar and launcher only after
 checksum validation and reuse a verified model snapshot. Set
 `LLM_CONTEXT_MODEL_CACHE` to relocate the model, or
-`LLM_CONTEXT_SKIP_SEMANTIC=1` for a structural-only installation.
+`LLM_CONTEXT_SKIP_SEMANTIC=1` for a graph-only installation.
 
 Re-run the installer to update, or remove the installed directory to uninstall.
 
@@ -104,7 +99,7 @@ around the same jar:
 
 ```bash
 npm pack
-npm install --global ./llm-context-0.7.8.tgz
+npm install --global ./llm-context-0.8.0.tgz
 llm-context doctor
 ```
 
@@ -120,19 +115,24 @@ llm-context doctor
 llm-context analyze [--full]
 llm-context query stats
 llm-context query find-symbol <name-or-id>
-llm-context query search <natural-language-query>
+llm-context query search <natural-language-query> [--explain]
 llm-context query callers <symbol-id>
-llm-context query callees <symbol-id>
+llm-context query callees <symbol-id> [--include-external]
 llm-context query trace <symbol-id>
 llm-context query entry-points
 llm-context query effects
-llm-context query unresolved
+llm-context query unresolved [--classification unresolved|ambiguous|dynamic|external]
+llm-context query topics|registrations|dispatchers|subscribers
+llm-context query state-readers|state-writers
 llm-context context <name-or-id> [--depth N] [--max-tokens N]
 llm-context export --format edn|json|jsonl|markdown [--output PATH]
 llm-context summary [--output PATH]
 llm-context integrate claude|codex|generic [--force]
 llm-context semantic status
 llm-context semantic sync [--wait]
+llm-context semantic failures
+llm-context semantic dirty
+llm-context semantic retry --failed [--wait]
 llm-context service start|status|stop
 ```
 
@@ -143,16 +143,14 @@ LateOn multi-vector index. It preserves exact identifiers, rejects semantic
 candidates whose content hash or model revision is stale, and falls back to
 Datalevin whenever the sidecar is unavailable.
 
-`analyze` runs a full scan when no graph exists and content-hash incremental
-analysis afterward. Incremental updates parse only changed files, cascade
-deleted files, preserve inbound evidence from unchanged callers, and reconcile
-all edge targets against the new symbol set. The default scan covers the whole
-confirmed project root. In Git repositories it uses tracked plus non-ignored
-files; elsewhere it prunes the configured generated/cache directories during
-the filesystem walk. Full analysis reports each stage and persists the rebuilt
-graph in dependency order using transactions of at most 100 records. If a full
-analysis is interrupted during persistence, rerun `analyze --full` to clear and
-rebuild the partial graph.
+`analyze` runs embedded clj-kondo once over the complete Clojure source set and
+a two-pass lexical/module resolver over Janet. It never invokes Clojure,
+Leiningen, shadow-cljs, Janet, project build tools, or project macros. Per-file
+semantic fingerprints make subsequent runs incremental while still updating
+unchanged callers when cross-file resolution changes. The default scan covers
+the whole confirmed project root and silently ignores unsupported extensions.
+Full analysis reports timestamped stages and persists in transactions of at
+most 100 records.
 
 ## Configuration
 
@@ -187,7 +185,7 @@ rebuild the partial graph.
            :trace-depth 4}}
 ```
 
-Set `:providers []` for a structural-only installation. There is intentionally
+Set `:providers []` for a graph-only installation. There is intentionally
 no JSON configuration or persisted-data migration layer in this greenfield
 release.
 
@@ -205,8 +203,10 @@ source of truth. The disposable LateOn index lives under
 `.llm-context/semantic/next-plaid/`. JSONL, JSON, EDN, and Markdown are
 deterministic projections for interoperability, debugging, and artifacts.
 
-Because this is a greenfield release, delete `.llm-context/` and analyze again
-after an incompatible pre-release schema change.
+Release `0.8.0` introduces graph format 2. Existing generated graphs must be
+rebuilt once with `llm-context analyze --full`; source and configuration files
+are never changed. Normal queries detect older state and print this instruction
+instead of opening it as if it were current.
 
 ## Resident service
 
@@ -218,7 +218,7 @@ llm-context service start
 ```
 
 The coordinator watches included source trees, debounces changes, runs the same
-content-hash analyzer as the CLI, drains durable LateOn jobs in the background,
+semantic-fingerprint analyzer as the CLI, drains durable LateOn jobs in the background,
 and supervises a loopback-only NextPlaid child. Query, context, and export
 commands automatically use the warm service. A random token in the ignored
 `.llm-context/service.edn` descriptor authenticates local requests. Structural

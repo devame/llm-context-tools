@@ -57,14 +57,23 @@ function Test-FileHash([string]$Path, [string]$Expected) {
 try {
     $JarDownload = Join-Path $TempDir "llm-context.jar"
     $ChecksumDownload = Join-Path $TempDir "llm-context.jar.sha256"
+    $GuideDownload = Join-Path $TempDir "USER-GUIDE.md"
+    $GuideChecksumDownload = Join-Path $TempDir "USER-GUIDE.md.sha256"
     Write-Host "Downloading llm-context $Version..."
     Receive-File "$ReleaseUrl/llm-context.jar" $JarDownload
     Receive-File "$ReleaseUrl/llm-context.jar.sha256" $ChecksumDownload
+    Receive-File "$ReleaseUrl/USER-GUIDE.md" $GuideDownload
+    Receive-File "$ReleaseUrl/USER-GUIDE.md.sha256" $GuideChecksumDownload
 
     $ExpectedHash = ((Get-Content -Raw $ChecksumDownload).Trim() -split '\s+')[0].ToLowerInvariant()
     $ActualHash = (Get-FileHash -Algorithm SHA256 $JarDownload).Hash.ToLowerInvariant()
     if (-not $ExpectedHash -or $ExpectedHash -ne $ActualHash) {
         throw "Release checksum verification failed"
+    }
+    $ExpectedGuideHash = ((Get-Content -Raw $GuideChecksumDownload).Trim() -split '\s+')[0].ToLowerInvariant()
+    $ActualGuideHash = (Get-FileHash -Algorithm SHA256 $GuideDownload).Hash.ToLowerInvariant()
+    if (-not $ExpectedGuideHash -or $ExpectedGuideHash -ne $ActualGuideHash) {
+        throw "User guide checksum verification failed"
     }
 
     $InstallSemantic = $env:LLM_CONTEXT_SKIP_SEMANTIC -notmatch '^(1|true|yes)$'
@@ -134,6 +143,7 @@ try {
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
     $InstalledJar = Join-Path $InstallDir "llm-context.jar"
     Move-Item -Force $JarDownload $InstalledJar
+    Move-Item -Force $GuideDownload (Join-Path $InstallDir "USER-GUIDE.md")
 
     $Launcher = Join-Path $InstallDir "llm-context.cmd"
     $LauncherBody = "@echo off`r`nset `"LLM_CONTEXT_INSTALL_DIR=%~dp0`"`r`njava --enable-native-access=ALL-UNNAMED -jar `"%~dp0llm-context.jar`" %*`r`n"
@@ -192,6 +202,7 @@ try {
         throw "Installed launcher failed its version check"
     }
     Write-Host "Installed llm-context $InstalledVersion at $Launcher"
+    Write-Host "Installed user guide at $(Join-Path $InstallDir 'USER-GUIDE.md')"
     if ($InstallSemantic) {
         Write-Host "Installed NextPlaid API $NextPlaidVersion and LateOn-Code at $ModelDir"
     }

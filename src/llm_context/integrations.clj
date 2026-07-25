@@ -2,7 +2,7 @@
   (:import [java.nio.file FileAlreadyExistsException Files OpenOption Path StandardOpenOption]))
 
 (def guidance
-  "# Using llm-context\n\nUse the persistent semantic graph before broad source exploration.\n\n1. Run `llm-context analyze` after source changes.\n2. Find symbols with `llm-context query find-symbol <name>`.\n3. Inspect callers, callees, effects, and unresolved links with `llm-context query`.\n4. Prefer `llm-context context <symbol>` for a bounded task packet.\n5. Read the referenced source locations when implementation detail is needed.\n\nDatalevin under `.llm-context/db/` is authoritative. JSONL, JSON, EDN, and Markdown are exports only. Resolution states and effect confidence are evidence quality indicators, not guarantees.\n")
+  "# Using llm-context\n\nUse the persistent semantic graph before broad source exploration.\n\n1. Run `llm-context analyze` after supported Clojure, ClojureScript, CLJC, Janet, or selected EDN changes.\n2. Find symbols with `llm-context query find-symbol <name>` or `query search <intent> --explain`.\n3. Inspect exact callers/callees and typed event/state topics with `llm-context query`.\n4. Inspect external, dynamic, ambiguous, and unresolved observations explicitly with `query unresolved`.\n5. Prefer `llm-context context <symbol>` for a bounded packet with selected path evidence.\n6. Read referenced source locations when implementation detail is needed.\n\nDatalevin under `.llm-context/db/` is authoritative. Traversable edges are exact in-project facts; diagnostic references never enter traversal. Unsupported languages are intentionally ignored. JSONL, JSON, EDN, and Markdown are exports only.\n")
 
 (def targets
   {:claude ".claude/skills/llm-context/SKILL.md"

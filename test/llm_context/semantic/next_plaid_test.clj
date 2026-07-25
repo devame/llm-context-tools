@@ -25,7 +25,7 @@
 (def ready-health
   {:status "healthy"
    :version "1.6.4"
-   :indices [{:name "llm-context" :num_documents 10}]
+   :indices [{:name (:index-name settings) :num_documents 10}]
    :updates []
    :model {:name "lightonai/LateOn-Code"
            :path (str "/models/snapshots/" (:model-revision settings))
@@ -37,7 +37,7 @@
    :file-id "file:src/a.clj"
    :document-hash "sha256:document"
    :model-revision (:model-revision settings)
-   :document-version 1
+   :document-version (:document-version settings)
    :chunk-index 0
    :chunk-count 1
    :text "Name: a\n\nSource:\n(defn a [] 1)"})
@@ -71,9 +71,9 @@
         client (scripted-client
                 (atom [(response 404 {:code "INDEX_NOT_FOUND"
                                       :message "missing"})
-                       (response 201 {:name "llm-context"})])
+                       (response 201 {:name (:index-name settings)})])
                 requests)]
-    (is (= "llm-context" (:name (index/ensure-index! client))))
+    (is (= (:index-name settings) (:name (index/ensure-index! client))))
     (let [create-request (second @requests)]
       (is (= :post (:method create-request)))
       (is (= 0 (get-in create-request
@@ -83,9 +83,9 @@
 (deftest ensure-index-recognizes-index-list-response
   (let [requests (atom [])
         client (scripted-client
-                (atom [(response 200 ["llm-context"])])
+                (atom [(response 200 [(:index-name settings)])])
                 requests)]
-    (is (= {:name "llm-context"}
+    (is (= {:name (:index-name settings)}
            (index/ensure-index! client)))
     (is (= 1 (count @requests)))
     (is (= "/indices" (:path (first @requests))))))

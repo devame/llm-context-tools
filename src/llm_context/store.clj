@@ -190,6 +190,80 @@
                      [{:llm-context/meta-key "search-index"
                        :llm-context/search-schema-version 1}])))))
 
+(def graph-metadata-key "analysis-format")
+
+(defn graph-metadata
+  "Return the persisted analyzer/graph compatibility contract, or nil before
+  the first format-aware full analysis."
+  [store]
+  (d/q '[:find (pull ?meta [*]) .
+         :in $ ?key
+         :where [?meta :llm-context/meta-key ?key]]
+       (database store) graph-metadata-key))
+
+(defn graph-state
+  "Classify generated graph state without preventing a full rebuild from
+  opening an older database."
+  [store]
+  (let [db (database store)
+        files? (boolean
+                (d/q '[:find ?file .
+                       :where [?file :file/id _]]
+                     db))
+        metadata (graph-metadata store)]
+    (cond
+      (not files?) :empty
+      (= schema/graph-format-version
+         (:llm-context/graph-format metadata)) :ready
+      :else :incompatible)))
+
+(defn assert-query-compatible!
+  "Refuse graph reads when derived state predates the current evidence
+  contract. Full analysis intentionally does not call this function."
+  [store]
+  (when (= :incompatible (graph-state store))
+    (throw
+     (ex-info
+      (str "This project graph uses an incompatible format. "
+           "Run `llm-context analyze --full` from the project root to rebuild it.")
+      {:exit-code 2
+       :type :graph/rebuild-required
+       :required-format schema/graph-format-version
+       :metadata (graph-metadata store)})))
+  store)
+
+(defn write-graph-metadata!
+  [store {:keys [analyzer-name analyzer-version janet-catalog-version
+                 semantic-document-version semantic-index-name]}]
+  (d/transact!
+   (:connection store)
+   [{:llm-context/meta-key graph-metadata-key
+     :llm-context/graph-format schema/graph-format-version
+     :llm-context/analyzer-name analyzer-name
+     :llm-context/analyzer-version analyzer-version
+     :llm-context/janet-catalog-version janet-catalog-version
+     :llm-context/semantic-document-version semantic-document-version
+     :llm-context/semantic-index-name semantic-index-name}]))
+
+(defn reset-semantic-state!
+  "Remove queue, indexed-record, dirty-marker, and watermark entities before
+  rebuilding a versioned semantic index. Canonical graph facts are untouched."
+  [store]
+  (let [semantic-eids
+        (->> (d/q '[:find ?entity ?attribute
+                    :where [?entity ?attribute _]]
+                  (database store))
+             (keep (fn [[entity attribute]]
+                     (when (str/starts-with? (or (namespace attribute) "")
+                                             "semantic")
+                       entity)))
+             distinct
+             vec)]
+    (doseq [batch (partition-all 100 semantic-eids)]
+      (d/transact! (:connection store)
+                   (mapv (fn [eid] [:db/retractEntity eid]) batch)))
+    (count semantic-eids)))
+
 (defn- file-retraction-plan [db file-id]
   (let [symbols (d/q '[:find [?symbol ...]
                        :in $ ?file-id
