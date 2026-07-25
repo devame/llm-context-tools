@@ -71,10 +71,9 @@
                                         [?symbol :symbol/kind :symbol.kind/function]]
                                []))))
       (is (some #{"./names"}
-                (store/query
-                 graph
-                 '[:find [?target ...]
-                   :where
-                   [?reference :reference/kind :edge.kind/imports]
-                   [?reference :reference/target-text ?target]]
-                 []))))))
+                (store/query graph
+                             '[:find [?target ...]
+                               :where
+                               [?edge :edge/kind :edge.kind/imports]
+                               [?edge :edge/target-text ?target]]
+                             []))))))

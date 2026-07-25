@@ -1,0 +1,40 @@
+{:version "1.41.2"
+ :source "https://janet-lang.org/1.41.2/api/index.html"
+ :special-forms
+ #{"break" "do" "fn" "if" "quasiquote" "quote" "set" "splice"
+   "unquote" "upscope" "while"}
+ :binding-forms
+ #{"let" "letn" "var" "with" "each" "eachk" "loop" "for" "forever"}
+ :definition-forms
+ {"def" :variable
+  "def-" :variable
+  "defglobal" :variable
+  "defdyn" :variable
+  "var" :variable
+  "var-" :variable
+  "varglobal" :variable
+  "defn" :function
+  "defn-" :function
+  "varfn" :function
+  "defmacro" :macro
+  "defmacro-" :macro}
+ :core
+ #{"+" "-" "*" "/" "%" "=" "not=" "<" "<=" ">" ">=" "compare"
+   "and" "or" "not" "nil?" "boolean?" "number?" "string?" "symbol?"
+   "keyword?" "tuple?" "array?" "table?" "struct?" "function?"
+   "fiber?" "buffer?" "abstract?" "type" "length" "empty?" "get" "put"
+   "in" "get-in" "put-in" "update" "merge" "keys" "values" "pairs"
+   "map" "mapcat" "filter" "reduce" "each" "eachk" "loop" "for"
+   "range" "slice" "first" "last" "next" "nextk" "find" "index-of"
+   "string" "string/format" "string/join" "string/split"
+   "string/ascii-lower" "string/ascii-upper" "string/has-prefix?"
+   "string/has-suffix?" "buffer/new" "array/new" "table/new"
+   "struct" "tuple" "array" "table" "setdyn" "dyn" "apply" "curry"
+   "comp" "juxt" "identity" "constantly" "memoize" "error" "try"
+   "resume" "cancel" "yield" "fiber/new" "fiber/status" "fiber/current"
+   "print" "printf" "prin" "prinf" "pp" "eprint" "eprintf"
+   "slurp" "spit" "file/open" "file/read" "file/write" "file/close"
+   "file/popen" "os/spawn" "os/execute" "os/getenv" "os/setenv"
+   "os/cwd" "os/dir" "os/stat" "os/mkdir" "os/remove" "os/rename"
+   "net/connect" "net/listen" "net/accept" "net/read" "net/write"
+   "parse" "compile" "eval" "require" "import" "use" "module/find"}}

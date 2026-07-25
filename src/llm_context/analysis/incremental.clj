@@ -30,7 +30,9 @@
         existing (graph-read/files-by-path (store/database graph))
         snapshot (project-analyzer/analyze project files)
         outputs (:outputs snapshot)
-        changed (filterv #(changed-output? existing %) outputs)
+        changed (filterv #(and (not (:preserve? %))
+                               (changed-output? existing %))
+                         outputs)
         deleted (->> (keys existing) (remove scanned) sort vec)]
     (doseq [path deleted]
       (let [file-id (get-in existing [path :id])]

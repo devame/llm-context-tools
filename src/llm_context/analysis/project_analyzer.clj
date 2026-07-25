@@ -2,11 +2,8 @@
   "Coordinate authoritative whole-project analyzer snapshots."
   (:require [llm-context.analysis.clj-kondo :as clj-kondo]
             [llm-context.analysis.clojure :as clojure-analysis]
-            [llm-context.analysis.effects :as effects]
-            [llm-context.analysis.structural :as structural]
-            [llm-context.indexer :as indexer]
-            [llm-context.model.ids :as ids]
-            [llm-context.parser.jtreesitter :as jtreesitter]))
+            [llm-context.analysis.janet :as janet]
+            [llm-context.model.ids :as ids]))
 
 (defn- edn-output
   [{:keys [relative-path language content size modified-at]}]
@@ -19,11 +16,6 @@
           :file/modified-at modified-at}
    :entities []
    :diagnostics []})
-
-(defn- enrich-janet-effects [{:keys [file entities] :as output}]
-  (let [edges (filter :edge/id entities)]
-    (update output :entities into
-            (effects/analyze (:file/language file) edges))))
 
 (defn semantic-fingerprint [{:keys [entities]}]
   (ids/content-hash
@@ -46,14 +38,8 @@
         janet-files (filterv #(= :language/janet (:language %)) files)
         edn-files (filterv #(= :language/edn-data (:language %)) files)
         clojure-snapshot (clj-kondo/analyze! project clojure-files)
-        janet-outputs
-        (if (seq janet-files)
-          (with-open [parser (jtreesitter/open project)]
-            (let [analyzer (structural/create parser)]
-              (mapv #(-> (indexer/index-file analyzer %)
-                         enrich-janet-effects)
-                    janet-files)))
-          [])
+        janet-snapshot (janet/analyze project janet-files)
+        janet-outputs (:outputs janet-snapshot)
         outputs
         (concat
          (clojure-analysis/materialize clojure-files clojure-snapshot)
@@ -66,5 +52,7 @@
      :analyzers
      {:clj-kondo {:version (:analyzer-version clojure-snapshot)
                   :configuration-fingerprint
-                  (:configuration-fingerprint clojure-snapshot)}}
-     :diagnostics (:diagnostics clojure-snapshot)}))
+                  (:configuration-fingerprint clojure-snapshot)}
+      :janet {:catalog-version (:catalog-version janet-snapshot)}}
+     :diagnostics (vec (concat (:diagnostics clojure-snapshot)
+                               (:diagnostics janet-snapshot)))}))
