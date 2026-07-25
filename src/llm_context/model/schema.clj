@@ -124,6 +124,23 @@
     (assoc entity :symbol/search-text (symbol-search-text entity))
     entity))
 
+(defn edge-target-name
+  "Normalize a syntactic edge target to the identifier used for structural
+  candidate lookup."
+  [target]
+  (-> target
+      str/trim
+      (str/replace #"^[`'\"]|[`'\"]$" "")
+      (str/replace #"\(.*$" "")
+      (str/split #"[./]")
+      last))
+
+(defn with-derived-attributes [entity]
+  (cond-> (with-symbol-search-text entity)
+    (and (= :entity.type/edge (:entity/type entity))
+         (:edge/target-text entity))
+    (assoc :edge/target-name (edge-target-name (:edge/target-text entity)))))
+
 (def datalevin-schema
   {:llm-context/meta-key {:db/valueType :db.type/string
                           :db/unique :db.unique/identity}
@@ -230,6 +247,8 @@
    :edge/to {:db/valueType :db.type/ref
              :db/index true}
    :edge/target-text {:db/valueType :db.type/string
+                      :db/index true}
+   :edge/target-name {:db/valueType :db.type/string
                       :db/index true}
    :edge/resolution {:db/valueType :db.type/keyword
                      :db/index true}

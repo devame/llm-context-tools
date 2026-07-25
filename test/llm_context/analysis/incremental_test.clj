@@ -38,3 +38,39 @@
     (store/with-store [graph project settings]
       (is (empty? (store/query graph
                                '[:find [?id ...] :where [_ :file/id ?id]] []))))))
+
+(deftest incremental-resolution-touches-edges-affected-by-symbol-names
+  (let [root (Files/createTempDirectory
+              "llm-context-incremental-resolution-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        src (.resolve root "src")
+        caller (.resolve src "caller.js")
+        first-target (.resolve src "first.js")
+        duplicate (.resolve src "duplicate.js")
+        project (project/context (str root))
+        settings (assoc-in (config/defaults) [:semantic :providers] [])
+        resolution
+        (fn []
+          (store/with-store [graph project settings]
+            (ffirst
+             (store/query
+              graph
+              '[:find ?resolution
+                :where
+                [?edge :edge/target-text "target"]
+                [?edge :edge/resolution ?resolution]]
+              []))))]
+    (Files/createDirectories src
+                             (make-array java.nio.file.attribute.FileAttribute 0))
+    (spit (str caller) "export function caller() { return target(); }")
+    (spit (str first-target) "export function target() { return 1; }")
+    (full/analyze! project settings)
+    (is (= :resolution/heuristic (resolution)))
+
+    (spit (str duplicate) "export function target() { return 2; }")
+    (incremental/analyze! project settings)
+    (is (= :resolution/ambiguous (resolution)))
+
+    (Files/delete duplicate)
+    (incremental/analyze! project settings)
+    (is (= :resolution/heuristic (resolution)))))

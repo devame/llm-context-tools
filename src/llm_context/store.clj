@@ -78,7 +78,7 @@
   after retractEntity rather than reused in the same transaction."
   [db entities force-new]
   (let [entities (->> entities
-                      (map schema/with-symbol-search-text)
+                      (map schema/with-derived-attributes)
                       dependency-order
                       vec)
         _ (validate-identities! entities)
@@ -140,6 +140,32 @@
         (d/transact! connection
                      [{:llm-context/meta-key "search-index"
                        :llm-context/search-schema-version 1}])))))
+
+(defn- backfill-edge-target-names! [connection]
+  (let [db (d/db connection)
+        current-version
+        (d/q '[:find ?version .
+               :where [?meta :llm-context/meta-key "edge-target-name"]
+                      [?meta :llm-context/search-schema-version ?version]]
+             db)]
+    (when-not (= 1 current-version)
+      (let [missing
+            (d/q '[:find ?edge ?target
+                   :where
+                   [?edge :edge/target-text ?target]
+                   [(missing? $ ?edge :edge/target-name)]]
+                 db)]
+        (doseq [batch (partition-all 100 missing)]
+          (d/transact!
+           connection
+           (mapv (fn [[edge target]]
+                   {:db/id edge
+                    :edge/target-name (schema/edge-target-name target)})
+                 batch)))
+        (d/transact!
+         connection
+         [{:llm-context/meta-key "edge-target-name"
+           :llm-context/search-schema-version 1}])))))
 
 (defn- file-retraction-plan [db file-id]
   (let [symbols (d/q '[:find [?symbol ...]
@@ -328,6 +354,7 @@
     (let [connection (d/get-conn (str path) schema/datalevin-schema)]
       (try
         (backfill-symbol-search-text! connection)
+        (backfill-edge-target-names! connection)
         (->DatalevinStore connection path)
         (catch Throwable error
           (d/close connection)

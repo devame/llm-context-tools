@@ -4,7 +4,9 @@
   Functions in this namespace accept an immutable Datalevin database value.
   Selection, joins, aggregation, and graph-neighborhood discovery stay in
   Datalevin; callers receive only bounded domain records."
-  (:require [datalevin.core :as d]))
+  (:require [clojure.set :as set]
+            [datalevin.core :as d]
+            [llm-context.model.schema :as schema]))
 
 (defn entity-counts [db]
   (into {}
@@ -342,3 +344,158 @@
           [?record :semantic.indexed/provider ?provider]
           [?record :semantic.indexed/file-id ?file-id]]
         db provider)))
+
+(defn symbol-identities-for-files [db file-ids]
+  (if-not (seq file-ids)
+    []
+    (->> (d/q '[:find ?id ?name ?qualified ?file-id
+                :in $ ?files
+                :where
+                [?file :file/id ?file-id]
+                [(contains? ?files ?file-id)]
+                [?symbol :symbol/file ?file]
+                [?symbol :symbol/id ?id]
+                [?symbol :symbol/name ?name]
+                [?symbol :symbol/qualified-name ?qualified]]
+              db (set file-ids))
+         (map (fn [[id name qualified file-id]]
+                {:symbol-id id :name name :qualified-name qualified
+                 :file-id file-id}))
+         vec)))
+
+(defn affected-edge-ids
+  "Find edges whose owner or structural candidate set can change."
+  [db file-ids names qualified-names]
+  (let [files (set file-ids)
+        names (set names)
+        qualified (set qualified-names)
+        owned
+        (when (seq files)
+          (d/q '[:find [?id ...]
+                 :in $ ?files
+                 :where
+                 [?edge :edge/id ?id]
+                 [?edge :edge/from ?from]
+                 [?from :symbol/file ?file]
+                 [?file :file/id ?file-id]
+                 [(contains? ?files ?file-id)]]
+               db files))
+        by-name
+        (when (seq names)
+          (d/q '[:find [?id ...]
+                 :in $ ?names
+                 :where
+                 [?edge :edge/id ?id]
+                 [?edge :edge/target-name ?target]
+                 [(contains? ?names ?target)]]
+               db names))
+        by-qualified
+        (when (seq qualified)
+          (d/q '[:find [?id ...]
+                 :in $ ?qualified
+                 :where
+                 [?edge :edge/id ?id]
+                 [?edge :edge/target-text ?target]
+                 [(contains? ?qualified ?target)]]
+               db qualified))]
+    (into (sorted-set) (concat owned by-name by-qualified))))
+
+(defn edge-resolution-inputs [db edge-ids]
+  (if-not (seq edge-ids)
+    []
+    (let [ids (set edge-ids)
+          current-targets
+          (into {}
+                (d/q '[:find ?edge-id ?target-id
+                       :in $ ?ids
+                       :where
+                       [?edge :edge/id ?edge-id]
+                       [(contains? ?ids ?edge-id)]
+                       [?edge :edge/to ?target]
+                       [?target :symbol/id ?target-id]]
+                     db ids))]
+      (->> (d/q '[:find ?id ?kind ?target ?resolution ?confidence
+                         ?path ?sl ?sc ?el ?ec
+                  :in $ ?ids
+                  :where
+                  [?edge :edge/id ?id]
+                  [(contains? ?ids ?id)]
+                  [?edge :edge/kind ?kind]
+                  [?edge :edge/target-text ?target]
+                  [?edge :edge/resolution ?resolution]
+                  [?edge :edge/confidence ?confidence]
+                  [?edge :edge/from ?from]
+                  [?from :symbol/file ?file]
+                  [?file :file/path ?path]
+                  [?edge :source/start-line ?sl]
+                  [?edge :source/start-column ?sc]
+                  [?edge :source/end-line ?el]
+                  [?edge :source/end-column ?ec]]
+                db ids)
+           (map (fn [[id kind target resolution confidence path sl sc el ec]]
+                  {:edge-id id :kind kind :target-text target
+                   :resolution resolution :confidence confidence
+                   :current-target (get current-targets id)
+                   :file-path path
+                   :source/start-line sl :source/start-column sc
+                   :source/end-line el :source/end-column ec}))
+           (sort-by :edge-id)
+           vec))))
+
+(defn resolution-candidate-symbols [db edges]
+  (let [names (set (map #(schema/edge-target-name
+                          (:target-text %))
+                        edges))
+        qualified (set (map :target-text edges))
+        current (set (keep :current-target edges))
+        ids
+        (into current
+              (concat
+               (when (seq names)
+                 (d/q '[:find [?id ...]
+                        :in $ ?names
+                        :where
+                        [?symbol :symbol/name ?name]
+                        [(contains? ?names ?name)]
+                        [?symbol :symbol/id ?id]]
+                      db names))
+               (when (seq qualified)
+                 (d/q '[:find [?id ...]
+                        :in $ ?qualified
+                        :where
+                        [?symbol :symbol/qualified-name ?name]
+                        [(contains? ?qualified ?name)]
+                        [?symbol :symbol/id ?id]]
+                      db qualified))))]
+    (->> (symbols-by-ids db ids)
+         vals
+         (map #(select-keys % [:id :name :qualified-name]))
+         (map #(set/rename-keys % {:id :symbol-id}))
+         vec)))
+
+(defn symbol-at-point [db file-path line column]
+  (->> (d/q '[:find ?id ?name ?qualified ?sl ?sc ?el ?ec
+              :in $ ?path ?line ?column
+              :where
+              [?file :file/path ?path]
+              [?symbol :symbol/file ?file]
+              [?symbol :symbol/id ?id]
+              [?symbol :symbol/name ?name]
+              [?symbol :symbol/qualified-name ?qualified]
+              [?symbol :source/start-line ?sl]
+              [?symbol :source/start-column ?sc]
+              [?symbol :source/end-line ?el]
+              [?symbol :source/end-column ?ec]
+              [(<= ?sl ?line)]
+              [(>= ?el ?line)]]
+            db file-path line column)
+       (filter (fn [[_ _ _ sl sc el ec]]
+                 (and (not (neg? (compare [line column] [sl sc])))
+                      (not (pos? (compare [line column] [el ec]))))))
+       (sort-by (fn [[_ _ _ sl _ el _]]
+                  (- (* 1000000 el) sl)))
+       first
+       ((fn [row]
+          (when row
+            (let [[id name qualified] row]
+              {:symbol-id id :name name :qualified-name qualified}))))))
