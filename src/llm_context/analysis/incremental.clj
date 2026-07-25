@@ -48,6 +48,7 @@
          [(semantic-reconcile/dirty-entity
            (:file/id file) (:file/content-hash file) :upsert)])
         (store/replace-file! graph file entities)))
+    (store/prune-orphan-topics! graph)
     (let [semantic-plan
           (semantic-reconcile/reconcile! graph project config)]
       {:mode :incremental

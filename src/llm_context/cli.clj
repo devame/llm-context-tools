@@ -200,20 +200,23 @@
 (defn- execute-query [graph semantic-client settings subcommand args]
   (case subcommand
     "stats" ((resolve-fn 'llm-context.query/stats) graph)
-    "find-symbol" ((resolve-fn 'llm-context.query/symbols)
+    "find-symbol" ((resolve-fn 'llm-context.query/find-symbol)
                    graph (require-argument subcommand args))
     "search" ((resolve-fn 'llm-context.query/search)
               graph semantic-client settings
               (require-argument subcommand args))
     "callers" ((resolve-fn 'llm-context.query/callers)
                graph (require-argument subcommand args))
-    "callees" ((resolve-fn 'llm-context.query/callees)
-               graph (require-argument subcommand args))
+    "callees" ((resolve-fn 'llm-context.query/callees-command) graph args)
     "trace" ((resolve-fn 'llm-context.query/transitive-callees)
              graph (require-argument subcommand args))
     "entry-points" ((resolve-fn 'llm-context.query/entry-points) graph)
     "effects" ((resolve-fn 'llm-context.query/effects) graph)
-    "unresolved" ((resolve-fn 'llm-context.query/unresolved) graph)
+    "unresolved" ((resolve-fn 'llm-context.query/unresolved-command)
+                  graph args)
+    ("topics" "registrations" "dispatchers" "subscribers"
+     "state-readers" "state-writers")
+    ((resolve-fn 'llm-context.query/topics-command) graph subcommand args)
     (throw (ex-info (str "Unknown query: " subcommand) {:exit-code 2}))))
 
 (defmethod execute "query" [context _ args]

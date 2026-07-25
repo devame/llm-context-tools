@@ -221,6 +221,32 @@
            #"Exact graph edge targets do not exist"
            (store/replace-all! graph [file source edge]))))))
 
+(deftest incremental-topic-cleanup-retracts-only-unreferenced-topics
+  (let [project (temp-project)
+        file (file-entity "src/a.cljs" "source")
+        symbol (assoc (symbol-entity file "sample/a" 1)
+                      :symbol/platform :cljs)
+        topic {:entity/type :entity.type/topic :topic/id "topic:cleanup"
+               :topic/kind :state-key :topic/key "[:saved]"
+               :topic/platform :cljs}
+        edge {:entity/type :entity.type/edge :edge/id "edge:topic-cleanup"
+              :edge/kind :edge.kind/state-reads
+              :edge/from (:symbol/id symbol) :edge/to (:topic/id topic)
+              :edge/target-text "[:saved]"
+              :edge/resolution :resolution/exact :edge/confidence 1.0
+              :edge/evidence :test-topic}]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-all! graph [file symbol topic edge])
+      (is (zero? (store/prune-orphan-topics! graph)))
+      (store/replace-file! graph file [symbol])
+      (is (empty? (store/query graph
+                               '[:find [?id ...] :where [?edge :edge/id ?id]]
+                               [])))
+      (is (= 1 (store/prune-orphan-topics! graph)))
+      (is (empty? (store/query graph
+                               '[:find [?id ...] :where [?topic :topic/id ?id]]
+                               []))))))
+
 (deftest whole-graph-replacement-commits-bounded-batches
   (let [project (temp-project)
         file-a (file-entity "src/a.clj" "source-a")

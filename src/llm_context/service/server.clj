@@ -30,14 +30,17 @@
                                        {:exit-code 2}))))]
    (case subcommand
     "stats" (query/stats graph)
-    "find-symbol" (query/symbols graph (argument))
+    "find-symbol" (query/find-symbol graph (argument))
     "search" (query/search graph semantic-client settings (argument))
     "callers" (query/callers graph (argument))
-    "callees" (query/callees graph (argument))
+    "callees" (query/callees-command graph args)
     "trace" (query/transitive-callees graph (argument))
     "entry-points" (query/entry-points graph)
     "effects" (query/effects graph)
-    "unresolved" (query/unresolved graph)
+    "unresolved" (query/unresolved-command graph args)
+    ("topics" "registrations" "dispatchers" "subscribers"
+     "state-readers" "state-writers")
+    (query/topics-command graph subcommand args)
     (throw (ex-info (str "Unknown query: " subcommand) {:exit-code 2})))))
 
 (defn- semantic-status [graph runtime-state]

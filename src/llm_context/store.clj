@@ -18,6 +18,8 @@
     "Atomically retract a file and every graph fact connected to its symbols.")
   (delete-file-and-mark! [store file-id dirty-markers]
     "Atomically retract one file and assert semantic dirty markers.")
+  (prune-orphan-topics! [store]
+    "Retract project-global topics that no exact edge references.")
   (query [store query-form inputs] "Run a Datalog query against the store."))
 
 (defn- entity-identity [entity]
@@ -351,6 +353,23 @@
           tx (vec (concat graph-tx marker-tx))]
       (when (seq tx)
         (d/transact! connection tx))))
+
+  (prune-orphan-topics! [_]
+    (let [db (d/db connection)
+          topics (set (d/q '[:find [?topic ...]
+                             :where [?topic :topic/id _]]
+                           db))
+          referenced
+          (set (d/q '[:find [?topic ...]
+                      :where
+                      [?topic :topic/id _]
+                      [?edge :edge/to ?topic]]
+                    db))
+          topics (remove referenced topics)]
+      (when (seq topics)
+        (d/transact! connection
+                     (mapv (fn [topic] [:db/retractEntity topic]) topics)))
+      (count topics)))
 
   (query [_ query-form inputs]
     (apply d/q query-form (d/db connection) inputs))
