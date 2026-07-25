@@ -29,6 +29,15 @@
                         #"requires a path"
                         (cli/parse-args ["analyze" "--project"]))))
 
+(deftest analysis-progress-is-timestamped-and-counted
+  (let [output
+        (with-out-str
+          (#'cli/print-analysis-progress!
+           {:stage :resolve-progress :completed 1000 :total 2500}))]
+    (is (re-find
+         #"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] Resolved 1000/2500 edges"
+         output))))
+
 (deftest project-context-is-canonical
   (let [context (project/context ".")]
     (is (.isAbsolute (:root context)))

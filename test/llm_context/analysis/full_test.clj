@@ -21,10 +21,18 @@
       (is (pos? (:entities result)))
       (is (= [:discover-start :discover-complete :parse-progress
               :parse-complete :semantic-start :semantic-complete
-              :persist-start :persist-progress :resolve-start :complete]
+              :persist-start :persist-progress :resolve-start
+              :resolve-edges-selected :resolve-edges-loaded
+              :resolve-candidates-selected
+              :resolve-plan :resolve-progress
+              :semantic-reconcile-start :semantic-reconcile-complete
+              :complete]
              (mapv :stage @events)))
       (is (= full/persistence-batch-size
              (:batch-size (first (filter #(= :persist-start (:stage %))
+                                        @events)))))
+      (is (= full/resolution-batch-size
+             (:batch-size (first (filter #(= :resolve-plan (:stage %))
                                         @events))))))
     (store/with-store [graph project settings]
       (is (= #{"greet"}

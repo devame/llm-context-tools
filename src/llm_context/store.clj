@@ -17,7 +17,7 @@
     "Atomically retract a file and every graph fact connected to its symbols.")
   (delete-file-and-mark! [store file-id dirty-markers]
     "Atomically retract one file and assert semantic dirty markers.")
-  (reconcile-edges! [store decisions]
+  (reconcile-edges! [store decisions] [store decisions options]
     "Update edge targets and resolution states after the symbol set changes.")
   (query [store query-form inputs] "Run a Datalog query against the store."))
 
@@ -234,6 +234,56 @@
          (conj marker))))
    markers))
 
+(defn- edge-reconciliation-tx [db decisions]
+  (let [edge-ids (set (map :edge-id decisions))
+        target-ids (set (keep :target-id decisions))
+        edge-eids
+        (if (seq edge-ids)
+          (into {}
+                (d/q '[:find ?id ?edge
+                       :in $ ?ids
+                       :where
+                       [?edge :edge/id ?id]
+                       [(contains? ?ids ?id)]]
+                     db edge-ids))
+          {})
+        current-targets
+        (if (seq edge-ids)
+          (into {}
+                (d/q '[:find ?id ?target
+                       :in $ ?ids
+                       :where
+                       [?edge :edge/id ?id]
+                       [(contains? ?ids ?id)]
+                       [?edge :edge/to ?target]]
+                     db edge-ids))
+          {})
+        target-eids
+        (if (seq target-ids)
+          (into {}
+                (d/q '[:find ?id ?symbol
+                       :in $ ?ids
+                       :where
+                       [?symbol :symbol/id ?id]
+                       [(contains? ?ids ?id)]]
+                     db target-ids))
+          {})]
+    (mapcat
+     (fn [{:keys [edge-id target-id resolution confidence]}]
+       (when-let [edge-eid (get edge-eids edge-id)]
+         (let [current-target (get current-targets edge-id)
+               target-eid (get target-eids target-id)]
+           (cond-> []
+             (and current-target (not= current-target target-eid))
+             (conj [:db/retract edge-eid :edge/to current-target])
+
+             true
+             (conj (cond-> {:db/id edge-eid
+                            :edge/resolution resolution
+                            :edge/confidence (double confidence)}
+                     target-eid (assoc :edge/to target-eid)))))))
+     decisions)))
+
 (defrecord DatalevinStore [connection path]
   GraphStore
   (database [_] (d/db connection))
@@ -312,58 +362,28 @@
       (when (seq tx)
         (d/transact! connection tx))))
 
-  (reconcile-edges! [_ decisions]
-    (let [db (d/db connection)
-          edge-ids (set (map :edge-id decisions))
-          target-ids (set (keep :target-id decisions))
-          edge-eids
-          (if (seq edge-ids)
-            (into {}
-                  (d/q '[:find ?id ?edge
-                         :in $ ?ids
-                         :where
-                         [?edge :edge/id ?id]
-                         [(contains? ?ids ?id)]]
-                       db edge-ids))
-            {})
-          current-targets
-          (if (seq edge-ids)
-            (into {}
-                  (d/q '[:find ?id ?target
-                         :in $ ?ids
-                         :where
-                         [?edge :edge/id ?id]
-                         [(contains? ?ids ?id)]
-                         [?edge :edge/to ?target]]
-                       db edge-ids))
-            {})
-          target-eids
-          (if (seq target-ids)
-            (into {}
-                  (d/q '[:find ?id ?symbol
-                         :in $ ?ids
-                         :where
-                         [?symbol :symbol/id ?id]
-                         [(contains? ?ids ?id)]]
-                       db target-ids))
-            {})
-          tx (mapcat
-              (fn [{:keys [edge-id target-id resolution confidence]}]
-                (when-let [edge-eid (get edge-eids edge-id)]
-                  (let [current-target (get current-targets edge-id)
-                        target-eid (get target-eids target-id)]
-                    (cond-> []
-                      (and current-target (not= current-target target-eid))
-                      (conj [:db/retract edge-eid :edge/to current-target])
+  (reconcile-edges! [this decisions]
+    (reconcile-edges! this decisions {}))
 
-                      true
-                      (conj (cond-> {:db/id edge-eid
-                                     :edge/resolution resolution
-                                     :edge/confidence (double confidence)}
-                              target-eid (assoc :edge/to target-eid)))))))
-              decisions)]
-      (when (seq tx)
-        (d/transact! connection (vec tx)))))
+  (reconcile-edges! [_ decisions {:keys [batch-size on-progress]}]
+    (let [decisions (vec decisions)
+          total (count decisions)
+          batch-size (or batch-size (max 1 total))]
+      (when-not (pos-int? batch-size)
+        (throw (ex-info "Edge reconciliation batch size must be positive"
+                        {:batch-size batch-size})))
+      (loop [batches (seq (partition-all batch-size decisions))
+             completed 0]
+        (when-let [batch (first batches)]
+          (let [tx (vec (edge-reconciliation-tx (d/db connection) batch))]
+            (when (seq tx)
+              (d/transact! connection tx))
+            (let [next-completed (+ completed (count batch))]
+              (when on-progress
+                (on-progress {:phase :resolve
+                              :completed next-completed
+                              :total total}))
+              (recur (next batches) next-completed)))))))
 
   (query [_ query-form inputs]
     (apply d/q query-form (d/db connection) inputs))

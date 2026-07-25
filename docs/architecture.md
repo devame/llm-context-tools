@@ -76,7 +76,10 @@ asserts the replacement in transactions of at most 100 records. This avoids
 Datalevin's pathological cost when resolving many forward temporary-ID
 references in one large transaction. The tradeoff is that a process interrupted
 during persistence can leave a partial graph; the recovery operation is another
-full analysis.
+full analysis. The subsequent relationship resolution is persisted in batches
+of 1,000 edges. Each committed batch emits timestamped progress, so a large
+resolution run remains observable and an interruption leaves valid unresolved
+or partially reconciled edges that another full analysis can safely replace.
 
 Context breadth is also bounded before record pulls. The token budget supplies
 a conservative symbol ceiling, and each Datalog neighbor query has a limit.

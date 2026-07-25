@@ -12,6 +12,7 @@
             [llm-context.store :as store]))
 
 (def persistence-batch-size 100)
+(def resolution-batch-size 1000)
 
 (defn- enrich-effects [{:keys [file entities] :as output}]
   (let [edges (filter :edge/id entities)]
@@ -39,19 +40,30 @@
                        (when progress
                          #(emit! progress :persist-progress %))}))
 
-(defn- resolve-persisted! [graph scip-index]
+(defn- resolve-persisted! [graph scip-index progress]
   (let [db (store/database graph)
         edge-ids (graph-read/all-edge-ids db)
+        _ (emit! progress :resolve-edges-selected {:edges (count edge-ids)})
         edges (graph-read/edge-resolution-inputs db edge-ids)
+        _ (emit! progress :resolve-edges-loaded {:edges (count edges)})
         symbols (graph-read/resolution-candidate-symbols db edges)
+        _ (emit! progress :resolve-candidates-selected
+                 {:candidates (count symbols)})
         exact
         (if scip-index
           (resolve/scip-exact-targets-focused
            edges scip-index
            #(graph-read/symbol-at-point db %1 %2 %3))
-          {})]
+          {})
+        decisions (resolve/resolution-decisions symbols edges exact)]
+    (emit! progress :resolve-plan
+           {:edges (count edges) :candidates (count symbols)
+            :exact (count exact) :batch-size resolution-batch-size})
     (store/reconcile-edges!
-     graph (resolve/resolution-decisions symbols edges exact))
+     graph decisions
+     {:batch-size resolution-batch-size
+      :on-progress
+      (when progress #(emit! progress :resolve-progress %))})
     {:edges (count edges) :candidates (count symbols)
      :exact (count exact)}))
 
@@ -98,9 +110,14 @@
                        :batch-size persistence-batch-size})]
          (persist! graph config all-entities progress)
          (emit! progress :resolve-start {})
-         (let [resolution (resolve-persisted! graph (:index semantic))
+         (let [resolution (resolve-persisted! graph (:index semantic) progress)
+               _ (emit! progress :semantic-reconcile-start {})
                semantic-plan
-               (semantic-reconcile/reconcile! graph project config)]
+               (semantic-reconcile/reconcile! graph project config)
+               _ (emit! progress :semantic-reconcile-complete
+                        {:upserts (:queued-upserts semantic-plan)
+                         :deletes (:queued-deletes semantic-plan)
+                         :deferred (:deferred semantic-plan)})]
            (emit! progress :complete
                   {:elapsed-seconds
                    (long (/ (- (System/nanoTime) started) 1000000000))})

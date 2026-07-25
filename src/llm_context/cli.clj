@@ -117,27 +117,46 @@
     ((resolve-fn 'llm-context.runtime.doctor/print-report) checks)
     (if ((resolve-fn 'llm-context.runtime.doctor/healthy?) checks) 0 1)))
 
-(defn- print-analysis-progress! [{:keys [stage files diagnostics completed total
-                                         file entities batch-size phase
-                                         elapsed-seconds]}]
-  (println
-   (case stage
-     :discover-start "Discovering source files..."
-     :discover-complete
-     (format "Discovered %d supported files (%d diagnostics)" files diagnostics)
-     :parse-progress (format "Parsing %d/%d: %s" completed total file)
-     :parse-complete (format "Parsed %d/%d files" completed total)
-     :semantic-start "Running configured semantic providers..."
-     :semantic-complete "Semantic provider stage complete"
-     :resolve-start "Resolving graph relationships..."
-     :persist-start (format "Persisting %d entities in batches of %d..."
-                            entities batch-size)
-     :persist-progress
-     (format "%s %d/%d entities"
-             (if (= :retract phase) "Retracted" "Committed") completed total)
-     :complete (format "Full analysis completed in %d seconds" elapsed-seconds)
-     (str "Analysis stage: " (name stage))))
-  (flush))
+(defn- analysis-progress-message
+  [{:keys [stage files diagnostics completed total file entities edges
+           candidates exact upserts deletes deferred batch-size phase
+           elapsed-seconds]}]
+  (case stage
+    :discover-start "Discovering source files..."
+    :discover-complete
+    (format "Discovered %d supported files (%d diagnostics)" files diagnostics)
+    :parse-progress (format "Parsing %d/%d: %s" completed total file)
+    :parse-complete (format "Parsed %d/%d files" completed total)
+    :semantic-start "Running configured semantic providers..."
+    :semantic-complete "Semantic provider stage complete"
+    :resolve-start "Resolving graph relationships..."
+    :resolve-edges-selected (format "Selected %d persisted edges" edges)
+    :resolve-edges-loaded (format "Loaded %d edge resolution inputs" edges)
+    :resolve-candidates-selected
+    (format "Selected %d candidate symbols" candidates)
+    :resolve-plan
+    (format
+     "Resolving %d edges against %d candidates (%d exact) in batches of %d..."
+     edges candidates exact batch-size)
+    :resolve-progress (format "Resolved %d/%d edges" completed total)
+    :semantic-reconcile-start "Reconciling semantic indexing jobs..."
+    :semantic-reconcile-complete
+    (format "Semantic reconciliation queued %d upserts and %d deletions (%d deferred)"
+            upserts deletes deferred)
+    :persist-start (format "Persisting %d entities in batches of %d..."
+                           entities batch-size)
+    :persist-progress
+    (format "%s %d/%d entities"
+            (if (= :retract phase) "Retracted" "Committed") completed total)
+    :complete (format "Full analysis completed in %d seconds" elapsed-seconds)
+    (str "Analysis stage: " (name stage))))
+
+(defn- print-analysis-progress! [event]
+  (let [timestamp (.format (java.time.ZonedDateTime/now)
+                           (java.time.format.DateTimeFormatter/ofPattern
+                            "yyyy-MM-dd HH:mm:ss"))]
+    (println (format "[%s] %s" timestamp (analysis-progress-message event)))
+    (flush)))
 
 (defmethod execute "analyze" [context _ args]
   (when-let [unknown (first (remove #{"--full"} args))]

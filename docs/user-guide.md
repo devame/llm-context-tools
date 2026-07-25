@@ -51,12 +51,14 @@ deleted files, preserves inbound relationships owned by unchanged callers,
 and reconciles their targets. A full scan is useful after changing config,
 language support, or the graph schema.
 
-A full scan prints discovery, parsing, semantic, resolution, and persistence
-progress. The rebuilt graph is written in dependency order—files, symbols,
-edges, then effects—in transactions of at most 100 records. This bounds each
-Datalevin transaction instead of asking it to resolve the entire graph at once.
-If the command is interrupted during persistence, the graph may be partial;
-rerun `llm-context analyze --full` to clear and rebuild it.
+A full scan prints timestamped discovery, parsing, semantic, resolution, and
+persistence progress. The rebuilt graph is written in dependency order—files,
+symbols, edges, then effects—in transactions of at most 100 records.
+Relationship decisions are then committed in batches of 1,000 with an
+incremental `Resolved N/total edges` message. This bounds each Datalevin
+transaction instead of asking it to resolve the entire graph at once. If the
+command is interrupted during persistence or resolution, rerun
+`llm-context analyze --full` to clear and rebuild it.
 
 Check the result with:
 
