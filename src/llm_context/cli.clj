@@ -357,6 +357,24 @@
         "--format" (if-let [value (second remaining)]
                      (recur (nnext remaining) (assoc result :format value))
                      (throw (ex-info "--format requires edn or markdown" {:exit-code 2})))
+        "--direction"
+        (if-let [value (second remaining)]
+          (let [directions
+                (case value
+                  "outgoing" #{:outgoing}
+                  "incoming" #{:incoming}
+                  "both" #{:outgoing :incoming}
+                  (throw (ex-info
+                          "--direction requires outgoing, incoming, or both"
+                          {:exit-code 2})))]
+            (recur (nnext remaining) (assoc result :directions directions)))
+          (throw (ex-info "--direction requires a value" {:exit-code 2})))
+        "--edge-kind"
+        (if-let [value (second remaining)]
+          (recur (nnext remaining)
+                 (update result :edge-kinds
+                         (fnil conj #{}) (keyword "edge.kind" value)))
+          (throw (ex-info "--edge-kind requires a value" {:exit-code 2})))
         (if (:focus result)
           (throw (ex-info (str "Unexpected context argument: " arg) {:exit-code 2}))
           (recur (next remaining) (assoc result :focus arg))))

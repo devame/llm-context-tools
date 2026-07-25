@@ -129,3 +129,57 @@
         (is (<= (count (:symbols packet)) 50))
         (is (:truncated? packet))
         (is (<= (get-in packet [:budget :estimated-tokens]) 400))))))
+
+(deftest typed-topic-bridges-connect-dispatchers-to-handlers
+  (let [root (Files/createTempDirectory
+              "llm-context-topic-path-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        project (project/context (str root))
+        file {:entity/type :entity.type/file :file/id "file:events.cljs"
+              :file/path "events.cljs"
+              :file/language :language/clojurescript
+              :file/content-hash (ids/content-hash "events")
+              :file/size 6 :file/modified-at 1}
+        symbol (fn [id name line]
+                 {:entity/type :entity.type/symbol
+                  :symbol/id id :symbol/name name
+                  :symbol/qualified-name (str "events/" name)
+                  :symbol/kind :symbol.kind/function
+                  :symbol/file (:file/id file)
+                  :symbol/platform :cljs :symbol/analyzer :test
+                  :source/start-line line :source/start-column 1
+                  :source/end-line line :source/end-column 8})
+        dispatcher (symbol "symbol:dispatch" "dispatch!" 1)
+        handler (symbol "symbol:handler" "handler" 10)
+        noise (symbol "symbol:finalize" "finalize-batch!" 20)
+        topic {:entity/type :entity.type/topic :topic/id "topic:saved"
+               :topic/kind :event :topic/key ":saved"
+               :topic/platform :cljs}
+        edge (fn [id kind from line]
+               {:entity/type :entity.type/edge :edge/id id :edge/kind kind
+                :edge/from from :edge/to (:topic/id topic)
+                :edge/target-text ":saved"
+                :edge/resolution :resolution/exact :edge/confidence 1.0
+                :edge/evidence :test-topic
+                :source/start-line line :source/start-column 1
+                :source/end-line line :source/end-column 5})]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-file!
+       graph file
+       [dispatcher handler noise topic
+        (edge "edge:dispatch-topic" :edge.kind/event-dispatches
+              (:symbol/id dispatcher) 2)
+        (edge "edge:register-topic" :edge.kind/topic-registers
+              (:symbol/id handler) 11)])
+      (let [packet (context/build
+                    graph {:focus "symbol:dispatch"
+                           :depth 2 :max-tokens 1200})
+            by-id (into {} (map (juxt :id identity)) (:symbols packet))]
+        (is (contains? by-id "symbol:handler"))
+        (is (not (contains? by-id "symbol:finalize")))
+        (is (= 1.0 (:path-cost (get by-id "symbol:handler"))))
+        (is (= [:edge.kind/event-dispatches :edge.kind/topic-registers]
+               (mapv :kind
+                     (:selected-path (get by-id "symbol:handler")))))
+        (is (= ":saved" (:key (first (:topics packet)))))
+        (is (false? (get-in packet [:truncation :graph?])))))))

@@ -188,91 +188,130 @@
        (long limit))
       db needle))))
 
-(defn neighbor-ids
-  "Return symbol IDs adjacent to a bounded frontier in either direction."
-  ([db frontier-ids]
-   (neighbor-ids db frontier-ids Long/MAX_VALUE))
-  ([db frontier-ids limit]
-   (if (and (seq frontier-ids) (pos? limit))
-    (let [frontier (vec frontier-ids)
-          limited-query
-          (fn [query]
-            (d/q (conj query (long limit)) db frontier))
-          outgoing
-          (limited-query
-           '[:find [?id ...]
-             :in $ [?frontier-id ...]
-             :where
-             [?frontier :symbol/id ?frontier-id]
-             [?edge :edge/from ?frontier]
-             [?edge :edge/to ?neighbor]
-             [?neighbor :symbol/id ?id]
-             :order-by ?id
-             :limit])
-          incoming
-          (limited-query
-           '[:find [?id ...]
-             :in $ [?frontier-id ...]
-             :where
-             [?frontier :symbol/id ?frontier-id]
-             [?edge :edge/to ?frontier]
-             [?edge :edge/from ?neighbor]
-             [?neighbor :symbol/id ?id]
-             :order-by ?id
-             :limit])]
-      (into (sorted-set)
-            (take limit)
-            (sort (distinct (concat outgoing incoming)))))
-    #{})))
-
-(defn edges-for-symbols
-  "Return edges originating in selected symbols when their resolved target is
-  also selected, plus unresolved outgoing edges."
-  [db symbol-ids]
-  (if-not (seq symbol-ids)
+(defn adjacent-exact
+  "Return a bounded exact-edge frontier over symbol and topic IDs. Filtering
+  and per-direction limits are applied by Datalevin before rows are returned."
+  [db frontier-ids {:keys [directions edge-kinds limit]
+                    :or {directions #{:outgoing :incoming}
+                         limit 200}}]
+  (if-not (and (seq frontier-ids) (pos? limit))
     []
-    (let [ids (vec symbol-ids)
-          resolved
-          (d/q '[:find ?id ?kind ?from-id ?to-id ?target ?resolution ?line
-                 :in $ ?selected
-                 :where
-                 [?from :symbol/id ?from-id]
-                 [(contains? ?selected ?from-id)]
-                 [?edge :edge/from ?from]
-                 [?edge :edge/id ?id]
-                 [?edge :edge/kind ?kind]
-                 [?edge :edge/to ?to]
-                 [?to :symbol/id ?to-id]
-                 [(contains? ?selected ?to-id)]
-                 [?edge :edge/target-text ?target]
-                 [?edge :edge/resolution ?resolution]
-                 [?edge :source/start-line ?line]]
-               db (set ids))
-          unresolved
-          (d/q '[:find ?id ?kind ?from-id ?target ?resolution ?line
-                 :in $ ?selected
-                 :where
-                 [?from :symbol/id ?from-id]
-                 [(contains? ?selected ?from-id)]
-                 [?edge :edge/from ?from]
-                 [?edge :edge/id ?id]
-                 [?edge :edge/kind ?kind]
-                 [?edge :edge/target-text ?target]
-                 [?edge :edge/resolution ?resolution]
-                 [?edge :source/start-line ?line]
-                 [(missing? $ ?edge :edge/to)]]
-               db (set ids))]
-      (->> (concat
-            (map (fn [[id kind from to target resolution line]]
-                   {:id id :kind kind :from from :to to
-                    :target-text target :resolution resolution :line line})
-                 resolved)
-            (map (fn [[id kind from target resolution line]]
-                   {:id id :kind kind :from from
-                    :target-text target :resolution resolution :line line})
-                 unresolved))
-           (sort-by (juxt :from :line :id))
+    (let [frontier (vec frontier-ids)
+          kinds (set edge-kinds)
+          run
+          (fn [query direction from-type to-type]
+            (->> (d/q (conj query (long limit)) db frontier (vec kinds))
+                 (map (fn [[edge-id kind from-id to-id evidence line]]
+                        {:edge-id edge-id :kind kind :from from-id :to to-id
+                         :direction direction :from-type from-type
+                         :to-type to-type :evidence evidence :line line}))
+                 vec))
+          symbol-symbol-out
+          '[:find ?edge-id ?kind ?from-id ?to-id ?evidence ?line
+            :in $ [?frontier-id ...] [?kind ...]
+            :where
+            [?from :symbol/id ?frontier-id]
+            [?from :symbol/id ?from-id]
+            [?edge :edge/from ?from]
+            [?edge :edge/to ?to]
+            [?to :symbol/id ?to-id]
+            [?edge :edge/id ?edge-id]
+            [?edge :edge/kind ?kind]
+            [?edge :edge/resolution :resolution/exact]
+            [?edge :edge/evidence ?evidence]
+            [(get-else $ ?edge :source/start-line 1) ?line]
+            :order-by [?kind :asc ?to-id :asc ?edge-id :asc]
+            :limit]
+          symbol-topic-out
+          '[:find ?edge-id ?kind ?from-id ?to-id ?evidence ?line
+            :in $ [?frontier-id ...] [?kind ...]
+            :where
+            [?from :symbol/id ?frontier-id]
+            [?from :symbol/id ?from-id]
+            [?edge :edge/from ?from]
+            [?edge :edge/to ?to]
+            [?to :topic/id ?to-id]
+            [?edge :edge/id ?edge-id]
+            [?edge :edge/kind ?kind]
+            [?edge :edge/resolution :resolution/exact]
+            [?edge :edge/evidence ?evidence]
+            [(get-else $ ?edge :source/start-line 1) ?line]
+            :order-by [?kind :asc ?to-id :asc ?edge-id :asc]
+            :limit]
+          symbol-symbol-in
+          '[:find ?edge-id ?kind ?from-id ?to-id ?evidence ?line
+            :in $ [?frontier-id ...] [?kind ...]
+            :where
+            [?to :symbol/id ?frontier-id]
+            [?to :symbol/id ?to-id]
+            [?edge :edge/to ?to]
+            [?edge :edge/from ?from]
+            [?from :symbol/id ?from-id]
+            [?edge :edge/id ?edge-id]
+            [?edge :edge/kind ?kind]
+            [?edge :edge/resolution :resolution/exact]
+            [?edge :edge/evidence ?evidence]
+            [(get-else $ ?edge :source/start-line 1) ?line]
+            :order-by [?kind :asc ?from-id :asc ?edge-id :asc]
+            :limit]
+          symbol-topic-in
+          '[:find ?edge-id ?kind ?from-id ?to-id ?evidence ?line
+            :in $ [?frontier-id ...] [?kind ...]
+            :where
+            [?to :topic/id ?frontier-id]
+            [?to :topic/id ?to-id]
+            [?edge :edge/to ?to]
+            [?edge :edge/from ?from]
+            [?from :symbol/id ?from-id]
+            [?edge :edge/id ?edge-id]
+            [?edge :edge/kind ?kind]
+            [?edge :edge/resolution :resolution/exact]
+            [?edge :edge/evidence ?evidence]
+            [(get-else $ ?edge :source/start-line 1) ?line]
+            :order-by [?kind :asc ?from-id :asc ?edge-id :asc]
+            :limit]
+          rows
+          (concat
+           (when (directions :outgoing)
+             (concat
+              (run symbol-symbol-out :outgoing :symbol :symbol)
+              (run symbol-topic-out :outgoing :symbol :topic)))
+           (when (directions :incoming)
+             (concat
+              (run symbol-symbol-in :incoming :symbol :symbol)
+              (run symbol-topic-in :incoming :symbol :topic))))]
+      (->> rows
+           (sort-by (juxt :kind :from :to :edge-id :direction))
+           (take limit)
            vec))))
+
+(defn topics-by-ids [db ids]
+  (if-not (seq ids)
+    {}
+    (->> (d/q '[:find ?id ?kind ?key ?platform
+                :in $ [?id ...]
+                :where
+                [?topic :topic/id ?id]
+                [?topic :topic/kind ?kind]
+                [?topic :topic/key ?key]
+                [?topic :topic/platform ?platform]]
+              db (vec ids))
+         (map (fn [[id kind key platform]]
+                [id {:id id :kind kind :key key :platform platform}]))
+         (into {}))))
+
+(defn reference-summary [db symbol-ids]
+  (if-not (seq symbol-ids)
+    {}
+    (into
+     (sorted-map)
+     (d/q '[:find ?classification (count ?reference)
+            :in $ [?symbol-id ...]
+            :where
+            [?symbol :symbol/id ?symbol-id]
+            [?reference :reference/symbol ?symbol]
+            [?reference :reference/classification ?classification]]
+          db (vec symbol-ids)))))
 
 (defn effects-for-symbols [db symbol-ids]
   (if-not (seq symbol-ids)
