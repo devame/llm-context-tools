@@ -1,7 +1,7 @@
 (ns llm-context.semantic.reconcile
   "Translate durable dirty markers into coalesced symbol upserts/deletes by
   comparing authoritative graph documents with recorded NextPlaid state."
-  (:require [datalevin.core :as d]
+  (:require [llm-context.graph.read :as graph-read]
             [llm-context.semantic.document :as document]
             [llm-context.semantic.state :as state]
             [llm-context.store :as store]))
@@ -43,16 +43,6 @@
                               [?file :file/content-hash ?hash]]
                      [])))
 
-(defn- indexed-by-symbol [graph]
-  (into {}
-        (map (juxt :semantic.indexed/symbol-id identity))
-        (state/indexed-records graph provider)))
-
-(defn- jobs-by-symbol [graph]
-  (into {}
-        (map (juxt :semantic.job/symbol-id identity))
-        (state/job-records graph provider)))
-
 (defn- path-for-file [graph file-id]
   (ffirst
    (store/query graph
@@ -74,7 +64,7 @@
           (:semantic.indexed/chunk-count indexed))))
 
 (defn- reconcile-file!
-  [graph project lateon marker now indexed jobs]
+  [graph project lateon marker now]
   (let [file-id (:semantic.dirty/file-id marker)
         operation (:semantic.dirty/operation marker)
         built (if (= :delete operation)
@@ -88,17 +78,13 @@
        :diagnostics (:diagnostics built)
        :queued-upserts 0 :queued-deletes 0
        :cancelled 0 :unchanged 0}
-      (let [desired (into {} (map (juxt :symbol-id identity))
+      (let [db (store/database graph)
+            desired (into {} (map (juxt :symbol-id identity))
                           (:documents built))
-            current (into {}
-                          (filter (fn [[_ value]]
-                                    (= file-id
-                                       (:semantic.indexed/file-id value))))
-                          indexed)
-            pending (into {}
-                          (filter (fn [[_ value]]
-                                    (= file-id (:semantic.job/file-id value))))
-                          jobs)
+            current (graph-read/semantic-indexed-for-file
+                     db provider file-id)
+            pending (graph-read/semantic-jobs-for-file
+                     db provider file-id)
             all-symbols (sort (set (concat (keys desired)
                                            (keys current)
                                            (keys pending))))
@@ -158,9 +144,9 @@
                :diagnostics (:diagnostics built))))))
 
 (defn- reconcile-file-safely!
-  [graph project lateon marker now indexed jobs]
+  [graph project lateon marker now]
   (try
-    (reconcile-file! graph project lateon marker now indexed jobs)
+    (reconcile-file! graph project lateon marker now)
     (catch Exception error
       (let [file-id (:semantic.dirty/file-id marker)
             file-path (path-for-file graph file-id)]
@@ -203,8 +189,10 @@
            ;; Indexed files absent from the graph need deletion during a full
            ;; repair, including after an interrupted graph replacement.
            graph-files (set (keys graph-file-hashes))
-           indexed (indexed-by-symbol graph)
-           indexed-files (set (map :semantic.indexed/file-id (vals indexed)))
+           indexed-files
+           (when full?
+             (graph-read/semantic-indexed-file-ids
+              (store/database graph) provider))
            missing
            (when full?
              (for [file-id (sort (remove graph-files indexed-files))
@@ -214,9 +202,7 @@
            work (->> (concat explicit synthetic missing)
                      (sort-by :semantic.dirty/file-id)
                      vec)
-           jobs (jobs-by-symbol graph)
-           results (mapv #(reconcile-file-safely! graph project lateon % now
-                                                   indexed jobs)
+           results (mapv #(reconcile-file-safely! graph project lateon % now)
                          work)
            deferred (count (filter #(= :deferred (:status %)) results))]
        (when (and full? (zero? deferred))

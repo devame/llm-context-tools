@@ -237,55 +237,82 @@
                       {:file relative :project (:root-str project)})))
     path))
 
-(defn build-file
-  "Build all indexable symbol documents for a committed file.
+(defn- validated-source [project file-id file]
+  (let [path (project-file project (:file/path file))]
+    (if-not (Files/isRegularFile path (make-array LinkOption 0))
+      {:status :source-changed
+       :file-id file-id
+       :expected-hash (:file/content-hash file)
+       :actual-hash nil
+       :diagnostics [{:level :warning :kind :semantic-source-missing
+                      :file (:file/path file)}]}
+      (let [source-text (:content (source/read-utf8 path))
+            actual-hash (ids/content-hash source-text)]
+        (if (= actual-hash (:file/content-hash file))
+          {:status :ready :file-id file-id :file-hash actual-hash
+           :source-text source-text :diagnostics []}
+          {:status :source-changed
+           :file-id file-id
+           :expected-hash (:file/content-hash file)
+           :actual-hash actual-hash
+           :diagnostics [{:level :info :kind :semantic-source-changed
+                          :file (:file/path file)}]})))))
 
-  Returns :source-changed instead of mixing current source with stale graph
-  ranges. Missing ranges are reported as diagnostics without preventing other
-  symbols in the file from being indexed."
+(defn- build-selected [db lateon file source-state symbols]
+  (let [results
+        (mapv
+         (fn [symbol]
+           (try
+             {:document
+              (build lateon symbol file (:source-text source-state)
+                     (relationships-for db (:symbol/id symbol)))}
+             (catch clojure.lang.ExceptionInfo error
+               {:diagnostic
+                {:level :warning
+                 :kind :semantic-range-invalid
+                 :file (:file/path file)
+                 :symbol-id (:symbol/id symbol)
+                 :message (.getMessage error)}})))
+         symbols)]
+    (-> source-state
+        (dissoc :source-text)
+        (assoc :documents (mapv :document (filter :document results))
+               :diagnostics (mapv :diagnostic
+                                  (filter :diagnostic results))))))
+
+(defn build-file
+  "Build all indexable symbol documents for a committed file."
   [graph project lateon file-id]
   (let [db (store/database graph)
         file (entity-by db :file/id file-id)]
     (if-not file
       {:status :deleted :file-id file-id :documents [] :diagnostics []}
-      (let [path (project-file project (:file/path file))]
-        (if-not (Files/isRegularFile path (make-array LinkOption 0))
-          {:status :source-changed
-           :file-id file-id
-           :expected-hash (:file/content-hash file)
-           :actual-hash nil
-           :documents []
-           :diagnostics [{:level :warning :kind :semantic-source-missing
-                          :file (:file/path file)}]}
-          (let [source-text (:content (source/read-utf8 path))
-                actual-hash (ids/content-hash source-text)]
-            (if-not (= actual-hash (:file/content-hash file))
-              {:status :source-changed
-               :file-id file-id
-               :expected-hash (:file/content-hash file)
-               :actual-hash actual-hash
-               :documents []
-               :diagnostics [{:level :info :kind :semantic-source-changed
-                              :file (:file/path file)}]}
-              (let [symbols (symbols-for-file db (:db/id file))
-                    results
-                    (mapv
-                     (fn [symbol]
-                       (try
-                         {:document
-                          (build lateon symbol file source-text
-                                 (relationships-for db (:symbol/id symbol)))}
-                         (catch clojure.lang.ExceptionInfo error
-                           {:diagnostic
-                            {:level :warning
-                             :kind :semantic-range-invalid
-                             :file (:file/path file)
-                             :symbol-id (:symbol/id symbol)
-                             :message (.getMessage error)}})))
-                     symbols)]
-                {:status :ready
-                 :file-id file-id
-                 :file-hash actual-hash
-                 :documents (mapv :document (filter :document results))
-                 :diagnostics (mapv :diagnostic
-                                    (filter :diagnostic results))}))))))))
+      (let [source-state (validated-source project file-id file)]
+        (if-not (= :ready (:status source-state))
+          (assoc source-state :documents [])
+          (build-selected db lateon file source-state
+                          (symbols-for-file db (:db/id file))))))))
+
+(defn build-symbol
+  "Build one exact symbol document without materializing its sibling symbols."
+  [graph project lateon file-id symbol-id]
+  (let [db (store/database graph)
+        file (entity-by db :file/id file-id)
+        symbol (entity-by db :symbol/id symbol-id)
+        symbol-file (some-> symbol :symbol/file)
+        symbol-file-eid (if (map? symbol-file)
+                          (:db/id symbol-file)
+                          symbol-file)]
+    (cond
+      (nil? file)
+      {:status :deleted :file-id file-id :documents [] :diagnostics []}
+
+      (or (nil? symbol) (not= (:db/id file) symbol-file-eid))
+      {:status :symbol-missing :file-id file-id :symbol-id symbol-id
+       :documents [] :diagnostics []}
+
+      :else
+      (let [source-state (validated-source project file-id file)]
+        (if-not (= :ready (:status source-state))
+          (assoc source-state :documents [])
+          (build-selected db lateon file source-state [symbol]))))))

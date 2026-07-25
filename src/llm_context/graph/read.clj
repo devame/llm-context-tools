@@ -311,3 +311,34 @@
      :failed (get by-status :failed 0)
      :oldest-pending-at oldest
      :dirty dirty}))
+
+(defn semantic-indexed-for-file [db provider file-id]
+  (->> (d/q '[:find [?record ...]
+              :in $ ?provider ?file-id
+              :where
+              [?record :semantic.indexed/provider ?provider]
+              [?record :semantic.indexed/file-id ?file-id]]
+            db provider file-id)
+       (map #(d/pull db '[*] %))
+       (map (juxt :semantic.indexed/symbol-id identity))
+       (into {})))
+
+(defn semantic-jobs-for-file [db provider file-id]
+  (->> (d/q '[:find [?job ...]
+              :in $ ?provider ?file-id
+              :where
+              [?job :semantic.job/provider ?provider]
+              [?job :semantic.job/file-id ?file-id]]
+            db provider file-id)
+       (map #(d/pull db '[*] %))
+       (map (juxt :semantic.job/symbol-id identity))
+       (into {})))
+
+(defn semantic-indexed-file-ids [db provider]
+  (set
+   (d/q '[:find [?file-id ...]
+          :in $ ?provider
+          :where
+          [?record :semantic.indexed/provider ?provider]
+          [?record :semantic.indexed/file-id ?file-id]]
+        db provider)))

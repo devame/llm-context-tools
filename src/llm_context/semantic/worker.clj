@@ -52,9 +52,10 @@
             (recur)))))))
 
 (defn- document-for-job [worker job]
-  (let [built (document/build-file
+  (let [built (document/build-symbol
                (:graph worker) (:project worker) (:settings worker)
-               (:semantic.job/file-id job))]
+               (:semantic.job/file-id job)
+               (:semantic.job/symbol-id job))]
     (when-not (= :ready (:status built))
       (throw
        (ex-info "Source changed before semantic ingestion"
