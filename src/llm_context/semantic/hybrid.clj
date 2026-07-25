@@ -134,9 +134,13 @@
          (keep
           (fn [id]
             (when-let [symbol (get symbols id)]
-              (let [exact? (contains? #{id (:name symbol)
-                                        (:qualified-name symbol)}
-                                      term)]
+              ;; Do not use a set literal here: a canonical symbol ID can be
+              ;; identical to its qualified name, and duplicate values in a
+              ;; literal set throw during construction.  Explicit equality
+              ;; checks preserve exact-match semantics without that hazard.
+              (let [exact? (or (= term id)
+                               (= term (:name symbol))
+                               (= term (:qualified-name symbol)))]
                 (assoc symbol
                        :matched-by
                        (matched-sources id lexical-set semantic-set)
