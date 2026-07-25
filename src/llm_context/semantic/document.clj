@@ -209,7 +209,7 @@
                     :where [?symbol :symbol/file ?file]]
                   db file-eid)]
     (->> eids
-         (map #(d/pull db '[*] %))
+         (d/pull-many db '[*])
          ;; Synthetic module symbols span whole files and duplicate every
          ;; contained code unit. They remain in the graph but not in LateOn.
          (remove #(= :symbol.kind/module (:symbol/kind %)))

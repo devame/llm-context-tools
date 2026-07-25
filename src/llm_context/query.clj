@@ -19,40 +19,52 @@
 (defn symbols
   "Find symbols by exact name, case-insensitive substring, or Datalevin
   full-text relevance over identifiers, signatures, and documentation."
-  [graph term]
-  (let [db (store/database graph)
+  ([graph term]
+   (symbols graph term nil))
+  ([graph term limit]
+   (let [db (store/database graph)
         needle (str/lower-case term)
-        exact (graph-read/exact-symbols db term)
-        fulltext-scores
+        exact (if limit
+                (graph-read/exact-symbols db term limit)
+                (graph-read/exact-symbols db term))
+        fulltext-query
+        (cond-> '[:find ?id ?score
+                  :in $ ?query
+                  :where
+                  [(fulltext $ ?query
+                             {:domains ["symbols"]
+                              :display :refs+scores})
+                   [[?symbol ?attribute ?value ?score]]]
+                  [?symbol :symbol/id ?id]
+                  :order-by [?score :desc ?id :asc]]
+          limit (conj :limit (long limit)))
+        fulltext-rows
         (try
-          (reduce (fn [scores [id score]]
-                    (update scores id (fnil max Double/NEGATIVE_INFINITY)
-                            (double score)))
-                  {}
-                  (store/query
-                   graph
-                   '[:find ?id ?score
-                     :in $ ?query
-                     :where
-                     [(fulltext $ ?query
-                                {:domains ["symbols"]
-                                 :display :refs+scores})
-                      [[?symbol ?attribute ?value ?score]]]
-                     [?symbol :symbol/id ?id]]
-                   [term]))
+          (store/query graph fulltext-query [term])
           (catch Exception _
             ;; Full-text syntax is intentionally richer than identifier search.
             ;; Invalid search expressions still retain the historical literal
             ;; substring behavior instead of failing the command.
-            {}))
+            []))
+        fulltext-scores
+        (reduce (fn [scores [id score]]
+                  (update scores id (fnil max Double/NEGATIVE_INFINITY)
+                          (double score)))
+                {} fulltext-rows)
+        fulltext-ids (->> fulltext-scores
+                          (sort-by (fn [[id score]] [(- score) id]))
+                          (map first))
         substring-ids (try
-                        (graph-read/substring-symbol-ids db needle)
+                        (if limit
+                          (graph-read/substring-symbol-ids db needle limit)
+                          (graph-read/substring-symbol-ids db needle))
                         (catch Exception _ []))
         exact-ids (set (map :id exact))
         substring-set (set substring-ids)
-        candidate-ids (distinct (concat exact-ids
-                                        (keys fulltext-scores)
-                                        substring-ids))
+        candidate-ids (cond->> (distinct (concat (map :id exact)
+                                                 fulltext-ids
+                                                 substring-ids))
+                        limit (take limit))
         candidates (graph-read/symbols-by-ids db candidate-ids)]
     (->> candidate-ids
          (keep (fn [id]
@@ -67,13 +79,17 @@
                           (- (double (::score %)))
                           0.0)
                        :qualified-name))
-         (mapv #(dissoc % ::exact? ::substring? ::score)))))
+         (mapv #(dissoc % ::exact? ::substring? ::score))))))
 
 (defn search
   "Hybrid lexical and semantic code search. Pass nil as semantic-client for a
   deterministic Datalevin-only fallback."
   [graph semantic-client config term]
-  (hybrid/search graph semantic-client config term (symbols graph term)))
+  (let [candidate-limit (or (get-in config
+                                    [:semantic :lateon-code :candidate-count])
+                            50)]
+    (hybrid/search graph semantic-client config term
+                   (symbols graph term candidate-limit))))
 
 (defn callers [graph target]
   (->> (store/query

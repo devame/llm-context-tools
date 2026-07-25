@@ -96,46 +96,88 @@
           (d/pull db symbol-pull)
           symbol-record))
 
-(defn exact-symbols [db term]
-  (->> (d/q '[:find [?symbol ...]
-              :in $ ?term
-              :where
-              (or [?symbol :symbol/id ?term]
-                  [?symbol :symbol/name ?term]
-                  [?symbol :symbol/qualified-name ?term])]
-            db term)
-       (map #(d/pull db symbol-pull %))
-       (map symbol-record)
-       (sort-by (juxt :qualified-name :id))
-       vec))
+(defn exact-symbols
+  ([db term]
+   (let [eids
+         (d/q '[:find [?symbol ...]
+                :in $ ?term
+                :where
+                (or [?symbol :symbol/id ?term]
+                    [?symbol :symbol/name ?term]
+                    [?symbol :symbol/qualified-name ?term])]
+              db term)]
+     (->> (if (seq eids) (d/pull-many db symbol-pull eids) [])
+          (map symbol-record)
+          (sort-by (juxt :qualified-name :id))
+          vec)))
+  ([db term limit]
+   (let [rows
+         (d/q
+          (conj
+           '[:find ?qualified ?id ?symbol
+             :in $ ?term
+             :where
+             (or [?symbol :symbol/id ?term]
+                 [?symbol :symbol/name ?term]
+                 [?symbol :symbol/qualified-name ?term])
+             [?symbol :symbol/id ?id]
+             [?symbol :symbol/qualified-name ?qualified]
+             :order-by [?qualified :asc ?id :asc]
+             :limit]
+           (long limit))
+          db term)
+         eids (mapv #(nth % 2) rows)]
+     (mapv symbol-record
+           (if (seq eids) (d/pull-many db symbol-pull eids) [])))))
 
 (defn symbols-by-ids [db ids]
   (if (seq ids)
-    (->> (d/q '[:find ?id ?symbol
-                :in $ [?id ...]
-                :where [?symbol :symbol/id ?id]]
-              db (vec ids))
-         (map (fn [[id eid]] [id (symbol-record (d/pull db symbol-pull eid))]))
-         (into {}))
+    (let [eids (d/q '[:find [?symbol ...]
+                      :in $ [?id ...]
+                      :where [?symbol :symbol/id ?id]]
+                    db (vec ids))]
+      (->> (d/pull-many db symbol-pull eids)
+           (map symbol-record)
+           (map (juxt :id identity))
+           (into {})))
     {}))
 
 (defn substring-symbol-ids
   "Evaluate the compatibility substring predicate inside Datalevin so symbol
   rows that do not match are never materialized in application memory."
-  [db needle]
-  (if (empty? needle)
-    []
-    (d/q '[:find [?id ...]
-           :in $ ?needle
-           :where
-           [?symbol :symbol/id ?id]
-           [?symbol :symbol/name ?name]
-           [?symbol :symbol/qualified-name ?qualified]
-           [(clojure.string/lower-case ?name) ?lower-name]
-           [(clojure.string/lower-case ?qualified) ?lower-qualified]
-           (or [(clojure.string/includes? ?lower-name ?needle)]
-               [(clojure.string/includes? ?lower-qualified ?needle)])]
-         db needle)))
+  ([db needle]
+   (if (empty? needle)
+     []
+     (d/q '[:find [?id ...]
+            :in $ ?needle
+            :where
+            [?symbol :symbol/id ?id]
+            [?symbol :symbol/name ?name]
+            [?symbol :symbol/qualified-name ?qualified]
+            [(clojure.string/lower-case ?name) ?lower-name]
+            [(clojure.string/lower-case ?qualified) ?lower-qualified]
+            (or [(clojure.string/includes? ?lower-name ?needle)]
+                [(clojure.string/includes? ?lower-qualified ?needle)])]
+          db needle)))
+  ([db needle limit]
+   (if (empty? needle)
+     []
+     (d/q
+      (conj
+       '[:find [?id ...]
+         :in $ ?needle
+         :where
+         [?symbol :symbol/id ?id]
+         [?symbol :symbol/name ?name]
+         [?symbol :symbol/qualified-name ?qualified]
+         [(clojure.string/lower-case ?name) ?lower-name]
+         [(clojure.string/lower-case ?qualified) ?lower-qualified]
+         (or [(clojure.string/includes? ?lower-name ?needle)]
+             [(clojure.string/includes? ?lower-qualified ?needle)])
+         :order-by ?id
+         :limit]
+       (long limit))
+      db needle))))
 
 (defn neighbor-ids
   "Return symbol IDs adjacent to a bounded frontier in either direction."
@@ -402,26 +444,26 @@
      :dirty dirty}))
 
 (defn semantic-indexed-for-file [db provider file-id]
-  (->> (d/q '[:find [?record ...]
-              :in $ ?provider ?file-id
-              :where
-              [?record :semantic.indexed/provider ?provider]
-              [?record :semantic.indexed/file-id ?file-id]]
-            db provider file-id)
-       (map #(d/pull db '[*] %))
-       (map (juxt :semantic.indexed/symbol-id identity))
-       (into {})))
+  (let [eids (d/q '[:find [?record ...]
+                    :in $ ?provider ?file-id
+                    :where
+                    [?record :semantic.indexed/provider ?provider]
+                    [?record :semantic.indexed/file-id ?file-id]]
+                  db provider file-id)]
+    (->> (if (seq eids) (d/pull-many db '[*] eids) [])
+         (map (juxt :semantic.indexed/symbol-id identity))
+         (into {}))))
 
 (defn semantic-jobs-for-file [db provider file-id]
-  (->> (d/q '[:find [?job ...]
-              :in $ ?provider ?file-id
-              :where
-              [?job :semantic.job/provider ?provider]
-              [?job :semantic.job/file-id ?file-id]]
-            db provider file-id)
-       (map #(d/pull db '[*] %))
-       (map (juxt :semantic.job/symbol-id identity))
-       (into {})))
+  (let [eids (d/q '[:find [?job ...]
+                    :in $ ?provider ?file-id
+                    :where
+                    [?job :semantic.job/provider ?provider]
+                    [?job :semantic.job/file-id ?file-id]]
+                  db provider file-id)]
+    (->> (if (seq eids) (d/pull-many db '[*] eids) [])
+         (map (juxt :semantic.job/symbol-id identity))
+         (into {}))))
 
 (defn semantic-indexed-file-ids [db provider]
   (set

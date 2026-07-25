@@ -76,14 +76,15 @@
   [graph {:keys [focus max-tokens depth]
           :or {max-tokens 8000 depth 4}}]
   (let [db (store/database graph)
-        exact (graph-read/exact-symbols db focus)
-        matches (or (seq exact) (seq (query/symbols graph focus)))
+        max-symbols (max 1 (quot max-tokens 8))
+        exact (graph-read/exact-symbols db focus max-symbols)
+        matches (or (seq exact)
+                    (seq (query/symbols graph focus max-symbols)))
         seeds (mapv :id (or (seq exact) (seq matches)))]
     (when-not (seq seeds)
       (throw (ex-info (str "No symbol matches context focus: " focus)
                       {:exit-code 2 :focus focus})))
-    (let [max-symbols (max 1 (quot max-tokens 8))
-          {:keys [order truncated?]}
+    (let [{:keys [order truncated?]}
           (traversal-order db seeds depth max-symbols)
           ids (mapv :id order)
           catalog (graph-read/symbols-by-ids db ids)

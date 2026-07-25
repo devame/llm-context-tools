@@ -101,7 +101,9 @@
   indexed)
 
 (defn- pull-many [db eids]
-  (mapv #(d/pull db '[*] %) eids))
+  (if (seq eids)
+    (d/pull-many db '[*] eids)
+    []))
 
 (defn- eid-by [db attribute value]
   (d/q '[:find ?entity .
@@ -242,17 +244,20 @@
                       {:now now :lease-ms lease-ms :limit limit})))
     (let [conn (connection graph)
           candidates
-          (->> (d/q '[:find ?entity ?available ?id
-                      :in $ ?provider ?now
-                      :where
-                      [?entity :semantic.job/provider ?provider]
-                      [?entity :semantic.job/status :pending]
-                      [?entity :semantic.job/available-at ?available]
-                      [(<= ?available ?now)]
-                      [?entity :semantic.job/id ?id]]
-                    (d/db conn) provider now)
-               (sort-by (juxt second #(nth % 2)))
-               (take limit))]
+          (d/q
+           (conj
+            '[:find ?entity ?available ?id
+              :in $ ?provider ?now
+              :where
+              [?entity :semantic.job/provider ?provider]
+              [?entity :semantic.job/status :pending]
+              [?entity :semantic.job/available-at ?available]
+              [(<= ?available ?now)]
+              [?entity :semantic.job/id ?id]
+              :order-by [?available :asc ?id :asc]
+              :limit]
+            (long limit))
+           (d/db conn) provider now)]
       (reduce
        (fn [leased [eid _ _]]
          (try
