@@ -38,14 +38,14 @@
      (str analyzer-version "\u001f" (pr-str analysis-options)
           "\u001f" content))))
 
-(defn- platform-for [file-language lang]
+(defn- platforms-for [file-language lang]
   (case lang
-    :clj :clj
-    :cljs :cljs
+    :clj [:clj]
+    :cljs [:cljs]
     (case file-language
-      :language/clojure :clj
-      :language/clojurescript :cljs
-      :language/clojure-common :clj)))
+      :language/clojure [:clj]
+      :language/clojurescript [:cljs]
+      :language/clojure-common [:clj :cljs])))
 
 (defn- relative-filename [project filename]
   (let [path (.normalize (.toAbsolutePath (.toPath (io/file filename))))]
@@ -59,7 +59,7 @@
         file-language (get language-by-path relative)]
     (-> record
         (assoc :filename relative
-               :platform (platform-for file-language (:lang record)))
+               :platforms (platforms-for file-language (:lang record)))
         (dissoc :uri))))
 
 (defn- finding->diagnostic [project finding]

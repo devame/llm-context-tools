@@ -46,6 +46,9 @@
 (s/def :symbol/file :file/id)
 (s/def :symbol/platform platforms)
 (s/def :symbol/analyzer keyword?)
+(s/def :symbol/private? boolean?)
+(s/def :symbol/macro? boolean?)
+(s/def :symbol/arglists string?)
 (s/def :symbol/signature string?)
 (s/def :symbol/doc string?)
 (s/def :symbol/search-text (s/and string? seq))
@@ -95,6 +98,7 @@
                        :symbol/qualified-name :symbol/kind :symbol/file]
                  :opt [:symbol/signature :symbol/doc
                        :symbol/search-text :symbol/platform :symbol/analyzer
+                       :symbol/private? :symbol/macro? :symbol/arglists
                        :source/start-line :source/start-column
                        :source/end-line :source/end-column])
          #(or (not (contains? % :source/start-line))
@@ -283,6 +287,11 @@
                      :db/index true}
    :symbol/analyzer {:db/valueType :db.type/keyword
                      :db/index true}
+   :symbol/private? {:db/valueType :db.type/boolean
+                     :db/index true}
+   :symbol/macro? {:db/valueType :db.type/boolean
+                   :db/index true}
+   :symbol/arglists {:db/valueType :db.type/string}
    :symbol/file {:db/valueType :db.type/ref
                  :db/index true}
    :symbol/signature {:db/valueType :db.type/string}

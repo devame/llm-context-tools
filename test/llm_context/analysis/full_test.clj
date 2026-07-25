@@ -23,7 +23,7 @@
               :parse-complete :persist-start :persist-progress :resolve-start
               :resolve-edges-selected :resolve-edges-loaded
               :resolve-candidates-selected
-              :resolve-plan :resolve-progress
+              :resolve-plan
               :semantic-reconcile-start :semantic-reconcile-complete
               :complete]
              (mapv :stage @events)))

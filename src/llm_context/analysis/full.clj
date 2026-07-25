@@ -1,10 +1,13 @@
 (ns llm-context.analysis.full
   (:require [llm-context.analysis.effects :as effects]
+            [llm-context.analysis.clj-kondo :as clj-kondo]
+            [llm-context.analysis.clojure :as clojure-analysis]
             [llm-context.analysis.files :as files]
             [llm-context.analysis.resolve :as resolve]
             [llm-context.analysis.structural :as structural]
             [llm-context.graph.read :as graph-read]
             [llm-context.indexer :as indexer]
+            [llm-context.model.ids :as ids]
             [llm-context.parser.jtreesitter :as jtreesitter]
             [llm-context.parser.provider :as parser]
             [llm-context.semantic.reconcile :as semantic-reconcile]
@@ -16,6 +19,18 @@
 (defn- enrich-effects [{:keys [file entities] :as output}]
   (let [edges (filter :edge/id entities)]
     (update output :entities into (effects/analyze (:file/language file) edges))))
+
+(defn- edn-output
+  [{:keys [relative-path language content size modified-at]}]
+  {:file {:entity/type :entity.type/file
+          :file/id (ids/file-id relative-path)
+          :file/path relative-path
+          :file/language language
+          :file/content-hash (ids/content-hash content)
+          :file/size size
+          :file/modified-at modified-at}
+   :entities []
+   :diagnostics []})
 
 (defn- emit! [progress stage data]
   (when progress
@@ -71,14 +86,29 @@
              _ (emit! progress :discover-complete
                       {:files total :diagnostics (count diagnostics)})
              structural-indexer (structural/create parser-provider)
+             clojure-files
+             (filterv #(contains? clj-kondo/clojure-languages (:language %))
+                      files)
+             janet-files (filterv #(= :language/janet (:language %)) files)
+             edn-files (filterv #(= :language/edn-data (:language %)) files)
+             clojure-snapshot (clj-kondo/analyze! project clojure-files)
+             by-path
+             (into {}
+                   (map (juxt (comp :file/path :file) identity)
+                        (concat
+                         (clojure-analysis/materialize
+                          clojure-files clojure-snapshot)
+                         (map #(-> (indexer/index-file structural-indexer %)
+                                   enrich-effects)
+                              janet-files)
+                         (map edn-output edn-files))))
              extracted
              (mapv (fn [index file]
                      (when (or (zero? index) (zero? (mod index 25)))
                        (emit! progress :parse-progress
                               {:completed index :total total
                                :file (:relative-path file)}))
-                     (-> (indexer/index-file structural-indexer file)
-                         enrich-effects))
+                     (get by-path (:relative-path file)))
                    (range) files)
              _ (emit! progress :parse-complete
                       {:completed total :total total})
@@ -107,5 +137,6 @@
             :resolution resolution
             :semantic semantic-plan
             :diagnostics (vec (concat diagnostics
+                                      (:diagnostics clojure-snapshot)
                                       (mapcat :diagnostics extracted)
                                       (:diagnostics semantic-plan)))}))))))

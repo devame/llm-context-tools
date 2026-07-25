@@ -46,8 +46,7 @@
 (defn- normalize-target [target]
   (-> target
       str/trim
-      (str/replace #"\s+" "")
-      (str/replace #"\." "/")))
+      (str/replace #"\s+" "")))
 
 (defn- matching-pattern [language target]
   (let [normalized (normalize-target target)]
