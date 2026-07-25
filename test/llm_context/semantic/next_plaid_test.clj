@@ -80,6 +80,16 @@
                        [:body :config :start_from_scratch])))
       (is (= 4 (get-in create-request [:body :config :nbits]))))))
 
+(deftest ensure-index-recognizes-index-list-response
+  (let [requests (atom [])
+        client (scripted-client
+                (atom [(response 200 ["llm-context"])])
+                requests)]
+    (is (= {:name "llm-context"}
+           (index/ensure-index! client)))
+    (is (= 1 (count @requests)))
+    (is (= "/indices" (:path (first @requests))))))
+
 (deftest document-mutations-use-stable-private-metadata
   (let [requests (atom [])
         client (scripted-client

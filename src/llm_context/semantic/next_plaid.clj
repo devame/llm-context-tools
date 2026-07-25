@@ -150,13 +150,20 @@
        :raw raw}))
 
   (ensure-index! [client]
-    (let [path (str "/indices/" index-name)
-          response (send-request client {:method :get :path path
-                                         :timeout-ms
-                                         (:health-timeout-ms settings)})]
-      (case (:status response)
-        200 (:parsed response)
-        404
+    (let [request {:method :get :path "/indices"
+                   :timeout-ms (:health-timeout-ms settings)}
+          response (send-request client request)
+          listed (when (= 200 (:status response)) (:parsed response))
+          existing (some (fn [entry]
+                           (let [name (if (map? entry) (:name entry) entry)]
+                             (when (= index-name name)
+                               (if (map? entry) entry {:name name}))))
+                         listed)]
+      (cond
+        existing
+        existing
+
+        (contains? #{200 404} (:status response))
         (try
           (request! client
                     {:method :post
@@ -170,12 +177,19 @@
                              :fts_tokenizer "unicode61"
                              :binary false}}})
           (catch clojure.lang.ExceptionInfo error
-            ;; Another coordinator may have won declaration after our GET.
+            ;; Another coordinator may have won declaration after our list.
             (if (= 409 (:status (ex-data error)))
-              (request! client {:method :get :path path
-                                :timeout-ms (:health-timeout-ms settings)})
+              (let [after (request! client request)]
+                (or (some (fn [entry]
+                            (let [name (if (map? entry) (:name entry) entry)]
+                              (when (= index-name name)
+                                (if (map? entry) entry {:name name}))))
+                          after)
+                    (throw error)))
               (throw error))))
-        (throw (api-error response {:method :get :path path})))))
+
+        :else
+        (throw (api-error response request)))))
 
   (add-documents! [client documents]
     (when-not (seq documents)
