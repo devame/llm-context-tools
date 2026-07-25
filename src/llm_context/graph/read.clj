@@ -455,7 +455,40 @@
       {:indexed indexed :jobs jobs :dirty-files dirty-files})))
 
 (defn semantic-counts [db provider]
-  (let [indexed
+  (let [symbol-count
+        (or (d/q '[:find (count ?symbol) .
+                   :where [?symbol :symbol/id _]]
+                 db)
+            0)
+        wrapper-count
+        (or (d/q '[:find (count ?symbol) .
+                   :in $ [?kind ...]
+                   :where [?symbol :symbol/kind ?kind]]
+                 db [:symbol.kind/module :symbol.kind/namespace])
+            0)
+        desired (max 0 (- symbol-count wrapper-count))
+        indexed-present
+        (or (d/q '[:find (count ?record) .
+                   :in $ ?provider
+                   :where
+                   [?record :semantic.indexed/provider ?provider]
+                   [?record :semantic.indexed/symbol-id ?symbol-id]
+                   [?symbol :symbol/id ?symbol-id]]
+                 db provider)
+            0)
+        indexed-wrappers
+        (or (d/q '[:find (count ?record) .
+                   :in $ ?provider [?kind ...]
+                   :where
+                   [?record :semantic.indexed/provider ?provider]
+                   [?record :semantic.indexed/symbol-id ?symbol-id]
+                   [?symbol :symbol/id ?symbol-id]
+                   [?symbol :symbol/kind ?kind]]
+                 db provider
+                 [:symbol.kind/module :symbol.kind/namespace])
+            0)
+        indexed-current (max 0 (- indexed-present indexed-wrappers))
+        indexed
         (or (d/q '[:find (count ?record) .
                    :in $ ?provider
                    :where [?record :semantic.indexed/provider ?provider]]
@@ -483,7 +516,9 @@
                    :where [?marker :semantic.dirty/provider ?provider]]
                  db provider)
             0)]
-    {:indexed indexed
+    {:desired desired
+     :indexed indexed
+     :indexed-current indexed-current
      :pending (get by-status :pending 0)
      :leased (get by-status :leased 0)
      :failed (get by-status :failed 0)

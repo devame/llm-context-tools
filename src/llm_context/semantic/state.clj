@@ -124,6 +124,8 @@
     "Return dirty markers for a provider in deterministic order.")
   (clear-dirty! [graph provider file-id]
     "Remove a dirty marker after it has been reconciled.")
+  (record-dirty-diagnostic! [graph provider file-id timestamp message]
+    "Persist the latest deferred reconciliation diagnostic.")
   (enqueue-job! [graph job]
     "Create or supersede one coalesced symbol job.")
   (cancel-job! [graph provider symbol-id]
@@ -189,6 +191,20 @@
           db (d/db conn)]
       (when-let [eid (eid-by db :semantic.dirty/id (dirty-id provider file-id))]
         (d/transact! conn [[:db/retractEntity eid]])
+        true)))
+
+  (record-dirty-diagnostic! [graph provider file-id timestamp message]
+    (let [conn (connection graph)
+          db (d/db conn)]
+      (when-let [eid (eid-by db :semantic.dirty/id
+                             (dirty-id provider file-id))]
+        (d/transact!
+         conn
+         [{:db/id eid
+           :semantic.dirty/last-error-at timestamp
+           :semantic.dirty/last-error
+           (subs (str message)
+                 0 (min max-error-length (count (str message))))}])
         true)))
 
   (enqueue-job! [graph job]
@@ -450,15 +466,29 @@
   (semantic-summary [graph provider now]
     (let [{:keys [oldest-pending-at] :as counts}
           (graph-read/semantic-counts (store/database graph) provider)]
-      {:provider provider
-       :indexed (:indexed counts)
+      (let [desired (:desired counts)
+            indexed (:indexed-current counts)
+            complete? (and (= desired indexed)
+                           (zero? (:pending counts))
+                           (zero? (:leased counts))
+                           (zero? (:failed counts))
+                           (zero? (:dirty counts)))]
+       {:provider provider
+       :desired desired
+       :indexed indexed
+       :indexed-records (:indexed counts)
+       :coverage-percent
+       (if (zero? desired)
+         100.0
+         (double (/ (Math/round (* 10000.0 (/ indexed desired))) 100.0)))
+       :completeness (if complete? :complete :partial)
        :pending (:pending counts)
        :leased (:leased counts)
        :failed (:failed counts)
        :oldest-pending-ms (when oldest-pending-at
                             (max 0 (- now oldest-pending-at)))
        :dirty (:dirty counts)
-       :watermark (watermark graph provider)}))
+       :watermark (watermark graph provider)})))
 
   (record-watermark! [graph {:keys [provider state last-success-at
                                     last-error-at last-error graph-revision]
@@ -499,3 +529,34 @@
       (when-let [eid (eid-by db :semantic.watermark/id
                              (watermark-id provider))]
         (d/pull db '[*] eid)))))
+
+(defn failure-records
+  "Return operator-facing terminal failures with graph file paths."
+  [graph provider]
+  (let [db (store/database graph)]
+    (->> (job-records graph provider)
+         (filter #(= :failed (:semantic.job/status %)))
+         (mapv
+          (fn [job]
+            {:symbol-id (:semantic.job/symbol-id job)
+             :file-id (:semantic.job/file-id job)
+             :file (graph-read/file-path db (:semantic.job/file-id job))
+             :operation (:semantic.job/operation job)
+             :attempts (:semantic.job/attempts job)
+             :timestamp (:semantic.job/updated-at job)
+             :last-error (:semantic.job/last-error job)})))))
+
+(defn dirty-details
+  "Return deferred file markers and their last durable reconciliation state."
+  [graph provider]
+  (let [db (store/database graph)]
+    (mapv
+     (fn [marker]
+       {:file-id (:semantic.dirty/file-id marker)
+        :file (graph-read/file-path db (:semantic.dirty/file-id marker))
+        :operation (:semantic.dirty/operation marker)
+        :created-at (:semantic.dirty/created-at marker)
+        :file-hash (:semantic.dirty/file-hash marker)
+        :last-error-at (:semantic.dirty/last-error-at marker)
+        :last-error (:semantic.dirty/last-error marker)})
+     (dirty-records graph provider))))

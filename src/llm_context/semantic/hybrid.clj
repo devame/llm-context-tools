@@ -65,22 +65,34 @@
     (contains? lexical-ids id) (conj :fts)
     (contains? semantic-ids id) (conj :lateon)))
 
-(defn search
-  "Fuse already-ranked lexical results with fresh LateOn candidates.
+(defn- failure-status [error]
+  (if (or (= :semantic/timeout (:type (ex-data error)))
+          (instance? java.util.concurrent.TimeoutException error)
+          (re-find #"(?i)timed? out|timeout" (or (.getMessage error) "")))
+    :timeout
+    :error))
 
-  Exact lexical identifiers remain first. Semantic failures intentionally
-  collapse to lexical-only results."
+(defn search-with-metadata
+  "Fuse lexical results with fresh LateOn candidates and explain semantic
+  availability, latency, raw recall, freshness acceptance, and stale rejects."
   [graph client config term lexical-results]
   (let [lateon (get-in config [:semantic :lateon-code])
         lexical-ids (vec (keep :id lexical-results))
-        raw-semantic-candidates
+        started (System/nanoTime)
+        semantic-attempt
         (if (and client (reconcile/enabled? config))
           (try
-            (index/search-text
-             client term {:top-k (:candidate-count lateon)})
-            (catch Throwable _
-              []))
-          [])
+            {:status :ok
+             :candidates
+             (vec (index/search-text
+                   client term {:top-k (:candidate-count lateon)}))}
+            (catch Throwable error
+              {:status (failure-status error)
+               :error (or (.getMessage error) (str (class error)))
+               :candidates []}))
+          {:status :unavailable :candidates []})
+        latency-ms (long (/ (- (System/nanoTime) started) 1000000))
+        raw-semantic-candidates (:candidates semantic-attempt)
         raw-semantic-ids
         (mapv #(get-in % [:metadata :llm_symbol_id])
               raw-semantic-candidates)
@@ -102,25 +114,42 @@
         semantic-set (set semantic-ids)
         lexical-scores (ranked-scores lexical-ids)
         semantic-scores (ranked-scores semantic-ids)
-        all-ids (distinct (concat lexical-ids semantic-ids))]
-    (->> all-ids
-         (keep
-          (fn [id]
-            (when-let [symbol (get symbols id)]
-              ;; Do not use a set literal here: a canonical symbol ID can be
-              ;; identical to its qualified name, and duplicate values in a
-              ;; literal set throw during construction.  Explicit equality
-              ;; checks preserve exact-match semantics without that hazard.
-              (let [exact? (or (= term id)
-                               (= term (:name symbol))
-                               (= term (:qualified-name symbol)))]
-                (assoc symbol
-                       :matched-by
-                       (matched-sources id lexical-set semantic-set)
-                       :score (+ (get lexical-scores id 0.0)
-                                 (get semantic-scores id 0.0))
-                       ::exact? exact?)))))
-         (sort-by (juxt #(if (::exact? %) 0 1)
-                        (comp - :score)
-                        :qualified-name))
-         (mapv #(dissoc % ::exact?)))))
+        all-ids (distinct (concat lexical-ids semantic-ids))
+        results
+        (->> all-ids
+             (keep
+              (fn [id]
+                (when-let [symbol (get symbols id)]
+                  (let [exact? (or (= term id)
+                                   (= term (:name symbol))
+                                   (= term (:qualified-name symbol)))]
+                    (assoc symbol
+                           :matched-by
+                           (matched-sources id lexical-set semantic-set)
+                           :score (+ (get lexical-scores id 0.0)
+                                     (get semantic-scores id 0.0))
+                           ::exact? exact?)))))
+             (sort-by (juxt #(if (::exact? %) 0 1)
+                            (comp - :score)
+                            :qualified-name))
+             (mapv #(dissoc % ::exact?)))
+        raw-count (count raw-semantic-candidates)
+        accepted-count (count semantic-candidates)
+        status (if (and (= :ok (:status semantic-attempt))
+                        (zero? raw-count))
+                 :no-matches
+                 (:status semantic-attempt))]
+    {:results results
+     :retrieval
+     (cond-> {:status status
+              :latency-ms latency-ms
+              :raw-candidate-count raw-count
+              :accepted-fresh-candidate-count accepted-count
+              :rejected-stale-candidate-count (- raw-count accepted-count)}
+       (:error semantic-attempt)
+       (assoc :error (:error semantic-attempt)))}))
+
+(defn search
+  "Compatibility result-vector surface for hybrid search."
+  [graph client config term lexical-results]
+  (:results (search-with-metadata graph client config term lexical-results)))

@@ -131,3 +131,79 @@
       (let [result (query/search graph failing settings "persistent database")]
         (is (= ["symbol:caller"] (mapv :id result)))
         (is (= #{:fts} (:matched-by (first result))))))))
+
+(deftest retrieval-explanation-distinguishes-timeouts-errors-and-no-matches
+  (let [{:keys [project file entities]} (fixture/fixture)
+        client
+        (fn [error]
+          (reify index/SemanticIndex
+            (index-health [_] {:ready? true})
+            (ensure-index! [_] nil)
+            (add-documents! [_ _] nil)
+            (delete-symbols! [_ _] nil)
+            (indexed-chunk-count [_ _ _] 0)
+            (search-text [_ _ _] (throw error))
+            (close-index! [_] nil)))]
+    (store/with-store [graph project settings]
+      (store/replace-file! graph file entities)
+      (let [timeout
+            (query/search-explain
+             graph (client (java.util.concurrent.TimeoutException. "slow"))
+             settings "persistent database")
+            failure
+            (query/search-explain
+             graph (client (ex-info "offline" {}))
+             settings "persistent database")
+            no-matches
+            (query/search-explain graph (fake/create) settings
+                                  "persistent database")]
+        (is (= :timeout (get-in timeout [:retrieval :status])))
+        (is (= :error (get-in failure [:retrieval :status])))
+        (is (= :no-matches (get-in no-matches [:retrieval :status])))
+        (is (= ["symbol:caller"] (mapv :id (:results timeout))))
+        (is (= 0 (get-in timeout [:retrieval :raw-candidate-count])))))))
+
+(deftest fresh-and-stale-candidate-counts-are-observable
+  (let [{:keys [project file entities]} (fixture/fixture)
+        client (fake/create)]
+    (store/with-store [graph project settings]
+      (store/replace-file! graph file entities)
+      (state/put-indexed!
+       graph (indexed "symbol:caller" (:file/id file) "sha256:caller"))
+      (fake/set-search-results!
+       client [(candidate "symbol:caller" (:file/id file)
+                          "sha256:caller" 0 10.0)
+               (candidate "symbol:callee" (:file/id file)
+                          "sha256:stale" 0 9.0)])
+      (let [retrieval
+            (:retrieval
+             (query/search-explain graph client settings "semantic concept"))]
+        (is (= :ok (:status retrieval)))
+        (is (= 2 (:raw-candidate-count retrieval)))
+        (is (= 1 (:accepted-fresh-candidate-count retrieval)))
+        (is (= 1 (:rejected-stale-candidate-count retrieval)))))))
+
+(deftest interactive-deadline-allows-a-subsecond-lateon-response
+  (let [{:keys [project file entities]} (fixture/fixture)
+        slow
+        (reify index/SemanticIndex
+          (index-health [_] {:ready? true})
+          (ensure-index! [_] nil)
+          (add-documents! [_ _] nil)
+          (delete-symbols! [_ _] nil)
+          (indexed-chunk-count [_ _ _] 0)
+          (search-text [_ _ _]
+            (Thread/sleep 600)
+            [])
+          (close-index! [_] nil))]
+    (is (= 1500 (get-in settings
+                        [:semantic :lateon-code :query-timeout-ms])))
+    (store/with-store [graph project settings]
+      (store/replace-file! graph file entities)
+      (let [retrieval
+            (:retrieval
+             (query/search-explain graph slow settings
+                                   "persistent database"))]
+        (is (= :no-matches (:status retrieval)))
+        (is (>= (:latency-ms retrieval) 500))
+        (is (= 0 (:raw-candidate-count retrieval)))))))

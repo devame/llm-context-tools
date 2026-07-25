@@ -87,6 +87,12 @@
     (is (= :ready
            (get-in (client/request project {:op :semantic-status})
                    [:value :runtime :status])))
+    (is (= :available
+           (get-in (client/request project {:op :semantic-status})
+                   [:value :availability])))
+    (is (= :complete
+           (get-in (client/request project {:op :semantic-status})
+                   [:value :completeness])))
     (is (= (str (.resolve root "next-plaid.log"))
            (get-in (client/request project {:op :semantic-status})
                    [:value :runtime :log-path])))

@@ -157,6 +157,14 @@
     (hybrid/search graph semantic-client config term
                    (symbols graph term candidate-limit))))
 
+(defn search-explain [graph semantic-client config term]
+  (let [candidate-limit (or (get-in config
+                                    [:semantic :lateon-code :candidate-count])
+                            50)]
+    (hybrid/search-with-metadata
+     graph semantic-client config term
+     (symbols graph term candidate-limit))))
+
 (defn callers [graph target]
   (->> (store/query
         graph

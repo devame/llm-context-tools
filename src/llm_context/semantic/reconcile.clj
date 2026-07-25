@@ -1,7 +1,8 @@
 (ns llm-context.semantic.reconcile
   "Translate durable dirty markers into coalesced symbol upserts/deletes by
   comparing authoritative graph documents with recorded NextPlaid state."
-  (:require [llm-context.graph.read :as graph-read]
+  (:require [clojure.string :as str]
+            [llm-context.graph.read :as graph-read]
             [llm-context.semantic.document :as document]
             [llm-context.semantic.state :as state]
             [llm-context.store :as store]))
@@ -93,6 +94,12 @@
                          (update :unchanged inc)
                          (update :cancelled +
                                  (if pending-record 1 0))))
+
+                   (and wanted
+                        (= :failed (:semantic.job/status pending-record)))
+                   ;; Terminal work is inspectable and remains terminal until
+                   ;; the operator explicitly requests semantic retry.
+                   (update result :unchanged inc)
 
                    wanted
                    (do
@@ -194,6 +201,13 @@
            results (mapv #(reconcile-file-safely! graph project lateon % now)
                          work)
            deferred (count (filter #(= :deferred (:status %)) results))]
+       (doseq [{:keys [status file-id diagnostics]} results
+               :when (= :deferred status)]
+         (state/record-dirty-diagnostic!
+          graph provider file-id now
+          (or (some->> diagnostics (map :message) (remove nil?) seq
+                       (str/join "; "))
+              "Semantic reconciliation deferred without details")))
        (when (and full? (zero? deferred))
          (state/clear-dirty! graph provider project-marker))
        {:enabled? true
@@ -204,3 +218,24 @@
         :unchanged (reduce + (map :unchanged results))
         :deferred deferred
         :diagnostics (vec (mapcat :diagnostics results))}))))
+
+(defn retry-failed!
+  "Cancel terminal jobs only when their source file still exists, mark those
+  files dirty, and reconcile fresh desired documents."
+  ([graph project config]
+   (retry-failed! graph project config (System/currentTimeMillis)))
+  ([graph project config now]
+   (let [db (store/database graph)
+         hashes (graph-read/file-hashes db)
+         failures (state/failure-records graph provider)
+         eligible (filter #(contains? hashes (:file-id %)) failures)
+         stale (remove #(contains? hashes (:file-id %)) failures)]
+     (doseq [{:keys [symbol-id file-id]} eligible]
+       (state/cancel-job! graph provider symbol-id)
+       (state/mark-dirty!
+        graph (dirty-marker file-id (get hashes file-id) :upsert now)))
+     (doseq [{:keys [symbol-id]} stale]
+       (state/cancel-job! graph provider symbol-id))
+     (assoc (reconcile! graph project config now)
+            :retried (count eligible)
+            :discarded-stale (count stale)))))

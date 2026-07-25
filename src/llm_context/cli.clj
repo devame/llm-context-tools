@@ -202,9 +202,14 @@
     "stats" ((resolve-fn 'llm-context.query/stats) graph)
     "find-symbol" ((resolve-fn 'llm-context.query/find-symbol)
                    graph (require-argument subcommand args))
-    "search" ((resolve-fn 'llm-context.query/search)
-              graph semantic-client settings
-              (require-argument subcommand args))
+    "search"
+    (let [term (require-argument subcommand args)
+          options (set (next args))]
+      (when-let [unknown (first (remove #{"--explain"} options))]
+        (throw (ex-info (str "Unknown query search option: " unknown)
+                        {:exit-code 2})))
+      ((resolve-fn 'llm-context.query/search-explain)
+       graph semantic-client settings term))
     "callers" ((resolve-fn 'llm-context.query/callers)
                graph (require-argument subcommand args))
     "callees" ((resolve-fn 'llm-context.query/callees-command) graph args)
@@ -224,12 +229,27 @@
         command-args (vec (next args))
         remote (remote-value context {:op :query :subcommand subcommand
                                       :args command-args})]
-    (if-not (= unavailable remote)
-      (pprint/pprint remote)
-      (let [settings (config/load-config context)]
-        (with-graph context settings
-          #(pprint/pprint
-            (execute-query % nil settings subcommand command-args)))))
+    (let [value
+          (if-not (= unavailable remote)
+            remote
+            (let [settings (config/load-config context)]
+              (with-graph context settings
+                #(execute-query % nil settings subcommand command-args))))]
+      (if (= "search" subcommand)
+        (let [explain? (some #{"--explain"} command-args)
+              retrieval (:retrieval value)]
+          (when (and (not explain?)
+                     (contains? #{:timeout :unavailable :error}
+                                (:status retrieval)))
+            (binding [*out* *err*]
+              (println
+               (str "warning: semantic retrieval "
+                    (name (:status retrieval))
+                    "; returning Datalevin FTS results"
+                    (when-let [detail (:error retrieval)]
+                      (str " (" detail ")"))))))
+          (pprint/pprint (if explain? value (:results value))))
+        (pprint/pprint value)))
     0))
 
 (defn- local-semantic-status [context settings]
@@ -248,7 +268,9 @@
 (defn- semantic-synchronized? [status]
   (and (zero? (:pending status))
        (zero? (:leased status))
-       (zero? (:dirty status))))
+       (zero? (:failed status))
+       (zero? (:dirty status))
+       (= :complete (:completeness status))))
 
 (defmethod execute "semantic" [context _ args]
   (let [subcommand (or (first args) "status")
@@ -329,6 +351,47 @@
                     (do
                       (Thread/sleep 250)
                       (recur (semantic-status context settings))))))))))
+
+      "failures"
+      (do
+        (when (seq options)
+          (throw (ex-info "semantic failures does not accept options"
+                          {:exit-code 2})))
+        (let [value (remote-value context {:op :semantic-failures})]
+          (when (= unavailable value)
+            (throw (ex-info
+                    "Semantic failure inspection requires a running project service"
+                    {:exit-code 2})))
+          (pprint/pprint value)))
+
+      "dirty"
+      (do
+        (when (seq options)
+          (throw (ex-info "semantic dirty does not accept options"
+                          {:exit-code 2})))
+        (let [value (remote-value context {:op :semantic-dirty})]
+          (when (= unavailable value)
+            (throw (ex-info
+                    "Semantic dirty inspection requires a running project service"
+                    {:exit-code 2})))
+          (pprint/pprint value)))
+
+      "retry"
+      (do
+        (when-let [unknown (first (remove #{"--failed" "--wait"} options))]
+          (throw (ex-info (str "Unknown semantic retry option: " unknown)
+                          {:exit-code 2})))
+        (when-not (contains? options "--failed")
+          (throw (ex-info "semantic retry currently requires --failed"
+                          {:exit-code 2})))
+        (let [value (remote-value context {:op :semantic-retry-failed})]
+          (when (= unavailable value)
+            (throw (ex-info
+                    "Semantic retry requires a running project service"
+                    {:exit-code 2})))
+          (if (contains? options "--wait")
+            (execute context "semantic" ["sync" "--wait"])
+            (pprint/pprint value))))
 
       (throw (ex-info (str "Unknown semantic command: " subcommand)
                       {:exit-code 2})))

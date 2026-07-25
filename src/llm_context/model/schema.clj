@@ -197,6 +197,8 @@
    :semantic.dirty/operation {:db/valueType :db.type/keyword
                               :db/index true}
    :semantic.dirty/created-at {:db/valueType :db.type/long}
+   :semantic.dirty/last-error-at {:db/valueType :db.type/long}
+   :semantic.dirty/last-error {:db/valueType :db.type/string}
 
    :semantic.job/id {:db/valueType :db.type/string
                      :db/unique :db.unique/identity}

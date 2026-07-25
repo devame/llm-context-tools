@@ -221,3 +221,30 @@
         (is (= 75 (:oldest-pending-ms summary)))
         (is (= :ready
                (get-in summary [:watermark :semantic.watermark/state])))))))
+
+(deftest semantic-summary-separates-partial-coverage-from-availability
+  (let [project (fixture/temp-project)
+        file (fixture/file-entity "src/coverage.clj" "source")
+        first-symbol (fixture/symbol-entity file "sample/first" 1)
+        second-symbol (fixture/symbol-entity file "sample/second" 2)]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-all! graph [file first-symbol second-symbol])
+      (state/put-indexed!
+       graph (assoc (indexed (:symbol/id first-symbol) "sha256:first" 10)
+                    :file-id (:file/id file)))
+      (state/enqueue-job!
+       graph (assoc (job (:symbol/id second-symbol) "sha256:second" 10)
+                    :file-id (:file/id file)))
+      (state/lease-jobs! graph provider "worker" 10 100 1)
+      (state/retry-job!
+       graph {:job-id (state/job-id provider (:symbol/id second-symbol))
+              :lease-owner "worker" :failed-at 20 :available-at 20
+              :error "terminal" :max-attempts 1})
+      (let [summary (state/semantic-summary graph provider 25)]
+        (is (= 2 (:desired summary)))
+        (is (= 1 (:indexed summary)))
+        (is (= 50.0 (:coverage-percent summary)))
+        (is (= :partial (:completeness summary)))
+        (is (= 1 (:failed summary))))
+      (is (= "terminal"
+             (:last-error (first (state/failure-records graph provider))))))))

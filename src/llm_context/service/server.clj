@@ -31,7 +31,14 @@
    (case subcommand
     "stats" (query/stats graph)
     "find-symbol" (query/find-symbol graph (argument))
-    "search" (query/search graph semantic-client settings (argument))
+    "search" (do
+               (argument)
+               (when-let [unknown
+                          (first (remove #{"--explain"} (next args)))]
+                 (throw (ex-info (str "Unknown query search option: " unknown)
+                                 {:exit-code 2})))
+               (query/search-explain graph semantic-client settings
+                                     (argument)))
     "callers" (query/callers graph (argument))
     "callees" (query/callees-command graph args)
     "trace" (query/transitive-callees graph (argument))
@@ -47,12 +54,16 @@
   (let [runtime (select-keys runtime-state
                              [:status :reason :detail :endpoint :log-path
                               :worker-status :worker-detail])]
-    (assoc (semantic-state/semantic-summary
-            graph semantic-reconcile/provider (System/currentTimeMillis))
-           :runtime
-           (cond-> runtime
-             (:log-path runtime)
-             (update :log-path str)))))
+    (let [summary (semantic-state/semantic-summary
+                   graph semantic-reconcile/provider
+                   (System/currentTimeMillis))
+          runtime
+          (cond-> runtime
+            (:log-path runtime) (update :log-path str))]
+      (assoc summary
+             :availability
+             (if (= :ready (:status runtime)) :available :unavailable)
+             :runtime runtime))))
 
 (defn- analyze! [graph project settings]
   (locking graph
@@ -73,6 +84,14 @@
         packet))
     :export (export/render graph (:format request))
     :semantic-status (semantic-status graph runtime)
+    :semantic-failures
+    (semantic-state/failure-records graph semantic-reconcile/provider)
+    :semantic-dirty
+    (semantic-state/dirty-details graph semantic-reconcile/provider)
+    :semantic-retry-failed
+    (locking graph
+      (semantic-reconcile/retry-failed! graph project settings)
+      (semantic-status graph runtime))
     :semantic-sync
     (locking graph
       ;; An explicit sync is also the operator's repair action for exhausted

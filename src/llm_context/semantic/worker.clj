@@ -156,6 +156,16 @@
           :available-at available-at
           :error (.getMessage ^Throwable error)
           :max-attempts max-attempts})]
+    (when (= :failed (:status result))
+      (binding [*out* *err*]
+        (println
+         (pr-str
+          {:event :semantic-terminal-failure
+           :symbol-id (:semantic.job/symbol-id job)
+           :file-id (:semantic.job/file-id job)
+           :attempts (:attempts result)
+           :timestamp failed-at
+           :error (.getMessage ^Throwable error)}))))
     {:status (or (:status result) :superseded)
      :operation (:semantic.job/operation job)
      :error error}))

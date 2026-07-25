@@ -170,4 +170,30 @@
             (is (= "src/app.clj"
                    (get-in result [:diagnostics 0 :file])))
             (is (= [failed-id]
-                   (mapv :semantic.dirty/file-id dirty)))))))))
+                   (mapv :semantic.dirty/file-id dirty)))
+            (is (str/includes? (:semantic.dirty/last-error (first dirty))
+                               "Input length"))))))))
+
+(deftest terminal-jobs-require-explicit-current-document-retry
+  (let [{:keys [project]}
+        (project-with-source "(ns sample.app)\n(defn useful [] :ok)")]
+    (full/analyze! project settings)
+    (store/with-store [graph project settings]
+      (let [pending (job graph)
+            now (System/currentTimeMillis)]
+        (state/lease-jobs! graph reconcile/provider "worker" now 100 1)
+        (state/retry-job!
+         graph {:job-id (:semantic.job/id pending)
+                :lease-owner "worker" :failed-at (+ now 1)
+                :available-at (+ now 1)
+                :error "terminal" :max-attempts 1})
+        (reconcile/mark-full! graph)
+        (reconcile/reconcile! graph project settings (+ now 2))
+        (is (= :failed (:semantic.job/status (job graph))))
+        (is (= 1 (count (state/failure-records
+                         graph reconcile/provider))))
+        (let [result (reconcile/retry-failed!
+                      graph project settings (+ now 3))]
+          (is (= 1 (:retried result)))
+          (is (= :pending (:semantic.job/status (job graph))))
+          (is (zero? (:semantic.job/attempts (job graph)))))))))
