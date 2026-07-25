@@ -7,9 +7,25 @@ clojure -M:bench 50
 ```
 
 It measures a full structural index, an unchanged incremental scan, a
-single-file incremental update, a Datalog statistics query, and a bounded
-context query. SCIP is disabled so network/package-manager behavior does not
-pollute structural-index measurements.
+single-file incremental update, a Datalog statistics query, a bounded Markdown
+summary, and a bounded context query. Every non-root fixture function calls the
+root function, deliberately creating a high-degree graph. The benchmark fails
+if incremental analysis does not remain single-file or if context construction
+violates its token-derived symbol ceiling. SCIP is disabled so
+network/package-manager behavior does not pollute structural-index measurements.
+
+Run at two sizes when reviewing graph-read changes:
+
+```bash
+clojure -M:bench 50
+clojure -M:bench 500
+```
+
+Compare the printed full, incremental, statistics, summary, and context
+latencies on the same machine. Focused query latency should be driven by the
+selected frontier and its degree, not by disconnected project size. CI also
+contains disconnected-symbol and 200-neighbor fan-out regressions; those are
+deterministic correctness gates rather than fragile wall-clock assertions.
 
 Measure JVM process startup separately:
 
@@ -63,4 +79,6 @@ Measured on 2026-07-21 in the repository's WSL workspace with JDK 25:
 
 The cold-process median remains above the one-second threshold even after lazy
 command loading reduced it from roughly 14 seconds, which is why the resident
-service is included.
+service is included. These historical numbers predate the high-fan-out
+benchmark fixture; use current benchmark output for comparisons rather than
+treating this table as a release threshold.

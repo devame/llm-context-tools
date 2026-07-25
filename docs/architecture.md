@@ -4,17 +4,24 @@
 
 The CLI resolves the project root and validated EDN configuration once. Full or
 incremental analysis discovers source files, parses supported files through the
-JTreeSitter provider, converts syntax into canonical entities, optionally runs
-SCIP TypeScript, resolves edges, classifies effects, and transacts file-owned
-facts into Datalevin.
+JTreeSitter provider, converts syntax into canonical entities, classifies
+effects, and transacts file-owned facts into Datalevin. Relationship resolution
+then starts from an immutable Datalevin snapshot. Optional SCIP TypeScript
+evidence is joined to focused database point lookups; it never creates a second
+application-owned graph.
 
 ```text
-source files ──> Tree-sitter ──> structural facts ──┐
-                                                   ├─> resolution/effects ─> Datalevin
-JS/TS project ──> SCIP TypeScript ─> exact evidence┘                         │
-                                                                               ├─> Datalog queries
-                                                                               ├─> context packets
-                                                                               └─> exports/summaries
+source files ──> Tree-sitter ──> canonical facts/effects ──> Datalevin
+                                                               │
+                      ┌────────────────────────────────────────┤
+JS/TS ──> SCIP ──────┤ focused source-point evidence           │
+                      └─> Datalog candidate selection ──> edge transactions
+                                                               │
+                              ┌────────────────────────────────┤
+                              ├─> focused Datalog queries
+                              ├─> bounded context traversal
+                              ├─> semantic indexing jobs
+                              └─> explicit full exports/repairs
 ```
 
 Three boundaries keep the implementation replaceable:
@@ -23,6 +30,30 @@ Three boundaries keep the implementation replaceable:
 - `SemanticIndexer` converts one file into canonical graph entities.
 - `GraphStore` owns validation, transactions, replacement, deletion, and
   Datalog execution.
+- `graph.read` owns snapshot-consistent selection, joins, aggregates, and
+  bounded graph projections used across commands and background work.
+
+## Datalevin-first execution rules
+
+Datalevin is the graph execution engine, not merely the final persistence
+format:
+
+- focused commands resolve an exact identity first, traverse only the requested
+  frontier, and pull records only after Datalevin has selected their IDs;
+- incremental analysis records changed file and symbol identities, asks
+  Datalevin for edges affected by those identities, and reconciles that set in
+  one batched transaction;
+- full analysis explicitly persists unresolved canonical edges before selecting
+  all edge IDs for database-backed resolution;
+- semantic reconciliation reads jobs, indexed state, and symbols by dirty file
+  or requested symbol; only an explicit full repair enumerates all files;
+- summaries use aggregates and database limits. Whole-graph exports and full
+  repair are named full operations and use one immutable snapshot.
+
+Production code must not rebuild global `group-by` indexes from parser output,
+pull every symbol before applying a focus, or issue one scalar database query
+per edge. In-memory operations are limited to already-selected bounded
+candidates, deterministic formatting, and external SCIP/embedding evidence.
 
 The optional service retains a warm JVM and one project Datalevin connection.
 It accepts sockets continuously and dispatches requests through a bounded
@@ -47,6 +78,11 @@ references in one large transaction. The tradeoff is that a process interrupted
 during persistence can leave a partial graph; the recovery operation is another
 full analysis.
 
+Context breadth is also bounded before record pulls. The token budget supplies
+a conservative symbol ceiling, and each Datalog neighbor query has a limit.
+This matters for hub symbols: token truncation after an unbounded traversal
+would still pay the cost of reading the whole connected component.
+
 ## What Clojure and Datalevin gain
 
 - Datalevin is called through its native Clojure API without a Node/JVM bridge.
@@ -56,6 +92,10 @@ full analysis.
   relationships owned by unchanged callers.
 - Recursive reachability and reverse graph questions are database queries, not
   rebuilt in-memory JSON indexes.
+- Indexed derived attributes such as `:edge/target-name` turn changed symbol
+  identities into focused incremental edge queries.
+- Aggregates, anti-joins, full-text search, immutable snapshots, pull patterns,
+  and bounded ordered queries replace repeated whole-table scans.
 - REPL-oriented development makes extraction and query behavior independently
   testable.
 - EDN keeps configuration expressive without adding executable configuration.

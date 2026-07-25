@@ -15,6 +15,12 @@
 References are Datalevin refs internally and canonical string IDs at the domain
 and export boundaries.
 
+Derived, indexed attributes are stored when they make a graph operation
+selective. For example, `:edge/target-name` is derived from target text so an
+incremental symbol change can locate potentially affected edges without loading
+every edge. These attributes are deterministic and resumably backfilled when an
+existing database is opened.
+
 ## Ownership and replacement
 
 A file owns its symbols, effects, and edges whose `from` symbol belongs to the
@@ -34,9 +40,15 @@ or simple symbol name is a heuristic target. Multiple matches are recorded as
 ambiguous and no match remains unresolved. No arbitrary target is selected to
 make the graph appear complete.
 
+Both full and incremental resolution operate on persisted facts. A full run
+selects all persisted edge identities explicitly. An incremental run selects
+only edges owned by changed files or whose indexed target identity intersects
+the old/new symbol names. Candidate symbols and source-point definitions are
+then selected by Datalog before a bounded decision set is transacted.
+
 ## Schema evolution
 
 The database schema is colocated with the domain specifications in
-`src/llm_context/model/schema.clj`. This is a greenfield 0.4 release: there is
-no legacy JSONL importer or automatic schema migration. During pre-release
-development, rebuild `.llm-context/` after incompatible schema changes.
+`src/llm_context/model/schema.clj`. Deterministic derived attributes have
+version markers and resumable backfills. There is no legacy JSONL importer;
+JSONL remains an export format rather than a persistence or migration path.

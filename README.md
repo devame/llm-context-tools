@@ -262,6 +262,7 @@ identifiers and bounded errors, not source documents.
 ```bash
 clojure -M:test
 clojure -M:bench 50
+clojure -M:bench 500
 clojure -M:semantic-bench /path/to/project queries.edn
 clojure -T:build dist
 npm pack --dry-run

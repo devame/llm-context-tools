@@ -182,6 +182,14 @@ The database itself is under `.llm-context/db/`. Keep that directory out of
 source control unless you intentionally want to distribute a generated graph;
 it is already ignored by the default configuration.
 
+Normal query and context commands do not export the graph into memory. They
+select identities, traverse relationships, join records, and aggregate counts
+inside Datalevin, then pull only the bounded result. `context` derives a
+conservative traversal ceiling from `--max-tokens`, so a high-degree symbol is
+reported as truncated instead of expanding the entire connected component.
+`export` and an explicit full analyze/semantic repair are the operations that
+intentionally enumerate project-wide facts.
+
 ## 8. Installation, privacy, and resource use
 
 The default one-script install downloads the INT8 LateOn snapshot (about
