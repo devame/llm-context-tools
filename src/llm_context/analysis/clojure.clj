@@ -1,6 +1,7 @@
 (ns llm-context.analysis.clojure
   "Materialize exact Clojure graph facts from normalized clj-kondo output."
   (:require [clojure.string :as str]
+            [llm-context.analysis.clojure-topics :as topics]
             [llm-context.analysis.effects :as effects]
             [llm-context.model.ids :as ids]))
 
@@ -331,6 +332,11 @@
      (fn [file]
        (let [path (:relative-path file)
              entities (vec (get facts-by-file path []))
+             framework-facts
+             (topics/extract
+              file
+              (filter #(= :entity.type/symbol (:entity/type %)) entities)
+              (filter #(= :entity.type/reference (:entity/type %)) entities))
              external-effects
              (->> entities
                   (filter #(and (= :entity.type/reference (:entity/type %))
@@ -348,6 +354,6 @@
                           :source/end-column (:source/end-column reference)}))
                   (effects/analyze (:language file)))]
          {:file (get file-entities path)
-          :entities (into entities external-effects)
+          :entities (vec (concat entities framework-facts external-effects))
           :diagnostics []}))
      files)))
