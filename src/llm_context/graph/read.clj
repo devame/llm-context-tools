@@ -67,6 +67,8 @@
     :symbol/name
     :symbol/qualified-name
     :symbol/kind
+    :symbol/platform
+    :symbol/analyzer
     :symbol/signature
     :symbol/doc
     :source/start-line
@@ -79,6 +81,8 @@
                :name (:symbol/name entity)
                :qualified-name (:symbol/qualified-name entity)
                :kind (:symbol/kind entity)
+               :platform (:symbol/platform entity)
+               :analyzer (:symbol/analyzer entity)
                :file (:file/path file)
                :file-id (:file/id file)
                :line (:source/start-line entity)}

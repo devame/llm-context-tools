@@ -11,10 +11,14 @@
      :files (get counts :entity.type/file 0)
      :symbols (get counts :entity.type/symbol 0)
      :edges (get counts :entity.type/edge 0)
+     :references (get counts :entity.type/reference 0)
+     :topics (get counts :entity.type/topic 0)
      :effects (get counts :entity.type/effect 0)
      :languages (graph-read/grouped-counts db :file/language)
      :symbol-kinds (graph-read/grouped-counts db :symbol/kind)
-     :edge-resolution (graph-read/grouped-counts db :edge/resolution)}))
+     :edge-resolution (graph-read/grouped-counts db :edge/resolution)
+     :reference-classification
+     (graph-read/grouped-counts db :reference/classification)}))
 
 (defn symbols
   "Find symbols by exact name, case-insensitive substring, or Datalevin

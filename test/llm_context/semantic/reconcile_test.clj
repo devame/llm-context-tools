@@ -70,10 +70,9 @@
       (is (= 1 (get-in result [:semantic :queued-upserts]))))
     (spit (str path) original)
     (let [result (incremental/analyze! project settings)]
-      ;; One-line Clojure definitions include their body in the current graph
-      ;; identity signature. Returning to the original source cancels both the
-      ;; old-symbol deletion and the changed-symbol insertion.
-      (is (= 2 (get-in result [:semantic :cancelled])))
+      ;; Graph format 2 keeps the symbol identity stable across body changes.
+      ;; Returning to the indexed document cancels the one pending replacement.
+      (is (= 1 (get-in result [:semantic :cancelled])))
       (is (= 1 (get-in result [:semantic :unchanged]))))
     (store/with-store [graph project settings]
       (is (empty? (state/job-records graph reconcile/provider)))

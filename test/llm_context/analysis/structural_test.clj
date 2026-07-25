@@ -22,12 +22,12 @@
         (analyze :language/clojurescript "src/app.cljs"
                  "(ns app) (defn greet [n] (println n))")
         symbols (filter :symbol/id entities)
-        edges (filter :edge/id entities)]
+        references (filter :reference/id entities)]
     (is (empty? diagnostics))
     (is (= "file:src/app.cljs" (:file/id file)))
     (is (some #(= "greet" (:symbol/name %)) symbols))
-    (is (some #(and (= :edge.kind/calls (:edge/kind %))
-                    (= "println" (:edge/target-text %))) edges))
+    (is (some #(and (= :edge.kind/calls (:reference/kind %))
+                    (= "println" (:reference/target-text %))) references))
     (doseq [entity (cons file entities)]
       (is (= entity (schema/validate-entity! entity))))))
 
@@ -36,8 +36,8 @@
         (analyze :language/clojure "src/app/core.clj"
                  "(ns app.core)\n(defn greet [name]\n  (println name))")]
     (is (some #(= "app.core/greet" (:symbol/qualified-name %)) entities))
-    (is (some #(and (= :edge.kind/calls (:edge/kind %))
-                    (= "println" (:edge/target-text %))) entities))))
+    (is (some #(and (= :edge.kind/calls (:reference/kind %))
+                    (= "println" (:reference/target-text %))) entities))))
 
 (deftest janet-forms-produce-symbol-call-and-import-facts
   (let [{:keys [entities diagnostics]}
@@ -54,15 +54,15 @@
            (set (map :symbol/name (remove #(= :symbol.kind/module
                                               (:symbol/kind %))
                                          symbols)))))
-    (is (some #(and (= :edge.kind/imports (:edge/kind %))
-                    (= "path" (:edge/target-text %))) entities))
-    (is (some #(and (= :edge.kind/calls (:edge/kind %))
-                    (= "print" (:edge/target-text %))) entities))
-    (is (some #(and (= :edge.kind/calls (:edge/kind %))
-                    (= "p/join" (:edge/target-text %))) entities))
-    (is (not-any? #(and (= :edge.kind/calls (:edge/kind %))
+    (is (some #(and (= :edge.kind/imports (:reference/kind %))
+                    (= "path" (:reference/target-text %))) entities))
+    (is (some #(and (= :edge.kind/calls (:reference/kind %))
+                    (= "print" (:reference/target-text %))) entities))
+    (is (some #(and (= :edge.kind/calls (:reference/kind %))
+                    (= "p/join" (:reference/target-text %))) entities))
+    (is (not-any? #(and (= :edge.kind/calls (:reference/kind %))
                         (contains? #{"def" "var" "defn" "defmacro" "import"}
-                                   (:edge/target-text %)))
+                                   (:reference/target-text %)))
                   entities))
     (doseq [entity entities]
       (is (= entity (schema/validate-entity! entity))))))

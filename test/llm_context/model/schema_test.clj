@@ -15,10 +15,12 @@
 (deftest deterministic-identities
   (is (= (ids/content-hash "same") (ids/content-hash "same")))
   (is (not= (ids/content-hash "same") (ids/content-hash "different")))
-  (let [parts {:file-id "file:a.clj" :kind :symbol.kind/function
-               :qualified-name "a/run" :signature "[]"
-               :start-line 3 :start-column 1}]
+  (let [parts {:platform :clj :file-id "file:a.clj"
+               :kind :symbol.kind/function :qualified-name "a/run"}]
     (is (= (ids/symbol-id parts) (ids/symbol-id parts)))
+    (is (= (ids/symbol-id parts)
+           (ids/symbol-id (assoc parts :signature "[x]"
+                                 :start-line 30 :start-column 4))))
     (is (not= (ids/symbol-id parts)
               (ids/symbol-id (assoc parts :qualified-name "a/stop"))))))
 
@@ -43,9 +45,11 @@
            :edge/id "edge:abc"
            :edge/kind :edge.kind/calls
            :edge/from "symbol:source"
+           :edge/to "symbol:target"
            :edge/target-text "target"
-           :edge/resolution :resolution/unresolved
-           :edge/confidence 1.5})))))
+           :edge/resolution :resolution/exact
+           :edge/confidence 1.5
+           :edge/evidence :clj-kondo-var-usage})))))
 
 (deftest symbol-search-text-preserves-and-expands-code-identifiers
   (let [text (schema/symbol-search-text
@@ -58,15 +62,22 @@
     (is (clojure.string/includes? text "sample edn safe fields"))
     (is (clojure.string/includes? text "input value"))))
 
-(deftest operator-targets-do-not-persist-nil-derived-identifiers
-  (let [edge {:entity/type :entity.type/edge
-              :edge/id "edge:divide"
-              :edge/kind :edge.kind/calls
-              :edge/from "symbol:source"
-              :edge/target-text "/"
-              :edge/resolution :resolution/unresolved
-              :edge/confidence 0.0}
-        derived (schema/with-derived-attributes edge)]
-    (is (nil? (schema/edge-target-name "/")))
-    (is (not (contains? derived :edge/target-name)))
-    (is (= derived (schema/validate-entity! derived)))))
+(deftest diagnostic-references-are-not-traversable-edges
+  (let [reference {:entity/type :entity.type/reference
+                   :reference/id "reference:divide"
+                   :reference/kind :edge.kind/calls
+                   :reference/symbol "symbol:source"
+                   :reference/target-text "/"
+                   :reference/classification :external
+                   :reference/evidence :clj-kondo-var-usage}]
+    (is (= reference (schema/validate-entity! reference)))
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (schema/validate-entity!
+                  {:entity/type :entity.type/edge
+                   :edge/id "edge:divide"
+                   :edge/kind :edge.kind/calls
+                   :edge/from "symbol:source"
+                   :edge/target-text "/"
+                   :edge/resolution :resolution/unresolved
+                   :edge/confidence 0.0
+                   :edge/evidence :tree-sitter-syntax})))))

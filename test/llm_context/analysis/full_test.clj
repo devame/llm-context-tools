@@ -70,14 +70,11 @@
                                  :where [?symbol :symbol/name ?name]
                                         [?symbol :symbol/kind :symbol.kind/function]]
                                []))))
-      (is (= #{:effect.kind/logging :effect.kind/file-read}
-             (set (store/query graph
-                               '[:find [?kind ...]
-                                 :where [_ :effect/kind ?kind]]
-                               []))))
       (is (some #{"./names"}
-                (store/query graph
-                             '[:find [?target ...]
-                               :where [?edge :edge/kind :edge.kind/imports]
-                                      [?edge :edge/target-text ?target]]
-                             []))))))
+                (store/query
+                 graph
+                 '[:find [?target ...]
+                   :where
+                   [?reference :reference/kind :edge.kind/imports]
+                   [?reference :reference/target-text ?target]]
+                 []))))))

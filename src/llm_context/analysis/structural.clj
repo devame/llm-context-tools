@@ -61,6 +61,14 @@
       (str/replace #"\.[^.]+$" "")
       (str/replace #"[/\\]" ".")))
 
+(defn- language-platform [language]
+  (case language
+    :language/clojure :clj
+    :language/clojurescript :cljs
+    :language/clojure-common :clj
+    :language/janet :janet
+    :language/edn-data :data))
+
 (defn- lisp-form-head [source node]
   (when-let [head (first (:children node))]
     (source-text source head)))
@@ -173,17 +181,18 @@
 (defn- canonical-symbol [file source candidate]
   (let [node (:node candidate)
         parts {:file-id (:file/id file)
+               :platform (:symbol/platform candidate)
                :kind (:kind candidate)
                :qualified-name (:qualified-name candidate)
-               :signature (signature source node)
-               :start-line (:source/start-line node)
-               :start-column (:source/start-column node)}]
+               :signature (signature source node)}]
     (merge {:entity/type :entity.type/symbol
             :symbol/id (ids/symbol-id parts)
             :symbol/name (:name candidate)
             :symbol/qualified-name (:qualified-name candidate)
             :symbol/kind (:kind candidate)
             :symbol/file (:file/id file)
+            :symbol/platform (:symbol/platform candidate)
+            :symbol/analyzer :tree-sitter-compat
             :symbol/signature (:signature parts)}
            (range-data node))))
 
@@ -204,22 +213,26 @@
 
 (defn- edge [kind from target source node]
   (let [target-text (str/trim (source-text source target))
-        parts {:kind kind :from-id (:symbol/id from) :target-text target-text
+        parts {:platform (:symbol/platform from)
+               :symbol-id (:symbol/id from)
+               :kind kind :target-text target-text
+               :classification :unresolved
                :start-line (:source/start-line node)
                :start-column (:source/start-column node)}]
-    (merge {:entity/type :entity.type/edge
-            :edge/id (ids/edge-id parts)
-            :edge/kind kind
-            :edge/from (:symbol/id from)
-            :edge/target-text target-text
-            :edge/resolution :resolution/unresolved
-            :edge/confidence 0.0
+    (merge {:entity/type :entity.type/reference
+            :reference/id (ids/reference-id parts)
+            :reference/kind kind
+            :reference/symbol (:symbol/id from)
+            :reference/target-text target-text
+            :reference/classification :unresolved
+            :reference/evidence :tree-sitter-syntax
             :source/snippet (signature source node)}
            (range-data node))))
 
 (defn- contains-edge [module symbol]
   (let [parts {:kind :edge.kind/contains
                :from-id (:symbol/id module)
+               :to-id (:symbol/id symbol)
                :target-text (:symbol/qualified-name symbol)
                :start-line (:source/start-line symbol)
                :start-column (:source/start-column symbol)}]
@@ -230,7 +243,8 @@
             :edge/to (:symbol/id symbol)
             :edge/target-text (:symbol/qualified-name symbol)
             :edge/resolution :resolution/exact
-            :edge/confidence 1.0}
+            :edge/confidence 1.0
+            :edge/evidence :syntactic-containment}
            (select-keys symbol [:source/start-line :source/start-column
                                 :source/end-line :source/end-column]))))
 
@@ -278,8 +292,9 @@
                  (edge :edge.kind/imports module-symbol target source node))))
            nodes))))
 
-(defn- module-symbol [file source root module]
-  (let [parts {:file-id (:file/id file) :kind :symbol.kind/module
+(defn- module-symbol [file source root module platform]
+  (let [parts {:file-id (:file/id file) :platform platform
+               :kind :symbol.kind/module
                :qualified-name module :signature ""
                :start-line 1 :start-column 1}]
     (merge {:entity/type :entity.type/symbol
@@ -287,7 +302,9 @@
             :symbol/name module
             :symbol/qualified-name module
             :symbol/kind :symbol.kind/module
-            :symbol/file (:file/id file)}
+            :symbol/file (:file/id file)
+            :symbol/platform platform
+            :symbol/analyzer :tree-sitter-compat}
            (range-data root))))
 
 (defrecord StructuralIndexer [parser-provider]
@@ -306,8 +323,11 @@
                                   :language/clojure-common} language)
                    (clojure-namespace content root fallback)
                    fallback)
-          module-entity (module-symbol file content root module)
-          candidates (qualify-candidates module (symbol-candidates language content root))
+          platform (language-platform language)
+          module-entity (module-symbol file content root module platform)
+          candidates (->> (symbol-candidates language content root)
+                          (qualify-candidates module)
+                          (mapv #(assoc % :symbol/platform platform)))
           symbols (mapv #(canonical-symbol file content %) candidates)
           contains-edges (mapv #(contains-edge module-entity %) symbols)
           relationships (extract-edges language content root candidates symbols module-entity)

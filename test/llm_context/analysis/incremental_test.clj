@@ -39,7 +39,7 @@
       (is (empty? (store/query graph
                                '[:find [?id ...] :where [_ :file/id ?id]] []))))))
 
-(deftest incremental-resolution-touches-edges-affected-by-symbol-names
+(deftest incremental-compatibility-analysis-keeps-weak-facts-as-references
   (let [root (Files/createTempDirectory
               "llm-context-incremental-resolution-"
               (make-array java.nio.file.attribute.FileAttribute 0))
@@ -49,28 +49,28 @@
         duplicate (.resolve src "duplicate.clj")
         project (project/context (str root))
         settings (assoc-in (config/defaults) [:semantic :providers] [])
-        resolution
+        classification
         (fn []
           (store/with-store [graph project settings]
             (ffirst
              (store/query
               graph
-              '[:find ?resolution
+              '[:find ?classification
                 :where
-                [?edge :edge/target-text "target"]
-                [?edge :edge/resolution ?resolution]]
+                [?reference :reference/target-text "target"]
+                [?reference :reference/classification ?classification]]
               []))))]
     (Files/createDirectories src
                              (make-array java.nio.file.attribute.FileAttribute 0))
     (spit (str caller) "(ns caller) (defn caller [] (target))")
     (spit (str first-target) "(ns first) (defn target [] 1)")
     (full/analyze! project settings)
-    (is (= :resolution/heuristic (resolution)))
+    (is (= :unresolved (classification)))
 
     (spit (str duplicate) "(ns duplicate) (defn target [] 2)")
     (incremental/analyze! project settings)
-    (is (= :resolution/ambiguous (resolution)))
+    (is (= :unresolved (classification)))
 
     (Files/delete duplicate)
     (incremental/analyze! project settings)
-    (is (= :resolution/heuristic (resolution)))))
+    (is (= :unresolved (classification)))))

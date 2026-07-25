@@ -28,6 +28,7 @@
                {:entity/type :entity.type/edge :edge/id id :edge/kind :edge.kind/calls
                 :edge/from from :edge/to to :edge/target-text target
                 :edge/resolution :resolution/exact :edge/confidence 1.0
+                :edge/evidence :test-exact
                 :source/start-line line :source/start-column 1
                 :source/end-line line :source/end-column 5})
         entities (concat symbols [(edge "edge:ab" "symbol:a" "symbol:b" "b" 1)
@@ -69,6 +70,7 @@
               :edge/from (:symbol/id focus) :edge/to (:symbol/id neighbor)
               :edge/target-text "neighbor"
               :edge/resolution :resolution/exact :edge/confidence 1.0
+              :edge/evidence :test-exact
               :source/start-line 1 :source/start-column 1
               :source/end-line 1 :source/end-column 5}]
     (store/with-store [graph project (config/defaults)]
@@ -113,6 +115,7 @@
                        :edge/target-text (:symbol/name neighbor)
                        :edge/resolution :resolution/exact
                        :edge/confidence 1.0
+                       :edge/evidence :test-exact
                        :source/start-line 1 :source/start-column 1
                        :source/end-line 1 :source/end-column 5})
                     (range) neighbors)]

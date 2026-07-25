@@ -29,6 +29,7 @@
               :edge/kind :edge.kind/calls :edge/from (:symbol/id caller)
               :edge/to (:symbol/id callee) :edge/target-text "callee"
               :edge/resolution :resolution/exact :edge/confidence 1.0
+              :edge/evidence :test-exact
               :source/start-line 2 :source/start-column 2
               :source/end-line 2 :source/end-column 10}
         effect {:entity/type :entity.type/effect :effect/id "effect:log"

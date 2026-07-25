@@ -1,5 +1,6 @@
 (ns llm-context.store
-  (:require [datalevin.core :as d]
+  (:require [clojure.string :as str]
+            [datalevin.core :as d]
             [llm-context.model.schema :as schema])
   (:import [java.io Closeable]
            [java.nio.file Files LinkOption Path]))
@@ -25,7 +26,9 @@
   (cond
     (:file/id entity) [:file/id (:file/id entity)]
     (:symbol/id entity) [:symbol/id (:symbol/id entity)]
+    (:topic/id entity) [:topic/id (:topic/id entity)]
     (:edge/id entity) [:edge/id (:edge/id entity)]
+    (:reference/id entity) [:reference/id (:reference/id entity)]
     (:effect/id entity) [:effect/id (:effect/id entity)]))
 
 (defn- existing-eid [db [attribute value]]
@@ -44,8 +47,10 @@
              (case (:entity/type entity)
                :entity.type/file 0
                :entity.type/symbol 1
-               :entity.type/edge 2
-               :entity.type/effect 3
+               :entity.type/topic 2
+               :entity.type/edge 3
+               :entity.type/reference 3
+               :entity.type/effect 4
                4))
            entities))
 
@@ -96,7 +101,12 @@
             (cond-> (assoc entity :db/id (get db-ids (entity-identity entity)))
               (:symbol/file entity) (update :symbol/file #(ref :file/id %))
               (:edge/from entity) (update :edge/from #(ref :symbol/id %))
-              (:edge/to entity) (update :edge/to #(ref :symbol/id %))
+              (:edge/to entity)
+              (update :edge/to
+                      #(ref (if (str/starts-with? % "topic:")
+                              :topic/id :symbol/id) %))
+              (:reference/symbol entity)
+              (update :reference/symbol #(ref :symbol/id %))
               (:effect/symbol entity) (update :effect/symbol #(ref :symbol/id %))))
           entities)))
 
@@ -196,7 +206,14 @@
                          :where [?effect :effect/symbol ?symbol]]
                        db symbols)
                   [])
-        owned (set (concat from-edges effects symbols))]
+        references (if (seq symbols)
+                     (d/q '[:find [?reference ...]
+                            :in $ [?symbol ...]
+                            :where
+                            [?reference :reference/symbol ?symbol]]
+                          db symbols)
+                     [])
+        owned (set (concat from-edges references effects symbols))]
     {:owned owned
      :inbound (remove #(contains? owned (first %)) inbound)}))
 
@@ -206,15 +223,21 @@
          :where [?file :file/id ?file-id]]
        db file-id))
 
-(defn- retract-owned-tx [db file-id]
-  (let [{:keys [owned inbound]} (file-retraction-plan db file-id)]
-    (into (mapv (fn [eid] [:db/retractEntity eid]) owned)
-          (mapcat (fn [[edge target]]
-                    [[:db/retract edge :edge/to target]
-                     {:db/id edge
-                      :edge/resolution :resolution/unresolved
-                      :edge/confidence 0.0}])
-                  inbound))))
+(defn- retract-owned-tx
+  ([db file-id] (retract-owned-tx db file-id #{}))
+  ([db file-id preserve-symbol-ids]
+   (let [{:keys [owned inbound]} (file-retraction-plan db file-id)
+         preserved-eids
+         (if (seq preserve-symbol-ids)
+           (set (d/q '[:find [?symbol ...]
+                       :in $ [?id ...]
+                       :where [?symbol :symbol/id ?id]]
+                     db (vec preserve-symbol-ids)))
+           #{})
+         owned (remove preserved-eids owned)
+         inbound (remove (comp preserved-eids second) inbound)]
+     (into (mapv (fn [eid] [:db/retractEntity eid]) owned)
+           (map (fn [[edge _target]] [:db/retractEntity edge]) inbound)))))
 
 (defn- dirty-marker-tx [db markers]
   (mapcat
@@ -323,9 +346,12 @@
     (doseq [entity entities]
       (schema/validate-entity! entity))
     (let [db (d/db connection)
-          retractions (retract-owned-tx db (:file/id file))
+          preserved (set (keep :symbol/id entities))
+          retractions (retract-owned-tx db (:file/id file) preserved)
           all-entities (vec (cons file entities))
-          force-new (set (map entity-identity entities))
+          force-new (set (remove #(and (= :symbol/id (first %))
+                                       (contains? preserved (second %)))
+                                 (map entity-identity entities)))
           assertions (entities->tx db all-entities force-new)]
       (d/transact! connection (into retractions assertions))))
 
@@ -334,9 +360,12 @@
     (doseq [entity entities]
       (schema/validate-entity! entity))
     (let [db (d/db connection)
-          retractions (retract-owned-tx db (:file/id file))
+          preserved (set (keep :symbol/id entities))
+          retractions (retract-owned-tx db (:file/id file) preserved)
           all-entities (vec (cons file entities))
-          force-new (set (map entity-identity entities))
+          force-new (set (remove #(and (= :symbol/id (first %))
+                                       (contains? preserved (second %)))
+                                 (map entity-identity entities)))
           assertions (entities->tx db all-entities force-new)
           markers (dirty-marker-tx db dirty-markers)]
       (d/transact! connection

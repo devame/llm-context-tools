@@ -15,18 +15,35 @@
   (str "file:" relative-path))
 
 (defn symbol-id
-  [{:keys [file-id kind qualified-name signature start-line start-column]}]
+  [{:keys [platform file-id kind qualified-name discriminator]}]
   (str "symbol:" (subs (sha256 (str/join "\u001f"
-                                         [file-id (name kind) qualified-name
-                                          (or signature "") start-line start-column]))
+                                         [(name (or platform :unknown))
+                                          file-id (name kind) qualified-name
+                                          (or discriminator "")]))
                        0 32)))
 
 (defn edge-id
-  [{:keys [kind from-id target-text start-line start-column]}]
+  [{:keys [kind from-id to-id target-text start-line start-column]}]
   (str "edge:" (subs (sha256 (str/join "\u001f"
-                                       [(name kind) from-id target-text
+                                       [(name kind) from-id (or to-id target-text)
                                         start-line start-column]))
                      0 32)))
+
+(defn reference-id
+  [{:keys [platform symbol-id kind target-text classification
+           start-line start-column]}]
+  (str "reference:"
+       (subs (sha256 (str/join "\u001f"
+                               [(name platform) symbol-id (name kind)
+                                target-text (name classification)
+                                start-line start-column]))
+             0 32)))
+
+(defn topic-id [{:keys [platform kind key]}]
+  (str "topic:"
+       (subs (sha256 (str/join "\u001f"
+                               [(name platform) (name kind) (pr-str key)]))
+             0 32)))
 
 (defn effect-id
   [{:keys [kind symbol-id detail start-line start-column]}]
