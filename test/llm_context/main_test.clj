@@ -54,6 +54,22 @@
     (is (str/includes? output ":pending 0"))
     (is (str/includes? output ":status :not-running"))))
 
+(deftest advertised-service-timeout-does-not-fall-back-to-direct-query
+  (let [root (Files/createTempDirectory
+              "llm-context-service-timeout-query-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        context (assoc (project/context (str root)) :options {:quiet? true})]
+    (with-redefs [service-client/request
+                  (fn [_ _]
+                    {:ok false
+                     :error "Project service request timed out"
+                     :exit-code 1
+                     :type :service/timeout})]
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"Project service request timed out"
+           (cli/execute context "query" ["stats"]))))))
+
 (deftest semantic-sync-requires-the-project-service
   (let [root (Files/createTempDirectory
               "llm-context-semantic-sync-"

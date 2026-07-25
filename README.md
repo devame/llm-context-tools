@@ -175,7 +175,9 @@ rebuild the partial graph.
 
  :service {:watch true
            :watch-initial true
-           :watch-debounce-ms 750}
+           :watch-debounce-ms 750
+           :request-threads 4
+           :request-queue-capacity 32}
 
  :semantic
  {:providers [:scip-typescript :lateon-code]
@@ -237,6 +239,18 @@ commands automatically use the warm service. A random token in the ignored
 `.llm-context/service.edn` descriptor authenticates local requests. Structural
 commands and lexical search remain available when the model is loading or
 unavailable.
+
+The service handles query, context, status, and export requests through a
+bounded request pool. A slow request therefore does not block health checks or
+other clients. When the pool is saturated the service returns an explicit busy
+response, and clients report timeouts or unreachable endpoints instead
+of silently opening the project database behind the resident service.
+
+On Linux and macOS, project clients connect through the owner-only
+`.llm-context/service.sock` Unix-domain socket. This lets shells or containers
+in different network namespaces share the service when they share the project
+filesystem. Windows uses authenticated loopback TCP. An OS file lock prevents
+two service processes from owning the same project.
 
 Use `llm-context semantic status` to inspect lag and
 `llm-context semantic sync --wait` when automation needs all queued embeddings

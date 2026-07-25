@@ -1,10 +1,12 @@
 (ns llm-context.service.server-test
   (:require [clojure.test :refer [deftest is]]
+            [llm-context.query :as query]
             [llm-context.semantic.fake-index :as fake]
             [llm-context.semantic.worker :as semantic-worker]
             [llm-context.project :as project]
             [llm-context.service.client :as client]
-            [llm-context.service.server :as server])
+            [llm-context.service.server :as server]
+            [llm-context.service.transport :as transport])
   (:import [java.nio.file Files LinkOption]))
 
 (defn- await-service [project]
@@ -36,6 +38,15 @@
                     (server/start! project
                                    {:runtime-factory runtime-factory})))]
     (is (await-service project))
+    (let [descriptor (client/descriptor project)]
+      (if (transport/windows?)
+        (is (= :tcp (:transport descriptor)))
+        (do
+          (is (= :unix (:transport descriptor)))
+          (is (= (str (transport/socket-path project))
+                 (:socket-path descriptor)))
+          (is (Files/exists (transport/socket-path project)
+                            (make-array LinkOption 0))))))
     (is (= {:ok true :value :pong} (client/request project {:op :ping})))
     (is (await-semantic-status project :unavailable))
     (is (= {:status :unavailable
@@ -51,7 +62,10 @@
            (client/request project {:op :stop})))
     (is (not= ::timeout (deref running 5000 ::timeout)))
     (is (not (Files/exists (client/descriptor-path project)
-                           (make-array LinkOption 0))))))
+                           (make-array LinkOption 0))))
+    (when-not (transport/windows?)
+      (is (not (Files/exists (transport/socket-path project)
+                             (make-array LinkOption 0)))))))
 
 (deftest service-owns-and-closes-ready-semantic-runtime
   (let [root (Files/createTempDirectory
@@ -80,6 +94,30 @@
            (client/request project {:op :stop})))
     (is (not= ::timeout (deref running 5000 ::timeout)))
     (is (:closed? (fake/snapshot semantic-index)))))
+
+(deftest project-lock-prevents-a-second-unreachable-service-owner
+  (let [root (Files/createTempDirectory
+              "llm-context-service-owner-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        project (project/context (str root))
+        runtime-factory (fn [_ _] {:status :unavailable
+                                   :reason :model-missing})
+        running (future
+                  (with-out-str
+                    (server/start! project
+                                   {:runtime-factory runtime-factory})))]
+    (is (await-service project))
+    ;; Model the case where another network namespace can see the project but
+    ;; cannot contact its advertised endpoint. Ownership must not depend only
+    ;; on a successful ping.
+    (with-redefs [client/available? (constantly false)]
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"already owns this project"
+           (server/start! project {:runtime-factory runtime-factory}))))
+    (is (= {:ok true :value :stopping}
+           (client/request project {:op :stop})))
+    (is (not= ::timeout (deref running 5000 ::timeout)))))
 
 (deftest service-reports-background-worker-failure-separately
   (let [root (Files/createTempDirectory
@@ -113,7 +151,40 @@
                (client/request project {:op :stop})))
         (is (not= ::timeout (deref running 5000 ::timeout)))))))
 
-(deftest unreadable-service-response-is-treated-as-unavailable
+(deftest slow-request-does-not-block-other-clients
+  (let [root (Files/createTempDirectory
+              "llm-context-concurrent-service-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        project (project/context (str root))
+        entered (promise)
+        release (promise)
+        runtime-factory (fn [_ _] {:status :unavailable
+                                   :reason :model-missing})]
+    (with-redefs [query/stats
+                  (fn [_]
+                    (deliver entered true)
+                    @release
+                    {:entities 0})]
+      (let [running (future
+                      (with-out-str
+                        (server/start! project
+                                       {:runtime-factory runtime-factory})))]
+        (is (await-service project))
+        (let [slow (future
+                     (client/request
+                      project {:op :query :subcommand "stats" :args []}))]
+          (is (= true (deref entered 2000 false)))
+          (is (= {:ok true :value :pong}
+                 (client/request project {:op :ping}
+                                 {:request-timeout 1000})))
+          (deliver release true)
+          (is (= 0 (get-in (deref slow 2000 ::timeout)
+                           [:value :entities]))))
+        (is (= {:ok true :value :stopping}
+               (client/request project {:op :stop})))
+        (is (not= ::timeout (deref running 5000 ::timeout)))))))
+
+(deftest unreadable-service-response-is-an-explicit-protocol-error
   (let [root (Files/createTempDirectory
               "llm-context-unreadable-service-"
               (make-array java.nio.file.attribute.FileAttribute 0))
@@ -140,5 +211,39 @@
                  (< attempt 100))
         (Thread/sleep 10)
         (recur (inc attempt))))
-    (is (nil? (client/request project {:op :ping})))
+    (is (= :service/protocol-error
+           (:type (client/request project {:op :ping}))))
+    (is (not= ::timeout (deref running 5000 ::timeout)))))
+
+(deftest advertised-service-timeout-is-not-treated-as-absent
+  (let [root (Files/createTempDirectory
+              "llm-context-timeout-service-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        project (project/context (str root))
+        release (promise)
+        running
+        (future
+          (with-open [server (java.net.ServerSocket.
+                              0 1 (java.net.InetAddress/getLoopbackAddress))]
+            (Files/createDirectories
+             (:state-dir project)
+             (make-array java.nio.file.attribute.FileAttribute 0))
+            (Files/writeString
+             (client/descriptor-path project)
+             (pr-str {:port (.getLocalPort server) :token "test"})
+             (make-array java.nio.file.OpenOption 0))
+            (with-open [socket (.accept server)]
+              @release)))]
+    (loop [attempt 0]
+      (when (and (not (Files/exists
+                       (client/descriptor-path project)
+                       (make-array LinkOption 0)))
+                 (< attempt 100))
+        (Thread/sleep 10)
+        (recur (inc attempt))))
+    (let [response (client/request project {:op :ping}
+                                   {:request-timeout 50})]
+      (is (= false (:ok response)))
+      (is (= :service/timeout (:type response))))
+    (deliver release true)
     (is (not= ::timeout (deref running 5000 ::timeout)))))

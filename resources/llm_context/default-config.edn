@@ -11,7 +11,9 @@
  :service
  {:watch true
   :watch-initial true
-  :watch-debounce-ms 750}
+  :watch-debounce-ms 750
+  :request-threads 4
+  :request-queue-capacity 32}
 
  :semantic
  {:providers [:scip-typescript :lateon-code]

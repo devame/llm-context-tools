@@ -24,11 +24,20 @@ Three boundaries keep the implementation replaceable:
 - `GraphStore` owns validation, transactions, replacement, deletion, and
   Datalog execution.
 
-The optional service retains a warm JVM but not a permanently open database
-connection. Query, context, and export requests open and close the project
-store. Analysis deliberately runs in the invoking CLI process: this keeps
-stage and transaction progress observable and prevents a service socket timeout
-from falling back to a second concurrent writer.
+The optional service retains a warm JVM and one project Datalevin connection.
+It accepts sockets continuously and dispatches requests through a bounded
+executor, so a slow query does not block unrelated clients. Datalevin queries
+read immutable database values; graph and semantic-state mutations retain their
+single-writer coordination. Analysis deliberately runs in the invoking CLI
+process so stage and transaction progress remain observable. Once a service
+descriptor exists, connection failures and timeouts are explicit errors rather
+than permission to fall back to a second direct database connection.
+
+The control transport is an owner-only Unix-domain socket on Linux and macOS,
+which remains usable across network namespaces sharing the project filesystem.
+Windows uses authenticated loopback TCP. A process-held file lock defines
+service ownership independently of either transport and makes stale Unix socket
+cleanup safe after a crash.
 
 Full replacement sorts canonical entities by dependency layer (files, symbols,
 edges, effects), retracts the previous graph in bounded transactions, and then

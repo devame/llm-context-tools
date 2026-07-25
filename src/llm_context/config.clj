@@ -63,6 +63,12 @@
     (not (pos-int? (get-in config [:service :watch-debounce-ms])))
     (conj ":service/:watch-debounce-ms must be a positive integer")
 
+    (not (pos-int? (get-in config [:service :request-threads])))
+    (conj ":service/:request-threads must be a positive integer")
+
+    (not (pos-int? (get-in config [:service :request-queue-capacity])))
+    (conj ":service/:request-queue-capacity must be a positive integer")
+
     (not (pos-int? (get-in config [:context :default-max-tokens])))
     (conj ":context/:default-max-tokens must be a positive integer")
 

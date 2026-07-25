@@ -11,13 +11,17 @@
             [llm-context.semantic.state :as semantic-state]
             [llm-context.semantic.worker :as semantic-worker]
             [llm-context.service.client :as client]
+            [llm-context.service.transport :as transport]
             [llm-context.service.watcher :as watcher]
             [llm-context.store :as store])
   (:import [java.io PushbackReader]
            [java.lang ProcessHandle]
-           [java.net InetAddress ServerSocket]
+           [java.net SocketException]
+           [java.nio.channels FileChannel OverlappingFileLockException]
            [java.nio.file Files OpenOption StandardOpenOption]
-           [java.util UUID]))
+           [java.util UUID]
+           [java.util.concurrent ArrayBlockingQueue RejectedExecutionException
+            ThreadPoolExecutor ThreadPoolExecutor$AbortPolicy TimeUnit]))
 
 (defn- query-value [graph semantic-client settings subcommand args]
   (let [argument (fn []
@@ -67,7 +71,7 @@
     :export (export/render graph (:format request))
     :semantic-status (semantic-status graph runtime)
     :semantic-sync
-    (do
+    (locking graph
       ;; An explicit sync is also the operator's repair action for exhausted
       ;; jobs. A full desired-state pass safely resets failed jobs while
       ;; leaving already-current indexed symbols unchanged.
@@ -81,8 +85,9 @@
 (defn- handle! [socket token project settings graph runtime-state]
   (with-open [socket socket
               reader (PushbackReader. (java.io.InputStreamReader.
-                                       (.getInputStream socket)))
-              writer (java.io.PrintWriter. (.getOutputStream socket) true)]
+                                       (transport/input-stream socket)))
+              writer (java.io.PrintWriter.
+                      (transport/output-stream socket) true)]
     (let [request (edn/read {:eof nil} reader)
           response
           (try
@@ -96,6 +101,51 @@
       (.println writer (pr-str response))
       (and (:ok response) (= :stop (:op request))))))
 
+(defn- reject-busy! [socket]
+  (with-open [socket socket
+              writer (java.io.PrintWriter.
+                      (transport/output-stream socket) true)]
+    (.println writer
+              (pr-str {:ok false
+                       :error "Project service is busy; retry shortly"
+                       :exit-code 1
+                       :type :service/busy}))))
+
+(defn- request-executor [settings]
+  (let [thread-number (atom 0)
+        thread-factory
+        (reify java.util.concurrent.ThreadFactory
+          (newThread [_ runnable]
+            (doto (Thread. runnable
+                           (str "llm-context-request-" (swap! thread-number inc)))
+              (.setDaemon true))))]
+    (ThreadPoolExecutor.
+     (int (get-in settings [:service :request-threads]))
+     (int (get-in settings [:service :request-threads]))
+     0 TimeUnit/MILLISECONDS
+     (ArrayBlockingQueue.
+      (int (get-in settings [:service :request-queue-capacity])))
+     thread-factory
+     (ThreadPoolExecutor$AbortPolicy.))))
+
+(defn- acquire-service-lock [project]
+  (let [path (.resolve ^java.nio.file.Path (:state-dir project) "service.lock")
+        channel
+        (FileChannel/open
+         path
+         (into-array java.nio.file.OpenOption
+                     [StandardOpenOption/CREATE StandardOpenOption/WRITE]))
+        lock (try
+               (.tryLock channel)
+               (catch OverlappingFileLockException _ nil))]
+    (if lock
+      {:channel channel :lock lock}
+      (do
+        (.close channel)
+        (throw
+         (ex-info "A service already owns this project"
+                  {:exit-code 2 :type :service/already-owned}))))))
+
 (defn start!
   "Run a foreground loopback-only service for one project."
   ([project]
@@ -108,7 +158,8 @@
                       {:exit-code 2})))
     (Files/createDirectories (:state-dir project)
                              (make-array java.nio.file.attribute.FileAttribute 0))
-    (let [settings (config/load-config project)
+    (let [{:keys [channel lock]} (acquire-service-lock project)
+          settings (config/load-config project)
           token (str (UUID/randomUUID))
           running (atom true)
           semantic-enabled? (semantic-reconcile/enabled? settings)
@@ -117,19 +168,23 @@
                                :worker-status (if semantic-enabled?
                                                 :starting :disabled)})
           worker-state (atom nil)]
-      (try
+      (with-open [lock-channel channel
+                  service-lock lock]
+       (try
         (with-open [graph (store/open project settings)
-                    server (ServerSocket. 0 50
-                                         (InetAddress/getLoopbackAddress))]
+                    server (transport/open-listener project)]
           (Files/writeString
            descriptor-path
-           (pr-str {:port (.getLocalPort server)
-                    :token token
-                    :pid (.pid (ProcessHandle/current))
-                    :semantic-status (:status @runtime-state)})
+           (pr-str
+            (merge
+             (transport/endpoint-descriptor server)
+             {:token token
+              :pid (.pid (ProcessHandle/current))
+              :semantic-status (:status @runtime-state)}))
            (into-array OpenOption [StandardOpenOption/CREATE
                                    StandardOpenOption/TRUNCATE_EXISTING
                                    StandardOpenOption/WRITE]))
+          (transport/secure-owner-only! descriptor-path)
           (let [runtime-future
                 (when semantic-enabled?
                   (future
@@ -187,18 +242,40 @@
                         (catch Throwable error
                           (binding [*out* *err*]
                             (println "Watched analysis failed:"
-                                     (.getMessage error)))))))))]
-            (println "llm-context service listening on loopback port"
-                     (.getLocalPort server))
+                                     (.getMessage error)))))))))
+                requests (request-executor settings)]
+            (println "llm-context service listening on"
+                     (pr-str (transport/endpoint-descriptor server)))
             (when-not semantic-enabled?
               (println "LateOn semantic runtime:"
                        (name (:status @runtime-state))))
             (try
               (while @running
-                (when (handle! (.accept server) token project settings
-                               graph runtime-state)
-                  (reset! running false)))
+                (try
+                  (let [socket (transport/accept server)]
+                    (try
+                      (.execute
+                       requests
+                       ^Runnable
+                       (fn []
+                         (when (handle! socket token project settings
+                                        graph runtime-state)
+                           (reset! running false)
+                           (try
+                             (.close server)
+                             (catch Throwable _)))))
+                      (catch RejectedExecutionException _
+                        (reject-busy! socket))))
+                  (catch java.nio.channels.AsynchronousCloseException error
+                    (when @running
+                      (throw error)))
+                  (catch SocketException error
+                    (when @running
+                      (throw error)))))
               (finally
+                (.shutdown requests)
+                (when-not (.awaitTermination requests 10 TimeUnit/SECONDS)
+                  (.shutdownNow requests))
                 (when-let [worker @worker-state]
                   (semantic-worker/stop! worker))
                 (when project-watcher
@@ -213,5 +290,5 @@
                   (future-cancel runtime-future))
                 (Files/deleteIfExists descriptor-path)))))
         (finally
-          (semantic-runtime/stop! @runtime-state)))))
+          (semantic-runtime/stop! @runtime-state))))))
    0))

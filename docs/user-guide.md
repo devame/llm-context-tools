@@ -125,7 +125,7 @@ asks the agent to query the graph before broad source exploration.
 
 ## 6. Keep interactive sessions warm
 
-Start the detached, loopback-only project coordinator:
+Start the detached project coordinator:
 
 ```bash
 llm-context service start
@@ -140,7 +140,20 @@ loading. The service performs an initial scan, watches included directories,
 coalesces bursts of edits, and incrementally updates the graph and LateOn
 queue. It accelerates query, context, and export commands and uses a
 per-project random token in the ignored state directory. It is not exposed
-beyond loopback.
+beyond the local machine.
+
+Linux and macOS clients use an owner-only Unix-domain socket under
+`.llm-context/`, so processes in different network namespaces can share the
+service when they share that project filesystem. Windows clients use
+authenticated loopback TCP. An OS-level project lock prevents a second service
+from taking ownership while the first is alive.
+
+Multiple clients can share the service.
+Requests use a bounded concurrent pool configured by
+`:service/:request-threads` and `:service/:request-queue-capacity`; saturated
+services return an explicit busy error. A descriptor with an unreachable or
+timed-out endpoint is also reported explicitly so a client cannot accidentally
+fall back to a competing direct database connection.
 
 Inspect or wait for semantic freshness with:
 
