@@ -66,7 +66,25 @@ size.
 
 ## Development baseline
 
-Measured on 2026-07-21 in the repository's WSL workspace with JDK 25:
+Measured on 2026-07-25 in the repository's WSL workspace with JDK 25.0.1
+after the Datalevin-first read rewrite:
+
+| High-fan-out workload | 50 files | 500 files |
+|---|---:|---:|
+| Full structural index | 1,524 ms | 4,039 ms |
+| Unchanged incremental scan | 70 ms | 182 ms |
+| Single-file incremental update and affected-edge reconciliation | 210 ms | 455 ms |
+| In-process Datalog statistics query | 12 ms | 29 ms |
+| In-process bounded summary | 30 ms | 69 ms |
+| In-process bounded context query | 140 ms | 269 ms |
+| Symbols returned within 2,000-token budget | 14 | 14 |
+
+Both runs passed the benchmark's correctness gates. The 500-file graph held
+2,501 canonical entities, while bounded context output remained constant at 14
+symbols.
+
+For historical comparison, the earlier disconnected fixture measured on
+2026-07-21 with JDK 25 produced:
 
 | Workload | Result |
 |---|---:|
