@@ -23,7 +23,6 @@
     "datalog",
     "datalevin",
     "clojure",
-    "scip",
     "tree-sitter"
   ],
   "author": "devame",
@@ -35,11 +34,5 @@
   "bugs": {
     "url": "https://github.com/devame/llm-context-tools/issues"
   },
-  "homepage": "https://github.com/devame/llm-context-tools#readme",
-  "engines": {
-    "node": ">=20.0.0"
-  },
-  "optionalDependencies": {
-    "@sourcegraph/scip-typescript": "^0.4.0"
-  }
+  "homepage": "https://github.com/devame/llm-context-tools#readme"
 }

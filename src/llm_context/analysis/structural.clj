@@ -7,85 +7,21 @@
            [java.nio.charset StandardCharsets]))
 
 (def language-profiles
-  {:language/javascript
-   {:symbols {"function_declaration" :symbol.kind/function
-              "generator_function_declaration" :symbol.kind/function
-              "method_definition" :symbol.kind/method
-              "class_declaration" :symbol.kind/class}
-    :calls #{"call_expression" "new_expression"}
-    :imports #{"import_statement"}}
-   :language/typescript
-   {:symbols {"function_declaration" :symbol.kind/function
-              "generator_function_declaration" :symbol.kind/function
-              "method_definition" :symbol.kind/method
-              "class_declaration" :symbol.kind/class
-              "interface_declaration" :symbol.kind/interface
-              "type_alias_declaration" :symbol.kind/type}
-    :calls #{"call_expression" "new_expression"}
-    :imports #{"import_statement"}}
-   :language/python
-   {:symbols {"function_definition" :symbol.kind/function
-              "class_definition" :symbol.kind/class}
-    :calls #{"call"}
-    :imports #{"import_statement" "import_from_statement"}}
-   :language/java
-   {:symbols {"method_declaration" :symbol.kind/method
-              "constructor_declaration" :symbol.kind/method
-              "class_declaration" :symbol.kind/class
-              "interface_declaration" :symbol.kind/interface
-              "enum_declaration" :symbol.kind/type}
-    :calls #{"method_invocation" "object_creation_expression"}
-    :imports #{"import_declaration"}}
-   :language/go
-   {:symbols {"function_declaration" :symbol.kind/function
-              "method_declaration" :symbol.kind/method
-              "type_declaration" :symbol.kind/type}
-    :calls #{"call_expression"}
-    :imports #{"import_declaration"}}
-   :language/rust
-   {:symbols {"function_item" :symbol.kind/function
-              "struct_item" :symbol.kind/type
-              "enum_item" :symbol.kind/type
-              "trait_item" :symbol.kind/interface
-              "impl_item" :symbol.kind/type}
-    :calls #{"call_expression"}
-    :imports #{"use_declaration"}}
-   :language/c
-   {:symbols {"function_definition" :symbol.kind/function
-              "struct_specifier" :symbol.kind/type
-              "enum_specifier" :symbol.kind/type}
-    :calls #{"call_expression"}
-    :imports #{"preproc_include"}}
-   :language/cpp
-   {:symbols {"function_definition" :symbol.kind/function
-              "class_specifier" :symbol.kind/class
-              "struct_specifier" :symbol.kind/type
-              "enum_specifier" :symbol.kind/type}
-    :calls #{"call_expression"}
-    :imports #{"preproc_include"}}
-   :language/ruby
-   {:symbols {"method" :symbol.kind/method
-              "singleton_method" :symbol.kind/method
-              "class" :symbol.kind/class
-              "module" :symbol.kind/module}
-    :calls #{"call" "method_call"}
-    :imports #{}}
-   :language/php
-   {:symbols {"function_definition" :symbol.kind/function
-              "method_declaration" :symbol.kind/method
-              "class_declaration" :symbol.kind/class
-              "interface_declaration" :symbol.kind/interface}
-    :calls #{"function_call_expression" "member_call_expression"
-             "scoped_call_expression"}
-    :imports #{"namespace_use_declaration" "require_expression"
-               "include_expression"}}
-   :language/bash
-   {:symbols {"function_definition" :symbol.kind/function}
-    :calls #{"command"}
-    :imports #{}}
-   :language/clojure
+  {:language/clojure
    {:symbols {}
     :calls #{"list_lit"}
+    :imports #{}}
+   :language/clojurescript
+   {:symbols {}
+    :calls #{"list_lit"}
+    :imports #{}}
+   :language/clojure-common
+   {:symbols {}
+    :calls #{"list_lit"}
+    :imports #{}}
+   :language/edn-data
+   {:symbols {}
+    :calls #{}
     :imports #{}}
    :language/janet
    {:symbols {}
@@ -190,7 +126,8 @@
 
 (defn- symbol-candidates [language source root]
   (cond
-    (= :language/clojure language)
+    (contains? #{:language/clojure :language/clojurescript
+                 :language/clojure-common} language)
     (lisp-symbol-candidates source root "list_lit" clojure-definitions)
 
     (= :language/janet language)
@@ -316,10 +253,12 @@
 (defn- extract-edges [language source root candidates symbols module-symbol]
   (let [{:keys [calls imports]} (get language-profiles language)
         nodes (walk-nodes root)
-        call? (case language
-                :language/clojure #(clojure-call? source %)
-                :language/janet #(janet-call? source %)
-                #(contains? calls (:type %)))
+        call? (cond
+                (contains? #{:language/clojure :language/clojurescript
+                             :language/clojure-common} language)
+                #(clojure-call? source %)
+                (= :language/janet language) #(janet-call? source %)
+                :else #(contains? calls (:type %)))
         import? (if (= :language/janet language)
                   #(janet-import? source %)
                   #(contains? imports (:type %)))]
@@ -363,7 +302,8 @@
                 :file/size size
                 :file/modified-at modified-at}
           fallback (module-name relative-path)
-          module (if (= :language/clojure language)
+          module (if (contains? #{:language/clojure :language/clojurescript
+                                  :language/clojure-common} language)
                    (clojure-namespace content root fallback)
                    fallback)
           module-entity (module-symbol file content root module)

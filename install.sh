@@ -221,15 +221,6 @@ if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
     "$NEXT_PLAID_VERSION" "$MODEL_DIR"
 fi
 
-case "${LLM_CONTEXT_INSTALL_SCIP:-0}" in
-  1|true|TRUE|yes|YES)
-    command -v npm >/dev/null 2>&1 ||
-      fail "npm is required when LLM_CONTEXT_INSTALL_SCIP=1"
-    printf 'Installing optional SCIP TypeScript provider...\n'
-    npm install --global '@sourcegraph/scip-typescript@^0.4.0'
-    ;;
-esac
-
 case ":${PATH}:" in
   *":${INSTALL_DIR}:"*) ;;
   *)

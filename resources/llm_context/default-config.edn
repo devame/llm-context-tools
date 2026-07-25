@@ -2,7 +2,6 @@
  {:include ["."]
   :exclude [".git" ".llm-context" "node_modules" "target" ".cpcache"
             "dist" "build" "out" ".shadow-cljs" ".cljs_node_repl" ".lsp"]
-  :languages :auto
   :max-file-bytes 1048576}
 
  :store
@@ -16,8 +15,7 @@
   :request-queue-capacity 32}
 
  :semantic
- {:providers [:scip-typescript :lateon-code]
-  :scip-typescript-command ["npx" "--no-install" "scip-typescript" "index"]
+ {:providers [:lateon-code]
   :lateon-code
   {:enabled true
    :mode :background
@@ -42,7 +40,7 @@
    :startup-timeout-ms 120000
    :health-timeout-ms 2000
    :update-timeout-ms 120000
-   :query-timeout-ms 350
+   :query-timeout-ms 1500
    :candidate-count 50
    :n-ivf-probe 8
    :centroid-score-threshold nil

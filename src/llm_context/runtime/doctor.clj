@@ -56,13 +56,6 @@
                           (catch Throwable error
                             {:check :datalevin :required? true :ok? false
                              :detail (.getMessage error)}))
-        scip-command (first (get-in config [:semantic :scip-typescript-command]))
-        scip-check {:check :scip-typescript
-                    :required? false
-                    :ok? (and scip-command (executable? scip-command))
-                    :detail (if scip-command
-                              (str "launcher " scip-command)
-                              "provider disabled")}
         lateon-enabled? (semantic-reconcile/enabled? config)
         lateon-settings (get-in config [:semantic :lateon-code])
         executable (when lateon-enabled?
@@ -144,7 +137,7 @@
                 "; worker "
                 (name (or (:worker-status service-runtime) :unknown)))
            :else "running")}]
-    [java-check writable-check datalevin-check scip-check runtime-check
+    [java-check writable-check datalevin-check runtime-check
      onnx-check model-check service-check]))
 
 (defn healthy? [checks]

@@ -5,9 +5,9 @@ turns focused neighborhoods of that graph into compact context for AI coding
 assistants.
 
 The application core is Clojure. [Datalevin](https://datalevin.org/) is the
-authoritative embedded database and Datalog query engine. Tree-sitter provides
-structural syntax facts, while SCIP TypeScript can optionally supply
-compiler-backed JavaScript and TypeScript symbol evidence. A local LateOn-Code
+authoritative embedded database and Datalog query engine. The analyzer is
+deliberately focused on Clojure, ClojureScript, CLJC, Janet, and selected EDN
+configuration. A local LateOn-Code
 sidecar adds multi-vector semantic retrieval without sending source code to a
 remote service.
 
@@ -33,8 +33,6 @@ tool does not present naming guesses as compiler facts.
 
 - JDK 23 or newer. JDK 25 is used for development and release validation.
 - Clojure CLI 1.12+ when running from source.
-- Node.js 20+ only when using the npm launcher or optional
-  `scip-typescript` provider. Node is not the application runtime.
 - The bundled LateOn runtime supports Linux x86-64, macOS Apple Silicon,
   and Windows x86-64. Structural graph analysis works elsewhere.
 
@@ -71,10 +69,7 @@ checksum validation and reuse a verified model snapshot. Set
 `LLM_CONTEXT_MODEL_CACHE` to relocate the model, or
 `LLM_CONTEXT_SKIP_SEMANTIC=1` for a structural-only installation.
 
-To install the optional compiler-backed JavaScript/TypeScript provider in the
-same run, set `LLM_CONTEXT_INSTALL_SCIP=1`; this option also requires Node.js
-and npm. Re-run the installer to update, or remove the installed directory to
-uninstall.
+Re-run the installer to update, or remove the installed directory to uninstall.
 
 After installation:
 
@@ -168,7 +163,6 @@ rebuild the partial graph.
  {:include ["."]
   :exclude [".git" ".llm-context" "node_modules" "target" ".cpcache"
             "dist" "build" "out" ".shadow-cljs" ".cljs_node_repl" ".lsp"]
-  :languages :auto
   :max-file-bytes 1048576}
 
  :store {:path ".llm-context/db"}
@@ -180,9 +174,7 @@ rebuild the partial graph.
            :request-queue-capacity 32}
 
  :semantic
- {:providers [:scip-typescript :lateon-code]
-  :scip-typescript-command ["npx" "--no-install"
-                            "scip-typescript" "index"]
+ {:providers [:lateon-code]
   :lateon-code
   {:enabled true
    :mode :background
@@ -201,17 +193,10 @@ release.
 
 ## Language support
 
-Packaged structural grammars are verified for JavaScript, TypeScript, Python,
-Java, Go, Rust, C, C++, Ruby, PHP, Bash, Clojure, and Janet. Janet analysis
-recognizes `def`, `var`, function and macro variants, calls, and
-`import`/`use`/`require` module relationships. The grammar and all native
-libraries are embedded, so users do not need a separate Janet installation.
-TSX extensions are detected but currently reported as unavailable rather than
-silently producing incomplete graphs.
-
-SCIP TypeScript is optional and currently enriches JavaScript/TypeScript
-resolution. Other languages use explicit structural resolution states; they do
-not claim compiler-accurate cross-file semantics.
+Supported source files are `.clj`, `.cljs`, `.cljc`, and `.janet`. Selected
+`deps.edn`, `bb.edn`, `shadow-cljs.edn`, and `.clj-kondo/config.edn` files are
+indexed as configuration data. Other source extensions are intentionally and
+silently ignored.
 
 ## Persistent data and exports
 

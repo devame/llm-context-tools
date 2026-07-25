@@ -34,11 +34,9 @@ to a fresh full analysis.
 
 ## Resolution
 
-SCIP occurrence evidence can establish exact JS/TS targets by matching
-definition and reference ranges. Without semantic evidence, a unique canonical
-or simple symbol name is a heuristic target. Multiple matches are recorded as
-ambiguous and no match remains unresolved. No arbitrary target is selected to
-make the graph appear complete.
+Analyzer evidence establishes exact project targets. Weaker observations are
+diagnostic data and never justify selecting an arbitrary target merely to make
+the graph appear complete.
 
 Both full and incremental resolution operate on persisted facts. A full run
 selects all persisted edge identities explicitly. An incremental run selects

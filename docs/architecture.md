@@ -4,18 +4,12 @@
 
 The CLI resolves the project root and validated EDN configuration once. Full or
 incremental analysis discovers source files, parses supported files through the
-JTreeSitter provider, converts syntax into canonical entities, classifies
-effects, and transacts file-owned facts into Datalevin. Relationship resolution
-then starts from an immutable Datalevin snapshot. Optional SCIP TypeScript
-evidence is joined to focused database point lookups; it never creates a second
-application-owned graph.
+the focused language providers, converts analyzer evidence into canonical
+entities, classifies effects, and transacts file-owned facts into Datalevin.
+Relationship and context queries start from immutable Datalevin snapshots.
 
 ```text
-source files ──> Tree-sitter ──> canonical facts/effects ──> Datalevin
-                                                               │
-                      ┌────────────────────────────────────────┤
-JS/TS ──> SCIP ──────┤ focused source-point evidence           │
-                      └─> Datalog candidate selection ──> edge transactions
+source files ──> focused analyzers ──> canonical facts/effects ──> Datalevin
                                                                │
                               ┌────────────────────────────────┤
                               ├─> focused Datalog queries
@@ -53,7 +47,7 @@ format:
 Production code must not rebuild global `group-by` indexes from parser output,
 pull every symbol before applying a focus, or issue one scalar database query
 per edge. In-memory operations are limited to already-selected bounded
-candidates, deterministic formatting, and external SCIP/embedding evidence.
+candidates, deterministic formatting, and external embedding evidence.
 
 The optional service retains a warm JVM and one project Datalevin connection.
 It accepts sockets continuously and dispatches requests through a bounded
@@ -113,8 +107,6 @@ would still pay the cost of reading the whole connected component.
   libraries for multiple platforms.
 - Native grammar packaging must be tested for every supported OS/architecture;
   the Janet grammar is pinned and cross-compiled into all supported packages.
-- `scip-typescript` still requires Node when compiler-backed JS/TS evidence is
-  desired.
 - The Clojure contributor pool is smaller than the JavaScript contributor pool.
 - Tree-sitter, Clojure, and Datalevin do not automatically provide compiler
   symbol resolution. Unsupported semantics remain heuristic or unresolved.

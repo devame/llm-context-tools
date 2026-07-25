@@ -16,10 +16,10 @@
    :source/snippet (str target "(path)")})
 
 (deftest effect-rules-require-high-signal-callees
-  (let [found (effects/analyze :language/javascript
-                               [(call "fs.readFile")
-                                (call "readFile")
-                                (call "console.log")])]
+  (let [found (effects/analyze :language/clojure
+                               [(call "slurp")
+                                (call "slurp-file")
+                                (call "println")])]
     (is (= #{:effect.kind/file-read :effect.kind/logging}
            (set (map :effect/kind found))))
     (is (every? #(>= (:effect/confidence %) 0.9) found))

@@ -17,19 +17,17 @@
         :size (count (.getBytes content java.nio.charset.StandardCharsets/UTF_8))
         :modified-at 1}))))
 
-(deftest javascript-structure-becomes-canonical-facts
+(deftest clojurescript-structure-becomes-canonical-facts
   (let [{:keys [file entities diagnostics]}
-        (analyze :language/javascript "src/app.js"
-                 "import x from './x.js'; export function greet(n) { return x(n); }")
+        (analyze :language/clojurescript "src/app.cljs"
+                 "(ns app) (defn greet [n] (println n))")
         symbols (filter :symbol/id entities)
         edges (filter :edge/id entities)]
     (is (empty? diagnostics))
-    (is (= "file:src/app.js" (:file/id file)))
+    (is (= "file:src/app.cljs" (:file/id file)))
     (is (some #(= "greet" (:symbol/name %)) symbols))
-    (is (some #(and (= :edge.kind/imports (:edge/kind %))
-                    (= "'./x.js'" (:edge/target-text %))) edges))
     (is (some #(and (= :edge.kind/calls (:edge/kind %))
-                    (= "x" (:edge/target-text %))) edges))
+                    (= "println" (:edge/target-text %))) edges))
     (doseq [entity (cons file entities)]
       (is (= entity (schema/validate-entity! entity))))))
 

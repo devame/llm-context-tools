@@ -11,15 +11,15 @@
   (let [root (Files/createTempDirectory "llm-context-incremental-"
                                         (make-array java.nio.file.attribute.FileAttribute 0))
         src (.resolve root "src")
-        path (.resolve src "app.js")
+        path (.resolve src "app.clj")
         project (project/context (str root))
         settings (assoc-in (config/defaults) [:semantic :providers] [])]
     (Files/createDirectories src (make-array java.nio.file.attribute.FileAttribute 0))
-    (spit (str path) "export function first() { return 1; }")
+    (spit (str path) "(ns app) (defn first [] 1)")
     (full/analyze! project settings)
     (is (= 0 (:changed (incremental/analyze! project settings))))
 
-    (spit (str path) "export function second() { return 2; }")
+    (spit (str path) "(ns app) (defn second [] 2)")
     (let [result (incremental/analyze! project settings)]
       (is (= 1 (:changed result)))
       (is (= 0 (:deleted result))))
@@ -44,9 +44,9 @@
               "llm-context-incremental-resolution-"
               (make-array java.nio.file.attribute.FileAttribute 0))
         src (.resolve root "src")
-        caller (.resolve src "caller.js")
-        first-target (.resolve src "first.js")
-        duplicate (.resolve src "duplicate.js")
+        caller (.resolve src "caller.clj")
+        first-target (.resolve src "first.clj")
+        duplicate (.resolve src "duplicate.clj")
         project (project/context (str root))
         settings (assoc-in (config/defaults) [:semantic :providers] [])
         resolution
@@ -62,12 +62,12 @@
               []))))]
     (Files/createDirectories src
                              (make-array java.nio.file.attribute.FileAttribute 0))
-    (spit (str caller) "export function caller() { return target(); }")
-    (spit (str first-target) "export function target() { return 1; }")
+    (spit (str caller) "(ns caller) (defn caller [] (target))")
+    (spit (str first-target) "(ns first) (defn target [] 1)")
     (full/analyze! project settings)
     (is (= :resolution/heuristic (resolution)))
 
-    (spit (str duplicate) "export function target() { return 2; }")
+    (spit (str duplicate) "(ns duplicate) (defn target [] 2)")
     (incremental/analyze! project settings)
     (is (= :resolution/ambiguous (resolution)))
 

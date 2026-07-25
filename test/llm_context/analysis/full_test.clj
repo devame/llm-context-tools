@@ -10,18 +10,17 @@
   (let [root (Files/createTempDirectory "llm-context-full-"
                                         (make-array java.nio.file.attribute.FileAttribute 0))
         src (.resolve root "src")
-        path (.resolve src "app.js")
+        path (.resolve src "app.clj")
         project (project/context (str root))
         settings (assoc-in (config/defaults) [:semantic :providers] [])]
     (Files/createDirectories src (make-array java.nio.file.attribute.FileAttribute 0))
-    (spit (str path) "export function greet(name) { console.log(name); }")
+    (spit (str path) "(ns app) (defn greet [name] (println name))")
     (let [events (atom [])
           result (full/analyze! project settings #(swap! events conj %))]
       (is (= 1 (:files result)))
       (is (pos? (:entities result)))
       (is (= [:discover-start :discover-complete :parse-progress
-              :parse-complete :semantic-start :semantic-complete
-              :persist-start :persist-progress :resolve-start
+              :parse-complete :persist-start :persist-progress :resolve-start
               :resolve-edges-selected :resolve-edges-loaded
               :resolve-candidates-selected
               :resolve-plan :resolve-progress

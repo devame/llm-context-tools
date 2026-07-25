@@ -3,43 +3,7 @@
             [llm-context.model.ids :as ids]))
 
 (def patterns
-  {:language/javascript
-   [{:match #"^(?:node:)?fs[./](?:promises[./])?readFile(?:Sync)?$"
-     :kind :effect.kind/file-read :confidence 0.98}
-    {:match #"^(?:node:)?fs[./](?:promises[./])?(?:writeFile|appendFile)(?:Sync)?$"
-     :kind :effect.kind/file-write :confidence 0.98}
-    {:match #"^(?:fetch|axios[./](?:get|post|put|patch|delete)|https?[./](?:get|request))$"
-     :kind :effect.kind/network :confidence 0.9}
-    {:match #"^console[./](?:log|info|warn|error|debug)$"
-     :kind :effect.kind/logging :confidence 0.99}
-    {:match #"^(?:child_process[./])?(?:exec|execFile|spawn|fork)(?:Sync)?$"
-     :kind :effect.kind/process :confidence 0.82}]
-
-   :language/typescript
-   [{:match #"^(?:node:)?fs[./](?:promises[./])?readFile(?:Sync)?$"
-     :kind :effect.kind/file-read :confidence 0.98}
-    {:match #"^(?:node:)?fs[./](?:promises[./])?(?:writeFile|appendFile)(?:Sync)?$"
-     :kind :effect.kind/file-write :confidence 0.98}
-    {:match #"^(?:fetch|axios[./](?:get|post|put|patch|delete)|https?[./](?:get|request))$"
-     :kind :effect.kind/network :confidence 0.9}
-    {:match #"^console[./](?:log|info|warn|error|debug)$"
-     :kind :effect.kind/logging :confidence 0.99}
-    {:match #"^(?:child_process[./])?(?:exec|execFile|spawn|fork)(?:Sync)?$"
-     :kind :effect.kind/process :confidence 0.82}]
-
-   :language/python
-   [{:match #"^(?:pathlib[./]Path[./])?read_text$"
-     :kind :effect.kind/file-read :confidence 0.96}
-    {:match #"^(?:pathlib[./]Path[./])?write_text$"
-     :kind :effect.kind/file-write :confidence 0.96}
-    {:match #"^(?:requests|httpx)[./](?:get|post|put|patch|delete|request)$"
-     :kind :effect.kind/network :confidence 0.94}
-    {:match #"^(?:subprocess[./])(?:run|call|Popen|check_output)$"
-     :kind :effect.kind/process :confidence 0.98}
-    {:match #"^(?:print|logging[./](?:debug|info|warning|error|exception))$"
-     :kind :effect.kind/logging :confidence 0.98}]
-
-   :language/clojure
+  {:language/clojure
    [{:match #"^(?:clojure\.core/)?slurp$"
      :kind :effect.kind/file-read :confidence 0.99}
     {:match #"^(?:clojure\.core/)?spit$"
@@ -50,6 +14,20 @@
      :kind :effect.kind/process :confidence 0.97}
     {:match #"^(?:next\.jdbc/)?execute!$"
      :kind :effect.kind/database-write :confidence 0.75}]
+
+   :language/clojurescript
+   [{:match #"^(?:cljs\.core/)?(?:swap!|reset!)$"
+     :kind :effect.kind/global-mutation :confidence 0.99}
+    {:match #"^(?:cljs\.core/)?(?:println|print|prn)$"
+     :kind :effect.kind/logging :confidence 0.98}
+    {:match #"^(?:js/)?fetch$"
+     :kind :effect.kind/network :confidence 0.9}]
+
+   :language/clojure-common
+   [{:match #"^(?:(?:clojure|cljs)\.core/)?(?:swap!|reset!)$"
+     :kind :effect.kind/global-mutation :confidence 0.99}
+    {:match #"^(?:(?:clojure|cljs)\.core/)?(?:println|print|prn)$"
+     :kind :effect.kind/logging :confidence 0.98}]
 
    :language/janet
    [{:match #"^slurp$"

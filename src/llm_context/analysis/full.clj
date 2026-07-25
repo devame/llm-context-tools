@@ -8,7 +8,6 @@
             [llm-context.parser.jtreesitter :as jtreesitter]
             [llm-context.parser.provider :as parser]
             [llm-context.semantic.reconcile :as semantic-reconcile]
-            [llm-context.semantic.scip :as scip]
             [llm-context.store :as store]))
 
 (def persistence-batch-size 100)
@@ -17,15 +16,6 @@
 (defn- enrich-effects [{:keys [file entities] :as output}]
   (let [edges (filter :edge/id entities)]
     (update output :entities into (effects/analyze (:file/language file) edges))))
-
-(defn- maybe-scip [project config languages]
-  (when (and (contains? (set (get-in config [:semantic :providers])) :scip-typescript)
-             (some #{:language/javascript :language/typescript :language/tsx} languages))
-    (try
-      {:index (scip/run! project config)}
-      (catch Throwable error
-        {:diagnostic {:level :warning :kind :semantic-provider-failed
-                      :provider :scip-typescript :message (.getMessage error)}}))))
 
 (defn- emit! [progress stage data]
   (when progress
@@ -40,7 +30,7 @@
                        (when progress
                          #(emit! progress :persist-progress %))}))
 
-(defn- resolve-persisted! [graph scip-index progress]
+(defn- resolve-persisted! [graph progress]
   (let [db (store/database graph)
         edge-ids (graph-read/all-edge-ids db)
         _ (emit! progress :resolve-edges-selected {:edges (count edge-ids)})
@@ -49,23 +39,17 @@
         symbols (graph-read/resolution-candidate-symbols db edges)
         _ (emit! progress :resolve-candidates-selected
                  {:candidates (count symbols)})
-        exact
-        (if scip-index
-          (resolve/scip-exact-targets-focused
-           edges scip-index
-           #(graph-read/symbol-at-point db %1 %2 %3))
-          {})
-        decisions (resolve/resolution-decisions symbols edges exact)]
+        decisions (resolve/resolution-decisions symbols edges {})]
     (emit! progress :resolve-plan
            {:edges (count edges) :candidates (count symbols)
-            :exact (count exact) :batch-size resolution-batch-size})
+            :exact 0 :batch-size resolution-batch-size})
     (store/reconcile-edges!
      graph decisions
      {:batch-size resolution-batch-size
       :on-progress
       (when progress #(emit! progress :resolve-progress %))})
     {:edges (count edges) :candidates (count symbols)
-     :exact (count exact)}))
+     :exact 0}))
 
 (defn analyze!
   "Perform a complete project scan and replace Datalevin facts in bounded
@@ -98,10 +82,6 @@
                    (range) files)
              _ (emit! progress :parse-complete
                       {:completed total :total total})
-             _ (emit! progress :semantic-start {})
-             semantic (maybe-scip project config (map :language files))
-             _ (emit! progress :semantic-complete
-                      {:provider-ran? (boolean semantic)})
              all-entities (vec (mapcat (fn [{:keys [file entities]}]
                                          (cons file entities))
                                        extracted))
@@ -110,7 +90,7 @@
                        :batch-size persistence-batch-size})]
          (persist! graph config all-entities progress)
          (emit! progress :resolve-start {})
-         (let [resolution (resolve-persisted! graph (:index semantic) progress)
+         (let [resolution (resolve-persisted! graph progress)
                _ (emit! progress :semantic-reconcile-start {})
                semantic-plan
                (semantic-reconcile/reconcile! graph project config)
@@ -126,8 +106,6 @@
             :entities (count all-entities)
             :resolution resolution
             :semantic semantic-plan
-            :diagnostics (cond-> (vec (concat diagnostics
-                                              (mapcat :diagnostics extracted)
-                                              (:diagnostics semantic-plan)))
-                           (:diagnostic semantic)
-                           (conj (:diagnostic semantic)))}))))))
+            :diagnostics (vec (concat diagnostics
+                                      (mapcat :diagnostics extracted)
+                                      (:diagnostics semantic-plan)))}))))))

@@ -31,8 +31,8 @@
     (spit (str (.resolve root "frontend/src/app.cljs")) "(defn start [] :ok)")
     (spit (str (.resolve root "frontend/src/README.md")) "not source")
     (spit (str (.resolve root "frontend/src/build.janet")) "(def main nil)")
-    (spit (str (.resolve root "node_modules/dependency/hidden.js"))
-          "export function hidden() {}")
+    (spit (str (.resolve root "node_modules/dependency/hidden.clj"))
+          "(defn hidden [])")
     (let [{:keys [files diagnostics]}
           (files/discover context settings (jtreesitter/available-languages))]
       (is (= ["frontend/src/app.cljs" "frontend/src/build.janet"]
@@ -48,13 +48,13 @@
     (create-directory (.resolve root "src"))
     (create-directory (.resolve root "generated"))
     (spit (str (.resolve root ".gitignore")) "generated/\n")
-    (spit (str (.resolve root "src/app.js")) "export function visible() {}")
-    (spit (str (.resolve root "generated/hidden.js"))
-          "export function hidden() {}")
+    (spit (str (.resolve root "src/app.clj")) "(defn visible [])")
+    (spit (str (.resolve root "generated/hidden.clj"))
+          "(defn hidden [])")
     (run-git! root "init" "--quiet")
     (let [result (files/discover context settings
                                  (jtreesitter/available-languages))]
-      (is (= ["src/app.js"] (mapv :relative-path (:files result))))
+      (is (= ["src/app.clj"] (mapv :relative-path (:files result))))
       (is (empty? (:diagnostics result))))))
 
 (deftest missing-explicit-includes-are-diagnostics

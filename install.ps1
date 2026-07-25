@@ -196,17 +196,6 @@ try {
         Write-Host "Installed NextPlaid API $NextPlaidVersion and LateOn-Code at $ModelDir"
     }
 
-    if ($env:LLM_CONTEXT_INSTALL_SCIP -match '^(1|true|yes)$') {
-        if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
-            throw "npm is required when LLM_CONTEXT_INSTALL_SCIP=1"
-        }
-        Write-Host "Installing optional SCIP TypeScript provider..."
-        & npm install --global '@sourcegraph/scip-typescript@^0.4.0'
-        if ($LASTEXITCODE -ne 0) {
-            throw "SCIP TypeScript installation failed"
-        }
-    }
-
     Write-Host "New terminals can run: llm-context doctor"
 } finally {
     if (Test-Path -LiteralPath $TempDir) {

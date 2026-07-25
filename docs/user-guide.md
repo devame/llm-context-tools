@@ -25,8 +25,8 @@ plus non-ignored untracked files. The default database location is
 `.llm-context/db/`.
 
 The executable and model installation is per user, but all source-derived
-state is per project under `.llm-context/`. For a structural-only project that
-does not use SCIP or LateOn, set the semantic providers to an empty vector:
+state is per project under `.llm-context/`. For a graph-only project that does
+not use LateOn, set the semantic providers to an empty vector:
 
 ```clojure
 {:semantic {:providers []}}
@@ -206,19 +206,7 @@ installation on other systems or whenever only the structural graph is
 wanted. Runtime memory and index size depend on codebase size and symbol
 length; pooling factor 2 is the default space/quality tradeoff.
 
-## 9. JavaScript and TypeScript projects
-
-To install the optional compiler-backed SCIP
-provider in the same setup command, provide Node.js 20+ and npm, then set
-`LLM_CONTEXT_INSTALL_SCIP=1` when running the installer. Otherwise the tool
-still performs structural analysis and records semantic links as heuristic,
-ambiguous, or unresolved where compiler evidence is unavailable.
-
-SCIP is used only for JavaScript and TypeScript enrichment. It is not required
-for Python, Java, Go, Rust, C, C++, Ruby, PHP, Bash, Clojure, or Janet
-structural analysis.
-
-## 10. Janet projects
+## 9. Janet projects
 
 Janet support is included in the normal installation. No Janet executable,
 package manager, Tree-sitter CLI, or C compiler is required. A normal project
@@ -238,12 +226,9 @@ unresolved, and cross-file links are labelled heuristic unless exact evidence
 exists in the graph. This is deliberate: structural evidence is not presented
 as compiler evidence.
 
-## 11. Troubleshooting
+## 10. Troubleshooting
 
 - `doctor` reports Java failure: install JDK 23 or newer and reopen the shell.
-- `doctor` reports SCIP as optional/unavailable: install Node/npm and rerun the
-  installer with `LLM_CONTEXT_INSTALL_SCIP=1`, or disable the provider in
-  `llm-context.edn`.
 - `doctor` reports NextPlaid, ONNX Runtime, or model failure: rerun the normal
   installer. It verifies and repairs the pinned components. Check
   `.llm-context/logs/next-plaid.log` if the runtime is installed but cannot
