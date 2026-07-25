@@ -57,3 +57,16 @@
     (is (clojure.string/includes? text "safe fields"))
     (is (clojure.string/includes? text "sample edn safe fields"))
     (is (clojure.string/includes? text "input value"))))
+
+(deftest operator-targets-do-not-persist-nil-derived-identifiers
+  (let [edge {:entity/type :entity.type/edge
+              :edge/id "edge:divide"
+              :edge/kind :edge.kind/calls
+              :edge/from "symbol:source"
+              :edge/target-text "/"
+              :edge/resolution :resolution/unresolved
+              :edge/confidence 0.0}
+        derived (schema/with-derived-attributes edge)]
+    (is (nil? (schema/edge-target-name "/")))
+    (is (not (contains? derived :edge/target-name)))
+    (is (= derived (schema/validate-entity! derived)))))

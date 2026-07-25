@@ -64,7 +64,7 @@ cached once per user. Repository-derived data is not stored there: every
 project owns its graph and semantic index below its own `.llm-context/`
 directory. Open a new terminal after an installer changes `PATH`.
 
-Set `LLM_CONTEXT_VERSION=0.7.5` to pin a release or
+Set `LLM_CONTEXT_VERSION=0.7.6` to pin a release or
 `LLM_CONTEXT_INSTALL_DIR` to choose another destination. The installers are
 idempotent: running them again replaces the jar and launcher only after
 checksum validation and reuse a verified model snapshot. Set
@@ -109,7 +109,7 @@ around the same jar:
 
 ```bash
 npm pack
-npm install --global ./llm-context-0.7.5.tgz
+npm install --global ./llm-context-0.7.6.tgz
 llm-context doctor
 ```
 

@@ -155,12 +155,16 @@
                    [?edge :edge/target-text ?target]
                    [(missing? $ ?edge :edge/target-name)]]
                  db)]
-        (doseq [batch (partition-all 100 missing)]
+        (doseq [batch (partition-all 100
+                                     (keep (fn [[edge target]]
+                                             (let [name (schema/edge-target-name target)]
+                                               (when (seq name) [edge name])))
+                                           missing))]
           (d/transact!
            connection
-           (mapv (fn [[edge target]]
+           (mapv (fn [[edge name]]
                    {:db/id edge
-                    :edge/target-name (schema/edge-target-name target)})
+                    :edge/target-name name})
                  batch)))
         (d/transact!
          connection

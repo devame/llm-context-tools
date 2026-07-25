@@ -136,10 +136,13 @@
       last))
 
 (defn with-derived-attributes [entity]
-  (cond-> (with-symbol-search-text entity)
-    (and (= :entity.type/edge (:entity/type entity))
-         (:edge/target-text entity))
-    (assoc :edge/target-name (edge-target-name (:edge/target-text entity)))))
+  (let [entity (with-symbol-search-text entity)
+        target-name (when (and (= :entity.type/edge (:entity/type entity))
+                               (:edge/target-text entity))
+                      (edge-target-name (:edge/target-text entity)))]
+    (cond-> entity
+      (seq target-name)
+      (assoc :edge/target-name target-name))))
 
 (def datalevin-schema
   {:llm-context/meta-key {:db/valueType :db.type/string
