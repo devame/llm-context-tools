@@ -3,7 +3,7 @@ node_modules/
 test-dir/
 *.wasm
 .cpcache/
-.clj-kondo/.cache/
+.clj-kondo/
 target/
 dist/
 .lsp/
