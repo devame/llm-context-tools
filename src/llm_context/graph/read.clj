@@ -229,6 +229,55 @@
        (sort-by (juxt :qualified-name :id))
        vec))
 
+(defn summary-entry-points
+  "Return a stable, database-bounded entry-point sample for human summaries."
+  [db]
+  (->> (d/q '[:find ?id ?qualified ?path ?line
+              :in $ ?kinds
+              :where
+              [?symbol :symbol/id ?id]
+              [?symbol :symbol/qualified-name ?qualified]
+              [?symbol :symbol/kind ?kind]
+              [(contains? ?kinds ?kind)]
+              [?symbol :symbol/file ?file]
+              [?file :file/path ?path]
+              [?symbol :source/start-line ?line]
+              (not-join [?symbol]
+                        [?edge :edge/to ?symbol]
+                        [?edge :edge/kind :edge.kind/calls])
+              :order-by [?qualified :asc]
+              :limit 20]
+            db #{:symbol.kind/function :symbol.kind/method})
+       (mapv (fn [[id qualified file line]]
+               {:id id :qualified-name qualified :file file :line line}))))
+
+(defn summary-effects
+  "Return a stable, database-bounded effect sample for human summaries."
+  [db]
+  (->> (d/q '[:find ?kind ?symbol-name ?path ?line
+              :where
+              [?effect :effect/kind ?kind]
+              [?effect :effect/symbol ?symbol]
+              [?symbol :symbol/qualified-name ?symbol-name]
+              [?symbol :symbol/file ?file]
+              [?file :file/path ?path]
+              [?effect :source/start-line ?line]
+              :order-by [?symbol-name :asc ?line :asc ?kind :asc]
+              :limit 20]
+            db)
+       (mapv (fn [[kind symbol file line]]
+               {:kind kind :symbol symbol :file file :line line}))))
+
+(defn unresolved-edge-count [db]
+  (or
+   (d/q '[:find (count ?edge) .
+          :where
+          [?edge :edge/resolution ?resolution]
+          [(not= ?resolution :resolution/exact)]
+          [(not= ?resolution :resolution/heuristic)]]
+        db)
+   0))
+
 (defn semantic-candidate-state
   "Return freshness state only for bounded semantic candidate symbol IDs."
   [db provider symbol-ids]
@@ -399,6 +448,12 @@
                  [(contains? ?qualified ?target)]]
                db qualified))]
     (into (sorted-set) (concat owned by-name by-qualified))))
+
+(defn all-edge-ids [db]
+  (into (sorted-set)
+        (d/q '[:find [?id ...]
+               :where [?edge :edge/id ?id]]
+             db)))
 
 (defn edge-resolution-inputs [db edge-ids]
   (if-not (seq edge-ids)

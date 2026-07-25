@@ -2,6 +2,7 @@
   (:require [clojure.data.json :as json]
             [clojure.pprint :as pprint]
             [clojure.string :as str]
+            [llm-context.graph.read :as graph-read]
             [llm-context.query :as query]
             [llm-context.store :as store]))
 
@@ -119,10 +120,11 @@
     :else value))
 
 (defn summary-markdown [graph]
-  (let [stats (query/stats graph)
-        entries (take 20 (query/entry-points graph))
-        effects (query/effects graph)
-        unresolved (query/unresolved graph)]
+  (let [db (store/database graph)
+        stats (query/stats graph)
+        entries (graph-read/summary-entry-points db)
+        effects (graph-read/summary-effects db)
+        unresolved-count (graph-read/unresolved-edge-count db)]
     (str "# Semantic graph summary\n\n"
          "Generated from the Datalevin graph; no claims are inferred beyond stored facts.\n\n"
          "## Counts\n\n"
@@ -130,7 +132,7 @@
          "- Symbols: " (:symbols stats) "\n"
          "- Relationships: " (:edges stats) "\n"
          "- Effects: " (:effects stats) "\n"
-         "- Unresolved or ambiguous relationships: " (count unresolved) "\n\n"
+         "- Unresolved or ambiguous relationships: " unresolved-count "\n\n"
          "## Languages\n\n"
          (if (seq (:languages stats))
            (str/join "\n" (for [[language count] (:languages stats)]

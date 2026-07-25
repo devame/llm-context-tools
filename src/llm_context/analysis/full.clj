@@ -3,6 +3,7 @@
             [llm-context.analysis.files :as files]
             [llm-context.analysis.resolve :as resolve]
             [llm-context.analysis.structural :as structural]
+            [llm-context.graph.read :as graph-read]
             [llm-context.indexer :as indexer]
             [llm-context.parser.jtreesitter :as jtreesitter]
             [llm-context.parser.provider :as parser]
@@ -29,15 +30,30 @@
   (when progress
     (progress (assoc data :stage stage))))
 
-(defn- persist! [graph project config entities progress]
+(defn- persist! [graph config entities progress]
   (when (semantic-reconcile/enabled? config)
     (semantic-reconcile/mark-full! graph))
   (store/replace-all! graph entities
                       {:batch-size persistence-batch-size
                        :on-progress
                        (when progress
-                         #(emit! progress :persist-progress %))})
-  (semantic-reconcile/reconcile! graph project config))
+                         #(emit! progress :persist-progress %))}))
+
+(defn- resolve-persisted! [graph scip-index]
+  (let [db (store/database graph)
+        edge-ids (graph-read/all-edge-ids db)
+        edges (graph-read/edge-resolution-inputs db edge-ids)
+        symbols (graph-read/resolution-candidate-symbols db edges)
+        exact
+        (if scip-index
+          (resolve/scip-exact-targets-focused
+           edges scip-index
+           #(graph-read/symbol-at-point db %1 %2 %3))
+          {})]
+    (store/reconcile-edges!
+     graph (resolve/resolution-decisions symbols edges exact))
+    {:edges (count edges) :candidates (count symbols)
+     :exact (count exact)}))
 
 (defn analyze!
   "Perform a complete project scan and replace Datalevin facts in bounded
@@ -74,25 +90,27 @@
              semantic (maybe-scip project config (map :language files))
              _ (emit! progress :semantic-complete
                       {:provider-ran? (boolean semantic)})
-             _ (emit! progress :resolve-start {})
-             resolved (resolve/resolve-outputs extracted (:index semantic))
              all-entities (vec (mapcat (fn [{:keys [file entities]}]
                                          (cons file entities))
-                                       resolved))
+                                       extracted))
              _ (emit! progress :persist-start
                       {:entities (count all-entities)
                        :batch-size persistence-batch-size})]
-         (let [semantic-plan (persist! graph project config
-                                       all-entities progress)]
+         (persist! graph config all-entities progress)
+         (emit! progress :resolve-start {})
+         (let [resolution (resolve-persisted! graph (:index semantic))
+               semantic-plan
+               (semantic-reconcile/reconcile! graph project config)]
            (emit! progress :complete
                   {:elapsed-seconds
                    (long (/ (- (System/nanoTime) started) 1000000000))})
            {:mode :full
             :files total
             :entities (count all-entities)
+            :resolution resolution
             :semantic semantic-plan
             :diagnostics (cond-> (vec (concat diagnostics
-                                              (mapcat :diagnostics resolved)
+                                              (mapcat :diagnostics extracted)
                                               (:diagnostics semantic-plan)))
                            (:diagnostic semantic)
                            (conj (:diagnostic semantic)))}))))))

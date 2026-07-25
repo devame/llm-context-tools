@@ -21,7 +21,7 @@
       (is (pos? (:entities result)))
       (is (= [:discover-start :discover-complete :parse-progress
               :parse-complete :semantic-start :semantic-complete
-              :resolve-start :persist-start :persist-progress :complete]
+              :persist-start :persist-progress :resolve-start :complete]
              (mapv :stage @events)))
       (is (= full/persistence-batch-size
              (:batch-size (first (filter #(= :persist-start (:stage %))
