@@ -47,7 +47,13 @@
       (is (some #(= 'f (:name %)) local-usages))
       (is (Files/isDirectory
            (.resolve root ".llm-context/cache/clj-kondo")
-           (make-array java.nio.file.LinkOption 0))))))
+           (make-array java.nio.file.LinkOption 0)))
+      (is (Files/isDirectory
+           (.resolve root ".llm-context/cache/clj-kondo-config")
+           (make-array java.nio.file.LinkOption 0)))
+      (is (not (Files/exists
+                (.resolve root ".clj-kondo")
+                (make-array java.nio.file.LinkOption 0)))))))
 
 (deftest unsupported-files-never-enter-the-provider
   (let [root (Files/createTempDirectory

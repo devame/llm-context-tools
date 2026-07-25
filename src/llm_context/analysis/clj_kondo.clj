@@ -86,9 +86,18 @@
   (let [files (vec (filter clojure-file? files))
         language-by-path (into {} (map (juxt :relative-path :language) files))
         ^Path cache-dir (.resolve ^Path (:state-dir project) "cache/clj-kondo")
-        ^Path config-dir (.resolve ^Path (:root project) ".clj-kondo")]
+        ^Path project-config-dir (.resolve ^Path (:root project) ".clj-kondo")
+        ^Path config-dir
+        (if (Files/isDirectory project-config-dir (make-array LinkOption 0))
+          project-config-dir
+          (.resolve ^Path (:state-dir project) "cache/clj-kondo-config"))]
     (Files/createDirectories
      cache-dir (make-array java.nio.file.attribute.FileAttribute 0))
+    ;; clj-kondo 2026.07.24's cache synchronizer expects a non-nil config-dir
+    ;; even when no project configuration exists. The isolated empty directory
+    ;; preserves source-first behavior and never writes into the repository.
+    (Files/createDirectories
+     config-dir (make-array java.nio.file.attribute.FileAttribute 0))
     (if (empty? files)
       {:analyzer analyzer-name
        :analyzer-version analyzer-version
@@ -97,15 +106,14 @@
        :diagnostics []}
       (let [result
             (kondo/run!
-             (cond-> {:lint (mapv (comp str :path) files)
-                      :cache true
-                      :cache-dir (str cache-dir)
-                      :config {:output {:format :edn
-                                        :summary true
-                                        :progress false
-                                        :analysis analysis-options}}}
-               (Files/isDirectory config-dir (make-array LinkOption 0))
-               (assoc :config-dir (str config-dir))))
+             {:lint (mapv (comp str :path) files)
+              :cache true
+              :cache-dir (str cache-dir)
+              :config-dir (str config-dir)
+              :config {:output {:format :edn
+                                :summary true
+                                :progress false
+                                :analysis analysis-options}}})
             normalized
             (into (sorted-map)
                   (map (fn [[kind records]]
