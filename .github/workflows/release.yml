@@ -148,11 +148,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            dist/llm-context.jar \
-            dist/llm-context.jar.sha256 \
-            dist/next-plaid-api-* \
-            install.sh \
-            install.ps1 \
-            --generate-notes \
-            --verify-tag
+          bash scripts/publish-release.sh "$GITHUB_REF_NAME" dist
