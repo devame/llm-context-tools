@@ -62,3 +62,20 @@
            [(file-input path :language/javascript source)])]
       (is (empty? (:analysis snapshot)))
       (is (empty? (:diagnostics snapshot))))))
+
+(deftest only-source-integrity-findings-become-analysis-diagnostics
+  (let [root (Files/createTempDirectory
+              "llm-context-kondo-malformed-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        path (.resolve root "broken.clj")
+        source "(ns broken)\n(defn unfinished ["]
+    (spit (str path) source)
+    (let [diagnostics
+          (:diagnostics
+           (clj-kondo/analyze!
+            (project/context (str root))
+            [(file-input path :language/clojure source)]))]
+      (is (seq diagnostics))
+      (is (every? #(contains? clj-kondo/source-integrity-finding-types
+                              (:type %))
+                  diagnostics)))))

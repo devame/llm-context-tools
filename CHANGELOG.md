@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.8.0
+
+- Restricted analysis to Clojure, ClojureScript, CLJC, Janet, and selected EDN
+  project configuration; unsupported source extensions are silently ignored,
+  and Node/SCIP are no longer installed or invoked.
+- Embedded clj-kondo 2026.07.24 as the authoritative Clojure-family analyzer,
+  including namespaces, aliases, vars, locals, macros, protocols, CLJC realms,
+  and project configuration without executing build tools or project macros.
+- Replaced Janet head-text inference with a two-pass lexical, module, import,
+  macro, and core-catalog resolver pinned to Janet 1.41.2.
+- Introduced graph format 2: only evidence-backed exact in-project
+  relationships are traversable; external, dynamic, ambiguous, and unresolved
+  observations are non-traversable classified references.
+- Added stable platform-aware symbol identities, semantic fingerprints,
+  exact-edge invariants, and whole-project incremental convergence when
+  definitions are added, renamed, or removed.
+- Added ClojureScript re-frame and application-state topics connecting event
+  registration/dispatch, subscriptions, effects/coeffects, and statically
+  recoverable state reads and writes.
+- Added exact-by-default callers/callees, explicit external-reference and topic
+  queries, symbol suggestions, and deterministic weighted context paths with
+  graph/token truncation reported separately.
+- Made semantic fallback observable with `query search --explain`, separated
+  runtime availability from index completeness, and added failed/dirty
+  inspection plus explicit terminal-job retry.
+- Added graph-format/analyzer/catalog/document metadata, coordinated full
+  rebuilds through the resident service, and rotated the default semantic
+  collection to `llm-context-v2`.
+- Added a checksummed installed user guide and release asset. Existing
+  `.llm-context` graphs must be rebuilt once with
+  `llm-context analyze --full`; no legacy migration is attempted.
+
 ## 0.7.1
 
 - Fixed malformed UTF-8 handling by sharing deterministic replacement decoding

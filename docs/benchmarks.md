@@ -64,6 +64,29 @@ filesystem location, JDK, native architecture, and project language mix have
 large effects. Regression comparisons should use the same machine and fixture
 size.
 
+## 0.8.0 release-candidate project gate
+
+The `0.8.0` distribution analyzed this repository on 2026-07-25 under WSL and
+JDK 25.0.1:
+
+| Metric | Result |
+|---|---:|
+| Supported files | 76 |
+| Canonical entities | 10,706 |
+| Symbols | 773 |
+| Exact traversable edges | 3,075 |
+| External references | 6,648 |
+| Dynamic references | 62 |
+| Ambiguous references | 2 |
+| Unresolved references | 0 |
+| Duplicate identities | 0 |
+| Full rebuild (warm cache, including semantic reconciliation) | 50 s |
+| No-op incremental | 0 changed / 0 deleted |
+
+The full command completed with zero diagnostics, queued 698 version-2
+semantic documents, and a 2,000-token context request returned a deterministic
+explained path while respecting its budget.
+
 ## Development baseline
 
 Measured on 2026-07-25 in the repository's WSL workspace with JDK 25.0.1

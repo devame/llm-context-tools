@@ -114,13 +114,18 @@
     (println "Initialization cancelled; no files were written."))
   0)
 
-(defn- diagnostic-message [{:keys [level kind file path language message size]}]
+(defn- diagnostic-message
+  [{:keys [level kind file path language message size row column]}]
   (str (name (or level :info)) " " (name kind) ": "
        (case kind
          :missing-include (str "configured path does not exist: " path)
          :grammar-unavailable (str file " (" (some-> language name) ")")
          :file-too-large (str file " (" size " bytes)")
          :binary-file file
+         :clj-kondo (str file
+                         (when (and row column)
+                           (str ":" row ":" column))
+                         ": " message)
          :semantic-provider-failed (or message "semantic provider failed")
          (or file path message (pr-str kind)))))
 

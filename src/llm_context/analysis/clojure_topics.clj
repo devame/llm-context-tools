@@ -35,12 +35,17 @@
 (def mutation-apis #{"cljs.core/swap!" "clojure.core/swap!"})
 (def atom-read-apis #{"cljs.core/deref" "clojure.core/deref"})
 (def atom-write-apis #{"cljs.core/reset!" "clojure.core/reset!"})
+(def topic-apis
+  (into #{} (concat (keys framework-apis)
+                    (keys state-apis)
+                    mutation-apis atom-read-apis atom-write-apis)))
 
 (defn- offset-at [source row column]
-  (let [lines (str/split source #"\n" -1)]
-    (when-let [line (nth lines (dec row) nil)]
-      (+ (reduce + 0 (map #(inc (count %)) (take (dec row) lines)))
-         (min (count line) (dec column))))))
+  (when (and (string? source) (pos-int? row) (pos-int? column))
+    (let [lines (str/split source #"\n" -1)]
+      (when-let [line (nth lines (dec row) nil)]
+        (+ (reduce + 0 (map #(inc (count %)) (take (dec row) lines)))
+           (min (count line) (dec column)))))))
 
 (defn- opening-list [source offset]
   (loop [index (if (and (< offset (count source))
@@ -125,7 +130,8 @@
 (defn- deref-token [source reference]
   (when-let [offset (offset-at source (:source/start-line reference)
                                (:source/start-column reference))]
-    (when (= \@ (.charAt source offset))
+    (when (and (< offset (count source))
+               (= \@ (.charAt source offset)))
       (some-> (re-find
                #"^[A-Za-z*+!_?.<>=$%&/#-][A-Za-z0-9*+!_?.<>=$%&/#-]*"
                (subs source (inc offset)))
@@ -218,11 +224,13 @@
          (mapcat
           (fn [reference]
             (let [owner (get symbols-by-id (:reference/symbol reference))
-                  target (:reference/qualified-target reference)
-                  tokens (call-tokens source reference)]
+                  target (:reference/qualified-target reference)]
               (when (and owner (= :cljs (:symbol/platform owner))
-                         (or tokens (contains? atom-read-apis target)))
-                (cond
+                         (contains? topic-apis target)
+                         (pos-int? (:source/start-line reference))
+                         (pos-int? (:source/start-column reference)))
+                (let [tokens (call-tokens source reference)]
+                 (cond
                   (contains? framework-apis target)
                   (let [[topic-kind edge-kind] (get framework-apis target)
                         key (topic-key owner (nth tokens 1 nil)
@@ -272,6 +280,6 @@
                     (let [entity (topic owner :state-key key)]
                       [entity
                        (topic-edge owner entity :edge.kind/state-writes
-                                   reference)])))))))
+                                   reference)]))))))))
          (remove nil?)
          vec)))

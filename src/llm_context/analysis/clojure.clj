@@ -31,10 +31,19 @@
      clojure.core/deftype cljs.core/deftype
      clojure.core/let cljs.core/let
      clojure.core/when cljs.core/when
+     clojure.core/if cljs.core/if
      clojure.core/when-let cljs.core/when-let
      clojure.core/if-let cljs.core/if-let
      clojure.core/and cljs.core/and
      clojure.core/or cljs.core/or
+     clojure.core/-> cljs.core/->
+     clojure.core/->> cljs.core/->>
+     clojure.core/cond cljs.core/cond
+     clojure.core/cond-> cljs.core/cond->
+     clojure.core/cond->> cljs.core/cond->>
+     clojure.core/case cljs.core/case
+     clojure.core/do cljs.core/do
+     clojure.core/comment cljs.core/comment
      clojure.core/fn cljs.core/fn
      clojure.core/loop cljs.core/loop
      clojure.core/for cljs.core/for
@@ -166,10 +175,15 @@
   (when (and (:to record) (:name record))
     (qualified (:to record) (:name record))))
 
+(defn- located? [record]
+  (and (pos-int? (:row record))
+       (pos-int? (:col record))))
+
 (defn- var-relationship
   [namespace-by-key definitions-by-key platform record]
-  (when-let [owner (owner-for namespace-by-key definitions-by-key
-                              platform record)]
+  (when (located? record)
+   (when-let [owner (owner-for namespace-by-key definitions-by-key
+                               platform record)]
     (let [qualified-target (qualified-target record)
           target (or qualified-target (str (:name record)))
           candidates (target-candidates definitions-by-key platform record)
@@ -197,18 +211,19 @@
 
         :else
         (diagnostic-reference kind owner record target :unresolved
-                              :clj-kondo-var-usage nil)))))
+                              :clj-kondo-var-usage nil))))))
 
 (defn- namespace-relationship
   [namespace-by-key platform record]
-  (when-let [owner (get namespace-by-key [platform (:from record)])]
+  (when (located? record)
+   (when-let [owner (get namespace-by-key [platform (:from record)])]
     (let [target-name (str (:to record))]
       (if-let [target (get namespace-by-key [platform (:to record)])]
         (exact-edge :edge.kind/imports owner target target-name
                     :clj-kondo-namespace-usage record)
         (diagnostic-reference
          :edge.kind/imports owner record target-name :external
-         :clj-kondo-namespace-usage target-name)))))
+         :clj-kondo-namespace-usage target-name))))))
 
 (defn- local-call?
   [content {:keys [row name-col col]}]

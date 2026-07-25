@@ -2,6 +2,7 @@
   (:require [clojure.test :refer [deftest is]]
             [llm-context.analysis.clj-kondo :as clj-kondo]
             [llm-context.analysis.clojure :as clojure-analysis]
+            [llm-context.analysis.clojure-topics :as clojure-topics]
             [llm-context.analysis.project-analyzer :as project-analyzer]
             [llm-context.project :as project])
   (:import [java.nio.file Files]))
@@ -16,6 +17,32 @@
      :size (count (.getBytes content
                              java.nio.charset.StandardCharsets/UTF_8))
      :modified-at 1}))
+
+(deftest focused-topic-reader-ignores-observations-without-source-ranges
+  (let [file {:content "(ns sample.ui)"}
+        owner {:symbol/id "symbol:owner"
+               :symbol/platform :cljs
+               :symbol/qualified-name "sample.ui/render"}
+        reference {:reference/symbol "symbol:owner"
+                   :reference/qualified-target "cljs.core/get-in"}]
+    (is (empty? (clojure-topics/extract file [owner] [reference])))
+    (is (nil? (#'clojure-topics/offset-at (:content file) nil nil)))))
+
+(deftest synthetic-kondo-usages-without-locations-are-not-graph-facts
+  (let [owner {:symbol/id "symbol:owner"
+               :symbol/platform :clj
+               :symbol/qualified-name "sample.core/run"}
+        namespaces {[:clj 'sample.core]
+                    {:symbol/id "symbol:namespace"
+                     :symbol/platform :clj
+                     :symbol/qualified-name "sample.core"}}
+        definitions {[:clj 'sample.core 'run] [owner]}
+        relationship
+        (#'clojure-analysis/var-relationship
+         namespaces definitions :clj
+         {:platform :clj :from 'sample.core :from-var 'run
+          :to 'clojure.core :name 'some? :arity 1})]
+    (is (nil? relationship))))
 
 (deftest kondo-facts-separate-exact-external-and-dynamic-relationships
   (let [root (Files/createTempDirectory

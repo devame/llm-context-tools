@@ -26,6 +26,14 @@
    :java-member-usages true
    :instance-invocations true})
 
+;; This provider supplies graph facts, not a second lint UI. Because dependency
+;; build commands and project macros are deliberately not executed, ordinary
+;; lint output contains expected false positives such as macro-introduced
+;; bindings. Only findings that mean source text could not be read reliably
+;; affect the analysis result.
+(def source-integrity-finding-types
+  #{:syntax :reader-error :invalid-token :unclosed-delimiter})
+
 (defn- clojure-file? [file]
   (contains? clojure-languages (:language file)))
 
@@ -113,5 +121,7 @@
          :configuration-fingerprint (config-fingerprint project)
          :summary (:summary result)
          :analysis normalized
-         :diagnostics (mapv #(finding->diagnostic project %)
-                            (:findings result))}))))
+         :diagnostics (->> (:findings result)
+                           (filter #(contains? source-integrity-finding-types
+                                               (:type %)))
+                           (mapv #(finding->diagnostic project %)))}))))
