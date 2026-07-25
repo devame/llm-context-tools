@@ -3,6 +3,7 @@
             [llm-context.analysis.files :as files]
             [llm-context.analysis.resolve :as resolve]
             [llm-context.analysis.structural :as structural]
+            [llm-context.graph.read :as graph-read]
             [llm-context.indexer :as indexer]
             [llm-context.model.ids :as ids]
             [llm-context.parser.jtreesitter :as jtreesitter]
@@ -15,8 +16,7 @@
    (store/with-store [graph project config]
      (index-present? graph)))
   ([graph]
-   (boolean (seq (store/query graph
-                              '[:find [?id ...] :where [_ :file/id ?id]] [])))))
+   (graph-read/any-file? (store/database graph))))
 
 (defn- existing-files [graph]
   (into {}

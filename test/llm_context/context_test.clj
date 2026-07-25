@@ -39,3 +39,44 @@
         (is (not-any? #(= "symbol:c" (:id %)) (:symbols packet)))
         (is (re-find #"Code context: a" (context/markdown packet)))
         (is (<= (get-in packet [:budget :estimated-tokens]) 1000))))))
+
+(deftest disconnected-symbols-do-not-enter-focused-context
+  (let [root (Files/createTempDirectory
+              "llm-context-packet-scaling-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        project (project/context (str root))
+        file {:entity/type :entity.type/file :file/id "file:large.clj"
+              :file/path "large.clj" :file/language :language/clojure
+              :file/content-hash (ids/content-hash "large")
+              :file/size 5 :file/modified-at 1}
+        symbol (fn [id name line]
+                 {:entity/type :entity.type/symbol
+                  :symbol/id id :symbol/name name
+                  :symbol/qualified-name (str "large/" name)
+                  :symbol/kind :symbol.kind/function
+                  :symbol/file (:file/id file)
+                  :source/start-line line :source/start-column 1
+                  :source/end-line line :source/end-column 5})
+        focus (symbol "symbol:focus" "focus" 1)
+        neighbor (symbol "symbol:neighbor" "neighbor" 2)
+        noise (mapv (fn [index]
+                      (symbol (str "symbol:noise-" index)
+                              (str "noise-" index)
+                              (+ index 10)))
+                    (range 1000))
+        edge {:entity/type :entity.type/edge :edge/id "edge:focus-neighbor"
+              :edge/kind :edge.kind/calls
+              :edge/from (:symbol/id focus) :edge/to (:symbol/id neighbor)
+              :edge/target-text "neighbor"
+              :edge/resolution :resolution/exact :edge/confidence 1.0
+              :source/start-line 1 :source/start-column 1
+              :source/end-line 1 :source/end-column 5}]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-file! graph file (into [focus neighbor edge] noise))
+      (let [packet (context/build
+                    graph {:focus "symbol:focus"
+                           :depth 1 :max-tokens 1000})]
+        (is (= #{"symbol:focus" "symbol:neighbor"}
+               (set (map :id (:symbols packet)))))
+        (is (= ["edge:focus-neighbor"]
+               (mapv :id (:relationships packet))))))))

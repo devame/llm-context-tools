@@ -1,35 +1,28 @@
 (ns llm-context.query
   (:require [clojure.string :as str]
+            [llm-context.graph.read :as graph-read]
             [llm-context.semantic.hybrid :as hybrid]
             [llm-context.store :as store]))
 
-(defn- frequencies-query [graph query-form]
-  (->> (store/query graph query-form [])
-       frequencies
-       (into (sorted-map))))
-
 (defn stats [graph]
-  (let [types (map second
-                   (store/query graph
-                                '[:find ?entity ?type
-                                  :where [?entity :entity/type ?type]] []))]
-    {:entities (count types)
-     :files (count (filter #{:entity.type/file} types))
-     :symbols (count (filter #{:entity.type/symbol} types))
-     :edges (count (filter #{:entity.type/edge} types))
-     :effects (count (filter #{:entity.type/effect} types))
-     :languages (frequencies-query
-                 graph '[:find [?language ...] :where [_ :file/language ?language]])
-     :symbol-kinds (frequencies-query
-                    graph '[:find [?kind ...] :where [_ :symbol/kind ?kind]])
-     :edge-resolution (frequencies-query
-                       graph '[:find [?state ...] :where [_ :edge/resolution ?state]])}))
+  (let [db (store/database graph)
+        counts (graph-read/entity-counts db)]
+    {:entities (reduce + 0 (vals counts))
+     :files (get counts :entity.type/file 0)
+     :symbols (get counts :entity.type/symbol 0)
+     :edges (get counts :entity.type/edge 0)
+     :effects (get counts :entity.type/effect 0)
+     :languages (graph-read/grouped-counts db :file/language)
+     :symbol-kinds (graph-read/grouped-counts db :symbol/kind)
+     :edge-resolution (graph-read/grouped-counts db :edge/resolution)}))
 
 (defn symbols
   "Find symbols by exact name, case-insensitive substring, or Datalevin
   full-text relevance over identifiers, signatures, and documentation."
   [graph term]
-  (let [needle (str/lower-case term)
+  (let [db (store/database graph)
+        needle (str/lower-case term)
+        exact (graph-read/exact-symbols db term)
         fulltext-scores
         (try
           (reduce (fn [scores [id score]]
@@ -51,28 +44,24 @@
             ;; Full-text syntax is intentionally richer than identifier search.
             ;; Invalid search expressions still retain the historical literal
             ;; substring behavior instead of failing the command.
-            {}))]
-    (->> (store/query
-          graph
-          '[:find ?id ?name ?qualified ?kind ?path ?line
-            :where [?symbol :symbol/id ?id]
-                   [?symbol :symbol/name ?name]
-                   [?symbol :symbol/qualified-name ?qualified]
-                   [?symbol :symbol/kind ?kind]
-                   [?symbol :symbol/file ?file]
-                   [?file :file/path ?path]
-                   [?symbol :source/start-line ?line]]
-          [])
-         (keep (fn [[id name qualified kind path line]]
-                 (let [substring? (or (str/includes? (str/lower-case name) needle)
-                                      (str/includes? (str/lower-case qualified) needle))]
-                   (when (or (= term id) (= term name) (= term qualified)
-                             substring? (contains? fulltext-scores id))
-                     {:id id :name name :qualified-name qualified
-                      :kind kind :file path :line line
-                      ::exact? (or (= term id) (= term name) (= term qualified))
-                      ::substring? substring?
-                      ::score (get fulltext-scores id Double/NEGATIVE_INFINITY)}))))
+            {}))
+        substring-ids (try
+                        (graph-read/substring-symbol-ids db needle)
+                        (catch Exception _ []))
+        exact-ids (set (map :id exact))
+        substring-set (set substring-ids)
+        candidate-ids (distinct (concat exact-ids
+                                        (keys fulltext-scores)
+                                        substring-ids))
+        candidates (graph-read/symbols-by-ids db candidate-ids)]
+    (->> candidate-ids
+         (keep (fn [id]
+                 (when-let [symbol (get candidates id)]
+                   (assoc symbol
+                          ::exact? (contains? exact-ids id)
+                          ::substring? (contains? substring-set id)
+                          ::score (get fulltext-scores id
+                                       Double/NEGATIVE_INFINITY)))))
          (sort-by (juxt #(if (::exact? %) 0 (if (::substring? %) 1 2))
                        #(if (Double/isFinite (double (::score %)))
                           (- (double (::score %)))
@@ -196,12 +185,4 @@
        (mapv (fn [[id name]] {:id id :name name}))))
 
 (defn entry-points [graph]
-  (let [called (set (store/query graph
-                                 '[:find [?id ...]
-                                   :where [?edge :edge/to ?symbol]
-                                          [?symbol :symbol/id ?id]
-                                          [?edge :edge/kind :edge.kind/calls]] []))]
-    (->> (symbols graph "")
-         (filter #(contains? #{:symbol.kind/function :symbol.kind/method} (:kind %)))
-         (remove #(contains? called (:id %)))
-         vec)))
+  (graph-read/entry-points (store/database graph)))

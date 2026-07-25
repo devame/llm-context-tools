@@ -1,78 +1,29 @@
 (ns llm-context.context
   (:require [clojure.string :as str]
+            [llm-context.graph.read :as graph-read]
             [llm-context.query :as query]
             [llm-context.store :as store]))
 
 (defn estimate-tokens [value]
   (long (Math/ceil (/ (count (pr-str value)) 4.0))))
 
-(defn- symbol-catalog [graph]
-  (let [signatures (into {} (store/query graph
-                                         '[:find ?id ?signature
-                                           :where [?symbol :symbol/id ?id]
-                                                  [?symbol :symbol/signature ?signature]] []))
-        docs (into {} (store/query graph
-                                  '[:find ?id ?doc
-                                    :where [?symbol :symbol/id ?id]
-                                           [?symbol :symbol/doc ?doc]] []))]
-    (into {}
-          (map (fn [[id name qualified kind path line]]
-                 [id (cond-> {:id id :name name :qualified-name qualified
-                              :kind kind :file path :line line}
-                       (get signatures id) (assoc :signature (get signatures id))
-                       (get docs id) (assoc :doc (get docs id)))]))
-          (store/query graph
-                       '[:find ?id ?name ?qualified ?kind ?path ?line
-                         :where [?symbol :symbol/id ?id]
-                                [?symbol :symbol/name ?name]
-                                [?symbol :symbol/qualified-name ?qualified]
-                                [?symbol :symbol/kind ?kind]
-                                [?symbol :symbol/file ?file]
-                                [?file :file/path ?path]
-                                [?symbol :source/start-line ?line]] []))))
-
-(defn- relationships [graph]
-  (let [targets (into {} (store/query graph
-                                      '[:find ?edge-id ?target-id
-                                        :where [?edge :edge/id ?edge-id]
-                                               [?edge :edge/to ?target]
-                                               [?target :symbol/id ?target-id]] []))]
-    (mapv (fn [[id kind from target-text resolution line]]
-            (cond-> {:id id :kind kind :from from :target-text target-text
-                     :resolution resolution :line line}
-              (get targets id) (assoc :to (get targets id))))
-          (store/query graph
-                       '[:find ?id ?kind ?from-id ?target-text ?resolution ?line
-                         :where [?edge :edge/id ?id]
-                                [?edge :edge/kind ?kind]
-                                [?edge :edge/from ?from]
-                                [?from :symbol/id ?from-id]
-                                [?edge :edge/target-text ?target-text]
-                                [?edge :edge/resolution ?resolution]
-                                [?edge :source/start-line ?line]] []))))
-
-(defn- traversal-order [seed-ids relationships max-depth]
-  (let [adjacency (reduce (fn [result {:keys [from to]}]
-                            (if to
-                              (-> result
-                                  (update from (fnil conj #{}) to)
-                                  (update to (fnil conj #{}) from))
-                              result))
-                          {} relationships)]
-    (loop [queue (into clojure.lang.PersistentQueue/EMPTY
-                       (map #(vector % 0) seed-ids))
-           seen #{}
-           order []]
-      (if-let [[id depth] (peek queue)]
-        (let [queue (pop queue)]
-          (if (contains? seen id)
-            (recur queue seen order)
-            (let [neighbors (if (< depth max-depth)
-                              (sort (get adjacency id)) [])]
-              (recur (into queue (map #(vector % (inc depth)) neighbors))
-                     (conj seen id)
-                     (conj order {:id id :distance depth})))))
-        order))))
+(defn- traversal-order [db seed-ids max-depth]
+  (loop [depth 0
+         frontier (vec (sort (distinct seed-ids)))
+         seen #{}
+         order []]
+    (if (or (empty? frontier) (> depth max-depth))
+      order
+      (let [fresh (vec (remove seen frontier))
+            seen' (into seen fresh)
+            order' (into order (map #(hash-map :id % :distance depth) fresh))
+            next-frontier
+            (when (< depth max-depth)
+              (->> (graph-read/neighbor-ids db fresh)
+                   (remove seen')
+                   sort
+                   vec))]
+        (recur (inc depth) next-frontier seen' order')))))
 
 (defn- packet-for [focus max-tokens symbols relationships effects order n]
   (let [selected (vec (take n order))
@@ -94,25 +45,39 @@
                 :truncated? (< n (count order))}]
     (assoc-in packet [:budget :estimated-tokens] (estimate-tokens packet))))
 
+(defn- largest-fitting-prefix
+  [focus max-tokens symbols relationships effects order]
+  (loop [low 1
+         high (count order)
+         best nil]
+    (if (> low high)
+      best
+      (let [middle (quot (+ low high) 2)
+            packet (packet-for focus max-tokens symbols relationships
+                               effects order middle)
+            fits? (<= (get-in packet [:budget :estimated-tokens])
+                      max-tokens)]
+        (if fits?
+          (recur (inc middle) high middle)
+          (recur low (dec middle) best))))))
+
 (defn build
   [graph {:keys [focus max-tokens depth]
           :or {max-tokens 8000 depth 4}}]
-  (let [catalog (symbol-catalog graph)
-        matches (query/symbols graph focus)
-        exact (filter #(or (= focus (:name %)) (= focus (:qualified-name %))
-                           (= focus (:id %))) matches)
+  (let [db (store/database graph)
+        exact (graph-read/exact-symbols db focus)
+        matches (or (seq exact) (seq (query/symbols graph focus)))
         seeds (mapv :id (or (seq exact) (seq matches)))]
     (when-not (seq seeds)
       (throw (ex-info (str "No symbol matches context focus: " focus)
                       {:exit-code 2 :focus focus})))
-    (let [relations (relationships graph)
-          order (traversal-order seeds relations depth)
-          effects (mapv #(select-keys % [:kind :symbol-id :detail :confidence :file :line])
-                        (query/effects graph))
-          fits? #(<= (get-in (packet-for focus max-tokens catalog relations effects order %)
-                             [:budget :estimated-tokens])
-                     max-tokens)
-          best-count (last (filter fits? (range 1 (inc (count order)))))]
+    (let [order (traversal-order db seeds depth)
+          ids (mapv :id order)
+          catalog (graph-read/symbols-by-ids db ids)
+          relations (graph-read/edges-for-symbols db ids)
+          effects (graph-read/effects-for-symbols db ids)
+          best-count (largest-fitting-prefix focus max-tokens catalog
+                                             relations effects order)]
       (if best-count
         (packet-for focus max-tokens catalog relations effects order best-count)
         (let [seed (select-keys (get catalog (:id (first order)))

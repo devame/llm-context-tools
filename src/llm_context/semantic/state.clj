@@ -6,6 +6,7 @@
   the authoritative graph."
   (:require [clojure.string :as str]
             [datalevin.core :as d]
+            [llm-context.graph.read :as graph-read]
             [llm-context.store :as store]))
 
 (def job-statuses #{:pending :leased :failed})
@@ -442,20 +443,16 @@
       indexed))
 
   (semantic-summary [graph provider now]
-    (let [jobs (job-records graph provider)
-          indexed (indexed-records graph provider)
-          pending (filter #(= :pending (:semantic.job/status %)) jobs)
-          leased (filter #(= :leased (:semantic.job/status %)) jobs)
-          failed (filter #(= :failed (:semantic.job/status %)) jobs)
-          oldest (when-let [times (seq (map :semantic.job/updated-at pending))]
-                   (apply min times))]
+    (let [{:keys [oldest-pending-at] :as counts}
+          (graph-read/semantic-counts (store/database graph) provider)]
       {:provider provider
-       :indexed (count indexed)
-       :pending (count pending)
-       :leased (count leased)
-       :failed (count failed)
-       :oldest-pending-ms (when oldest (max 0 (- now oldest)))
-       :dirty (count (dirty-records graph provider))
+       :indexed (:indexed counts)
+       :pending (:pending counts)
+       :leased (:leased counts)
+       :failed (:failed counts)
+       :oldest-pending-ms (when oldest-pending-at
+                            (max 0 (- now oldest-pending-at)))
+       :dirty (:dirty counts)
        :watermark (watermark graph provider)}))
 
   (record-watermark! [graph {:keys [provider state last-success-at

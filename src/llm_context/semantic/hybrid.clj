@@ -1,47 +1,11 @@
 (ns llm-context.semantic.hybrid
   "Freshness-safe rank fusion between Datalevin FTS and LateOn candidates."
-  (:require [datalevin.core :as d]
+  (:require [llm-context.graph.read :as graph-read]
             [llm-context.semantic.index :as index]
             [llm-context.semantic.reconcile :as reconcile]
-            [llm-context.semantic.state :as state]
             [llm-context.store :as store]))
 
 (def ^:private rrf-k 60.0)
-
-(defn- graph-symbols [graph]
-  (let [db (store/database graph)
-        eids (d/q '[:find [?symbol ...]
-                    :where [?symbol :symbol/id _]]
-                  db)]
-    (into {}
-          (map
-           (fn [eid]
-             (let [symbol (d/pull db '[*] eid)
-                   file-ref (:symbol/file symbol)
-                   file-eid (if (map? file-ref) (:db/id file-ref) file-ref)
-                   file (d/pull db '[*] file-eid)]
-               [(:symbol/id symbol)
-                {:id (:symbol/id symbol)
-                 :name (:symbol/name symbol)
-                 :qualified-name (:symbol/qualified-name symbol)
-                 :kind (:symbol/kind symbol)
-                 :file (:file/path file)
-                 :file-id (:file/id file)
-                 :line (:source/start-line symbol)
-                 :signature (:symbol/signature symbol)}]))
-           eids))))
-
-(defn- operational-state [graph]
-  {:indexed
-   (into {}
-         (map (juxt :semantic.indexed/symbol-id identity))
-         (state/indexed-records graph reconcile/provider))
-   :pending
-   (set (map :semantic.job/symbol-id
-             (state/job-records graph reconcile/provider)))
-   :dirty-files
-   (set (map :semantic.dirty/file-id
-             (state/dirty-records graph reconcile/provider)))})
 
 (defn- candidate-metadata [candidate]
   (let [metadata (:metadata candidate)]
@@ -53,7 +17,7 @@
      :chunk-index (:llm_chunk_index metadata)}))
 
 (defn- current-candidate?
-  [lateon symbols {:keys [indexed pending dirty-files]} candidate]
+  [lateon symbols {:keys [indexed jobs dirty-files]} candidate]
   (let [{:keys [symbol-id file-id document-hash model-revision
                 document-version]} (candidate-metadata candidate)
         symbol (get symbols symbol-id)
@@ -69,7 +33,7 @@
             (:semantic.indexed/document-version recorded))
          (= model-revision (:model-revision lateon))
          (= (long document-version) (:document-version lateon))
-         (not (contains? pending symbol-id))
+         (not (contains? jobs symbol-id))
          (not (contains? dirty-files file-id))
          (not (contains? dirty-files reconcile/project-marker)))))
 
@@ -108,20 +72,29 @@
   collapse to lexical-only results."
   [graph client config term lexical-results]
   (let [lateon (get-in config [:semantic :lateon-code])
-        symbols (graph-symbols graph)
         lexical-ids (vec (keep :id lexical-results))
-        semantic-candidates
+        raw-semantic-candidates
         (if (and client (reconcile/enabled? config))
           (try
-            (let [operational (operational-state graph)]
-              (->> (index/search-text
-                    client term {:top-k (:candidate-count lateon)})
-                   (filter #(current-candidate?
-                             lateon symbols operational %))
-                   collapse-chunks))
+            (index/search-text
+             client term {:top-k (:candidate-count lateon)})
             (catch Throwable _
               []))
           [])
+        raw-semantic-ids
+        (mapv #(get-in % [:metadata :llm_symbol_id])
+              raw-semantic-candidates)
+        candidate-ids (distinct (concat lexical-ids raw-semantic-ids))
+        db (store/database graph)
+        symbols (graph-read/symbols-by-ids db candidate-ids)
+        operational
+        (graph-read/semantic-candidate-state
+         db reconcile/provider raw-semantic-ids)
+        semantic-candidates
+        (->> raw-semantic-candidates
+             (filter #(current-candidate?
+                       lateon symbols operational %))
+             collapse-chunks)
         semantic-ids
         (mapv #(get-in % [:metadata :llm_symbol_id])
               semantic-candidates)

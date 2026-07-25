@@ -1,6 +1,7 @@
 (ns llm-context.runtime.doctor
   (:require [clojure.string :as str]
             [llm-context.config :as config]
+            [llm-context.graph.read :as graph-read]
             [llm-context.semantic.artifacts :as artifacts]
             [llm-context.semantic.reconcile :as semantic-reconcile]
             [llm-context.semantic.runtime :as semantic-runtime]
@@ -48,7 +49,7 @@
                         :detail (:root-str project)}
         datalevin-check (try
                           (store/with-store [graph project config]
-                            (store/query graph '[:find ?e :where [?e :entity/type _]] []))
+                            (graph-read/any-entity? (store/database graph)))
                           {:check :datalevin :required? true :ok? true
                            :detail (str (.resolve ^Path (:root project)
                                                  (get-in config [:store :path])))}
