@@ -2,103 +2,72 @@
   (:require [clojure.data.json :as json]
             [clojure.pprint :as pprint]
             [clojure.string :as str]
+            [datalevin.core :as d]
             [llm-context.graph.read :as graph-read]
             [llm-context.query :as query]
             [llm-context.store :as store]))
 
 (def schema-version 1)
 
-(defn- attribute-map [graph id-attribute attribute]
-  (into {}
-        (store/query graph
-                     '[:find ?id ?value
-                       :in $ ?id-attribute ?attribute
-                       :where [?entity ?id-attribute ?id]
-                              [?entity ?attribute ?value]]
-                     [id-attribute attribute])))
+(def ^:private source-pattern
+  [:source/start-line :source/start-column
+   :source/end-line :source/end-column :source/snippet])
 
-(defn- source-attributes [graph id-attribute]
-  (let [attributes [:source/start-line :source/start-column
-                    :source/end-line :source/end-column :source/snippet]
-        maps (into {} (map (fn [attribute]
-                             [attribute (attribute-map graph id-attribute attribute)]))
-                   attributes)]
-    (fn [id]
-      (into {} (keep (fn [[attribute values]]
-                       (when-let [value (get values id)] [attribute value]))) maps))))
+(def ^:private export-patterns
+  {:entity.type/file
+   [:entity/type :file/id :file/path :file/language :file/content-hash
+    :file/size :file/modified-at]
+
+   :entity.type/symbol
+   (into [:entity/type :symbol/id :symbol/name :symbol/qualified-name
+          :symbol/kind :symbol/signature :symbol/doc
+          {:symbol/file [:file/id]}]
+         source-pattern)
+
+   :entity.type/edge
+   (into [:entity/type :edge/id :edge/kind :edge/target-text
+          :edge/resolution :edge/confidence
+          {:edge/from [:symbol/id]} {:edge/to [:symbol/id]}]
+         source-pattern)
+
+   :entity.type/effect
+   (into [:entity/type :effect/id :effect/kind :effect/detail
+          :effect/confidence {:effect/symbol [:symbol/id]}]
+         source-pattern)})
+
+(defn- flatten-reference [entity reference output-key identity-key]
+  (let [target (get entity reference)]
+    (cond-> (dissoc entity reference)
+      target (assoc output-key (get target identity-key)))))
+
+(defn- export-record [entity]
+  (case (:entity/type entity)
+    :entity.type/symbol
+    (flatten-reference entity :symbol/file :symbol/file :file/id)
+
+    :entity.type/edge
+    (-> entity
+        (flatten-reference :edge/from :edge/from :symbol/id)
+        (flatten-reference :edge/to :edge/to :symbol/id))
+
+    :entity.type/effect
+    (flatten-reference entity :effect/symbol :effect/symbol :symbol/id)
+
+    entity))
 
 (defn entities [graph]
-  (let [file-rows (store/query
-                   graph
-                   '[:find ?id ?path ?language ?hash ?size ?modified
-                     :where [?file :file/id ?id]
-                            [?file :file/path ?path]
-                            [?file :file/language ?language]
-                            [?file :file/content-hash ?hash]
-                            [?file :file/size ?size]
-                            [?file :file/modified-at ?modified]] [])
-        symbol-source (source-attributes graph :symbol/id)
-        signatures (attribute-map graph :symbol/id :symbol/signature)
-        docs (attribute-map graph :symbol/id :symbol/doc)
-        symbol-rows (store/query
-                     graph
-                     '[:find ?id ?name ?qualified ?kind ?file-id
-                       :where [?symbol :symbol/id ?id]
-                              [?symbol :symbol/name ?name]
-                              [?symbol :symbol/qualified-name ?qualified]
-                              [?symbol :symbol/kind ?kind]
-                              [?symbol :symbol/file ?file]
-                              [?file :file/id ?file-id]] [])
-        edge-source (source-attributes graph :edge/id)
-        edge-targets (into {} (store/query
-                               graph
-                               '[:find ?id ?target-id
-                                 :where [?edge :edge/id ?id]
-                                        [?edge :edge/to ?target]
-                                        [?target :symbol/id ?target-id]] []))
-        edge-rows (store/query
-                   graph
-                   '[:find ?id ?kind ?from-id ?target-text ?resolution ?confidence
-                     :where [?edge :edge/id ?id]
-                            [?edge :edge/kind ?kind]
-                            [?edge :edge/from ?from]
-                            [?from :symbol/id ?from-id]
-                            [?edge :edge/target-text ?target-text]
-                            [?edge :edge/resolution ?resolution]
-                            [?edge :edge/confidence ?confidence]] [])
-        effect-source (source-attributes graph :effect/id)
-        effect-rows (store/query
-                     graph
-                     '[:find ?id ?kind ?symbol-id ?detail ?confidence
-                       :where [?effect :effect/id ?id]
-                              [?effect :effect/kind ?kind]
-                              [?effect :effect/symbol ?symbol]
-                              [?symbol :symbol/id ?symbol-id]
-                              [?effect :effect/detail ?detail]
-                              [?effect :effect/confidence ?confidence]] [])]
-    (->> (concat
-          (map (fn [[id path language hash size modified]]
-                 {:entity/type :entity.type/file :file/id id :file/path path
-                  :file/language language :file/content-hash hash
-                  :file/size size :file/modified-at modified}) file-rows)
-          (map (fn [[id name qualified kind file-id]]
-                 (merge {:entity/type :entity.type/symbol :symbol/id id
-                         :symbol/name name :symbol/qualified-name qualified
-                         :symbol/kind kind :symbol/file file-id}
-                        (symbol-source id)
-                        (when-let [value (get signatures id)] {:symbol/signature value})
-                        (when-let [value (get docs id)] {:symbol/doc value}))) symbol-rows)
-          (map (fn [[id kind from-id target-text resolution confidence]]
-                 (merge {:entity/type :entity.type/edge :edge/id id :edge/kind kind
-                         :edge/from from-id :edge/target-text target-text
-                         :edge/resolution resolution :edge/confidence confidence}
-                        (when-let [target (get edge-targets id)] {:edge/to target})
-                        (edge-source id))) edge-rows)
-          (map (fn [[id kind symbol-id detail confidence]]
-                 (merge {:entity/type :entity.type/effect :effect/id id
-                         :effect/kind kind :effect/symbol symbol-id
-                         :effect/detail detail :effect/confidence confidence}
-                        (effect-source id))) effect-rows))
+  (let [db (store/database graph)
+        eids-by-type
+        (reduce (fn [result [type eid]]
+                  (update result type (fnil conj []) eid))
+                {}
+                (d/q '[:find ?type ?entity
+                       :where [?entity :entity/type ?type]]
+                     db))]
+    (->> export-patterns
+         (mapcat (fn [[type pattern]]
+                   (when-let [eids (seq (get eids-by-type type))]
+                     (map export-record (d/pull-many db pattern eids)))))
          (sort-by (juxt :entity/type #(or (:file/id %) (:symbol/id %)
                                          (:edge/id %) (:effect/id %))))
          vec)))
