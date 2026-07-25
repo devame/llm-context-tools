@@ -19,14 +19,7 @@
    (graph-read/any-file? (store/database graph))))
 
 (defn- existing-files [graph]
-  (into {}
-        (map (fn [[id path hash]] [path {:id id :hash hash}]))
-        (store/query graph
-                     '[:find ?id ?path ?hash
-                       :where [?file :file/id ?id]
-                              [?file :file/path ?path]
-                              [?file :file/content-hash ?hash]]
-                     [])))
+  (graph-read/files-by-path (store/database graph)))
 
 (defn- semantic-index [project config changed]
   (when (and (contains? (set (get-in config [:semantic :providers])) :scip-typescript)

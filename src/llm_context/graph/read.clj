@@ -35,6 +35,33 @@
           :where [?entity :entity/type _]]
         db)))
 
+(defn files-by-path [db]
+  (into {}
+        (map (fn [[path id hash]]
+               [path {:id id :hash hash}]))
+        (d/q '[:find ?path ?id ?hash
+               :where
+               [?file :file/path ?path]
+               [?file :file/id ?id]
+               [?file :file/content-hash ?hash]]
+             db)))
+
+(defn file-hashes [db]
+  (into (sorted-map)
+        (d/q '[:find ?id ?hash
+               :where
+               [?file :file/id ?id]
+               [?file :file/content-hash ?hash]]
+             db)))
+
+(defn file-path [db file-id]
+  (d/q '[:find ?path .
+         :in $ ?id
+         :where
+         [?file :file/id ?id]
+         [?file :file/path ?path]]
+       db file-id))
+
 (def symbol-pull
   '[:symbol/id
     :symbol/name
@@ -112,29 +139,40 @@
 
 (defn neighbor-ids
   "Return symbol IDs adjacent to a bounded frontier in either direction."
-  [db frontier-ids]
-  (if (seq frontier-ids)
+  ([db frontier-ids]
+   (neighbor-ids db frontier-ids Long/MAX_VALUE))
+  ([db frontier-ids limit]
+   (if (and (seq frontier-ids) (pos? limit))
     (let [frontier (vec frontier-ids)
+          limited-query
+          (fn [query]
+            (d/q (conj query (long limit)) db frontier))
           outgoing
-          (d/q '[:find [?id ...]
-                 :in $ [?frontier-id ...]
-                 :where
-                 [?frontier :symbol/id ?frontier-id]
-                 [?edge :edge/from ?frontier]
-                 [?edge :edge/to ?neighbor]
-                 [?neighbor :symbol/id ?id]]
-               db frontier)
+          (limited-query
+           '[:find [?id ...]
+             :in $ [?frontier-id ...]
+             :where
+             [?frontier :symbol/id ?frontier-id]
+             [?edge :edge/from ?frontier]
+             [?edge :edge/to ?neighbor]
+             [?neighbor :symbol/id ?id]
+             :order-by ?id
+             :limit])
           incoming
-          (d/q '[:find [?id ...]
-                 :in $ [?frontier-id ...]
-                 :where
-                 [?frontier :symbol/id ?frontier-id]
-                 [?edge :edge/to ?frontier]
-                 [?edge :edge/from ?neighbor]
-                 [?neighbor :symbol/id ?id]]
-               db frontier)]
-      (into (sorted-set) (concat outgoing incoming)))
-    #{}))
+          (limited-query
+           '[:find [?id ...]
+             :in $ [?frontier-id ...]
+             :where
+             [?frontier :symbol/id ?frontier-id]
+             [?edge :edge/to ?frontier]
+             [?edge :edge/from ?neighbor]
+             [?neighbor :symbol/id ?id]
+             :order-by ?id
+             :limit])]
+      (into (sorted-set)
+            (take limit)
+            (sort (distinct (concat outgoing incoming)))))
+    #{})))
 
 (defn edges-for-symbols
   "Return edges originating in selected symbols when their resolved target is

@@ -7,25 +7,36 @@
 (defn estimate-tokens [value]
   (long (Math/ceil (/ (count (pr-str value)) 4.0))))
 
-(defn- traversal-order [db seed-ids max-depth]
+(defn- traversal-order [db seed-ids max-depth max-symbols]
   (loop [depth 0
          frontier (vec (sort (distinct seed-ids)))
          seen #{}
-         order []]
+         order []
+         truncated? false]
     (if (or (empty? frontier) (> depth max-depth))
-      order
-      (let [fresh (vec (remove seen frontier))
+      {:order order :truncated? truncated?}
+      (let [remaining (- max-symbols (count order))
+            candidates (vec (remove seen frontier))
+            fresh (vec (take remaining candidates))
+            capped? (> (count candidates) (count fresh))
             seen' (into seen fresh)
             order' (into order (map #(hash-map :id % :distance depth) fresh))
+            next-limit (inc (max 0 (- max-symbols (count order'))))
             next-frontier
-            (when (< depth max-depth)
-              (->> (graph-read/neighbor-ids db fresh)
+            (when (and (< depth max-depth) (pos? next-limit))
+              (->> (graph-read/neighbor-ids db fresh next-limit)
                    (remove seen')
                    sort
-                   vec))]
-        (recur (inc depth) next-frontier seen' order')))))
+                   vec))
+            frontier-capped? (and next-frontier
+                                  (>= (count next-frontier) next-limit))]
+        (if (or capped? (>= (count order') max-symbols))
+          {:order order' :truncated? true}
+          (recur (inc depth) next-frontier seen' order'
+                 (or truncated? frontier-capped?)))))))
 
-(defn- packet-for [focus max-tokens symbols relationships effects order n]
+(defn- packet-for
+  [focus max-tokens symbols relationships effects order n graph-truncated?]
   (let [selected (vec (take n order))
         selected-ids (set (map :id selected))
         packet {:packet/version 1
@@ -42,11 +53,11 @@
                 :effects (->> effects
                               (filter #(contains? selected-ids (:symbol-id %)))
                               vec)
-                :truncated? (< n (count order))}]
+                :truncated? (or graph-truncated? (< n (count order)))}]
     (assoc-in packet [:budget :estimated-tokens] (estimate-tokens packet))))
 
 (defn- largest-fitting-prefix
-  [focus max-tokens symbols relationships effects order]
+  [focus max-tokens symbols relationships effects order graph-truncated?]
   (loop [low 1
          high (count order)
          best nil]
@@ -54,7 +65,7 @@
       best
       (let [middle (quot (+ low high) 2)
             packet (packet-for focus max-tokens symbols relationships
-                               effects order middle)
+                               effects order middle graph-truncated?)
             fits? (<= (get-in packet [:budget :estimated-tokens])
                       max-tokens)]
         (if fits?
@@ -71,15 +82,18 @@
     (when-not (seq seeds)
       (throw (ex-info (str "No symbol matches context focus: " focus)
                       {:exit-code 2 :focus focus})))
-    (let [order (traversal-order db seeds depth)
+    (let [max-symbols (max 1 (quot max-tokens 8))
+          {:keys [order truncated?]}
+          (traversal-order db seeds depth max-symbols)
           ids (mapv :id order)
           catalog (graph-read/symbols-by-ids db ids)
           relations (graph-read/edges-for-symbols db ids)
           effects (graph-read/effects-for-symbols db ids)
           best-count (largest-fitting-prefix focus max-tokens catalog
-                                             relations effects order)]
+                                             relations effects order truncated?)]
       (if best-count
-        (packet-for focus max-tokens catalog relations effects order best-count)
+        (packet-for focus max-tokens catalog relations effects order best-count
+                    truncated?)
         (let [seed (select-keys (get catalog (:id (first order)))
                                 [:id :name :qualified-name :kind :file :line])
               packet {:packet/version 1 :focus focus

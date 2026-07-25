@@ -80,3 +80,49 @@
                (set (map :id (:symbols packet)))))
         (is (= ["edge:focus-neighbor"]
                (mapv :id (:relationships packet))))))))
+
+(deftest high-degree-context-traversal-is-capped-before-pulling-records
+  (let [root (Files/createTempDirectory
+              "llm-context-packet-fanout-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        project (project/context (str root))
+        file {:entity/type :entity.type/file :file/id "file:fanout.clj"
+              :file/path "fanout.clj" :file/language :language/clojure
+              :file/content-hash (ids/content-hash "fanout")
+              :file/size 6 :file/modified-at 1}
+        symbol (fn [id name line]
+                 {:entity/type :entity.type/symbol
+                  :symbol/id id :symbol/name name
+                  :symbol/qualified-name (str "fanout/" name)
+                  :symbol/kind :symbol.kind/function
+                  :symbol/file (:file/id file)
+                  :source/start-line line :source/start-column 1
+                  :source/end-line line :source/end-column 5})
+        focus (symbol "symbol:focus" "focus" 1)
+        neighbors (mapv (fn [index]
+                          (symbol (str "symbol:neighbor-" index)
+                                  (str "neighbor-" index)
+                                  (+ index 2)))
+                        (range 200))
+        edges (mapv (fn [index neighbor]
+                      {:entity/type :entity.type/edge
+                       :edge/id (str "edge:fanout-" index)
+                       :edge/kind :edge.kind/calls
+                       :edge/from (:symbol/id focus)
+                       :edge/to (:symbol/id neighbor)
+                       :edge/target-text (:symbol/name neighbor)
+                       :edge/resolution :resolution/exact
+                       :edge/confidence 1.0
+                       :source/start-line 1 :source/start-column 1
+                       :source/end-line 1 :source/end-column 5})
+                    (range) neighbors)]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-file! graph file (into [focus] (concat neighbors edges)))
+      (let [packet (context/build
+                    graph {:focus "symbol:focus"
+                           :depth 1 :max-tokens 400})]
+        ;; The traversal ceiling is derived from the token budget (400 / 8),
+        ;; so a hub cannot cause all 200 adjacent records to be pulled first.
+        (is (<= (count (:symbols packet)) 50))
+        (is (:truncated? packet))
+        (is (<= (get-in packet [:budget :estimated-tokens]) 400))))))

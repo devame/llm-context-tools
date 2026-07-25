@@ -36,21 +36,10 @@
                      (dirty-marker project-marker nil :reconcile-all)))
 
 (defn- file-hashes [graph]
-  (into (sorted-map)
-        (store/query graph
-                     '[:find ?id ?hash
-                       :where [?file :file/id ?id]
-                              [?file :file/content-hash ?hash]]
-                     [])))
+  (graph-read/file-hashes (store/database graph)))
 
 (defn- path-for-file [graph file-id]
-  (ffirst
-   (store/query graph
-                '[:find ?path
-                  :in $ ?id
-                  :where [?file :file/id ?id]
-                         [?file :file/path ?path]]
-                [file-id])))
+  (graph-read/file-path (store/database graph) file-id))
 
 (defn- same-indexed? [lateon indexed desired]
   (and indexed

@@ -310,21 +310,44 @@
 
   (reconcile-edges! [_ decisions]
     (let [db (d/db connection)
+          edge-ids (set (map :edge-id decisions))
+          target-ids (set (keep :target-id decisions))
+          edge-eids
+          (if (seq edge-ids)
+            (into {}
+                  (d/q '[:find ?id ?edge
+                         :in $ ?ids
+                         :where
+                         [?edge :edge/id ?id]
+                         [(contains? ?ids ?id)]]
+                       db edge-ids))
+            {})
+          current-targets
+          (if (seq edge-ids)
+            (into {}
+                  (d/q '[:find ?id ?target
+                         :in $ ?ids
+                         :where
+                         [?edge :edge/id ?id]
+                         [(contains? ?ids ?id)]
+                         [?edge :edge/to ?target]]
+                       db edge-ids))
+            {})
+          target-eids
+          (if (seq target-ids)
+            (into {}
+                  (d/q '[:find ?id ?symbol
+                         :in $ ?ids
+                         :where
+                         [?symbol :symbol/id ?id]
+                         [(contains? ?ids ?id)]]
+                       db target-ids))
+            {})
           tx (mapcat
               (fn [{:keys [edge-id target-id resolution confidence]}]
-                (when-let [edge-eid (d/q '[:find ?edge .
-                                           :in $ ?id
-                                           :where [?edge :edge/id ?id]]
-                                         db edge-id)]
-                  (let [current-target (d/q '[:find ?target .
-                                              :in $ ?edge
-                                              :where [?edge :edge/to ?target]]
-                                            db edge-eid)
-                        target-eid (when target-id
-                                     (d/q '[:find ?target .
-                                            :in $ ?id
-                                            :where [?target :symbol/id ?id]]
-                                          db target-id))]
+                (when-let [edge-eid (get edge-eids edge-id)]
+                  (let [current-target (get current-targets edge-id)
+                        target-eid (get target-eids target-id)]
                     (cond-> []
                       (and current-target (not= current-target target-eid))
                       (conj [:db/retract edge-eid :edge/to current-target])
