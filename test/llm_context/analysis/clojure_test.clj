@@ -28,6 +28,15 @@
     (is (empty? (clojure-topics/extract file [owner] [reference])))
     (is (nil? (#'clojure-topics/offset-at (:content file) nil nil)))))
 
+(deftest canonical-file-size-bounds-the-normalized-analyzer-source
+  (let [file (#'clojure-analysis/file-entity
+              {:relative-path "src/invalid.clj"
+               :language :language/clojure
+               :content "\uFFFD"
+               :size 1
+               :modified-at 1})]
+    (is (= 3 (:file/size file)))))
+
 (deftest synthetic-kondo-usages-without-locations-are-not-graph-facts
   (let [owner {:symbol/id "symbol:owner"
                :symbol/platform :clj
@@ -88,6 +97,21 @@
     (is (every? #(seq (:reference/target-text %)) dynamic-references))
     (is (some #(= "done" (:reference/target-text %)) dynamic-references))))
 
+(deftest malformed-clojure-output-never-exposes-partial-kondo-facts
+  (let [root (Files/createTempDirectory
+              "llm-context-clojure-malformed-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        files [(input root "src/broken.clj" :language/clojure
+                      "(ns broken) (defn incomplete [x]")]
+        snapshot (clj-kondo/analyze! (project/context (str root)) files)
+        output (first (clojure-analysis/materialize files snapshot))]
+    (is (:preserve? output))
+    (is (= :malformed (:status output)))
+    (is (empty? (:entities output)))
+    (is (some #(contains? clj-kondo/source-integrity-finding-types
+                          (:type %))
+              (:diagnostics output)))))
+
 (deftest kondo-facts-separate-exact-external-and-dynamic-relationships
   (let [root (Files/createTempDirectory
               "llm-context-clojure-"
@@ -139,13 +163,14 @@
         (str "(ns sample.ui (:require [re-frame.core :as rf]))\n"
              "(defonce app-db (atom {}))\n"
              "(defn register! []\n"
-             "  (rf/reg-event-db :save (fn [db _] db))\n"
+             "  (rf/reg-event-db :save (fn [db _] (assoc db :handled true)))\n"
              "  (rf/reg-sub :saved (fn [db _] (:saved db))))\n"
              "(defn render! []\n"
              "  (rf/dispatch [:save 1])\n"
              "  (rf/subscribe [:saved])\n"
              "  (swap! app-db assoc-in [:saved-programs] [])\n"
              "  (get-in @app-db [:saved-programs]))\n"
+             "(defn local-only [m] (get m :local-only))\n"
              "(defn dynamic-dispatch! [event] (rf/dispatch event))\n")
         files [(input root "src/ui.cljs" :language/clojurescript source)]
         project (project/context (str root))
@@ -165,6 +190,10 @@
     (is (some #(and (= :state-key (:topic/kind %))
                     (= "[:saved-programs]" (:topic/key %)))
               topics))
+    (is (some #(and (= :state-key (:topic/kind %))
+                    (= ":handled" (:topic/key %)))
+              topics))
+    (is (not-any? #(= ":local-only" (:topic/key %)) topics))
     (is (some #(= :edge.kind/event-dispatches (:edge/kind %)) edges))
     (is (some #(= :edge.kind/subscribes (:edge/kind %)) edges))
     (is (some #(= :edge.kind/topic-registers (:edge/kind %)) edges))
@@ -206,3 +235,238 @@
     (is (= 1 (count (filter #(= ":save" (:topic/key %)) topics))))
     (is (= 2 (count topic-edges)))
     (is (= 1 (count (set (map :edge/to topic-edges)))))))
+
+(deftest declarations-collapse-into-one-effective-symbol
+  (let [root (Files/createTempDirectory
+              "llm-context-declarations-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        source (str "(ns sample.declarations)\n"
+                    "(declare later)\n"
+                    "(declare later)\n"
+                    "(defn later [] (later))\n")
+        files [(input root "src/declarations.clj" :language/clojure source)]
+        entities (->> files
+                      (clj-kondo/analyze! (project/context (str root)))
+                      (clojure-analysis/materialize files)
+                      (mapcat :entities))
+        later (filter #(= "sample.declarations/later"
+                          (:symbol/qualified-name %))
+                      entities)]
+    (is (= 1 (count later)))
+    (is (= :symbol.kind/function (:symbol/kind (first later))))
+    (is (= 4 (:source/start-line (first later))))
+    (is (true? (:symbol/indexable? (first later))))
+    (is (= 1
+           (count
+            (filter #(and (= :edge.kind/calls (:edge/kind %))
+                          (= "sample.declarations/later"
+                             (:edge/target-text %)))
+                    entities))))))
+
+(deftest repeated-declarations-without-definition-do-not-persist-a-symbol
+  (let [root (Files/createTempDirectory
+              "llm-context-declaration-only-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        source (str "(ns sample.pending)\n"
+                    "(declare later)\n"
+                    "(declare later)\n"
+                    "(defn run [] (later))\n")
+        files [(input root "src/pending.clj" :language/clojure source)]
+        entities (->> files
+                      (clj-kondo/analyze! (project/context (str root)))
+                      (clojure-analysis/materialize files)
+                      (mapcat :entities))
+        later (filter #(= "sample.pending/later"
+                          (:symbol/qualified-name %))
+                      entities)]
+    (is (empty? later))
+    (is (some #(and (= :entity.type/reference (:entity/type %))
+                    (= "sample.pending/later"
+                       (:reference/qualified-target %))
+                    (contains? #{:external :unresolved}
+                               (:reference/classification %)))
+              entities))))
+
+(deftest cljc-definitions-stay-separated-by-platform
+  (let [root (Files/createTempDirectory
+              "llm-context-cljc-platforms-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        source (str "(ns sample.common)\n"
+                    "#?(:clj (defn platform [] :clj)\n"
+                    "   :cljs (defn platform [] :cljs))\n")
+        files [(input root "src/common.cljc" :language/clojure-common source)]
+        entities (->> files
+                      (clj-kondo/analyze! (project/context (str root)))
+                      (clojure-analysis/materialize files)
+                      (mapcat :entities))
+        definitions
+        (filter #(= "sample.common/platform" (:symbol/qualified-name %))
+                entities)]
+    (is (= #{:clj :cljs} (set (map :symbol/platform definitions))))
+    (is (= 2 (count definitions)))
+    (is (= 2 (count (set (map :symbol/id definitions)))))))
+
+(deftest duplicate-analysis-observations-do-not-duplicate-symbols-or-calls
+  (let [file {:relative-path "src/duplicate.clj"
+              :language :language/clojure
+              :content (str "(ns duplicate)\n"
+                            "(defn target [] 1)\n"
+                            "(defn run [] (target) (target))")
+              :size 71 :modified-at 1}
+        namespace {:filename "src/duplicate.clj" :platforms [:clj]
+                   :row 1 :col 1 :end-row 1 :end-col 15
+                   :name 'duplicate}
+        target {:filename "src/duplicate.clj" :platforms [:clj]
+                :row 2 :col 1 :end-row 2 :end-col 19
+                :ns 'duplicate :name 'target
+                :defined-by 'clojure.core/defn}
+        run {:filename "src/duplicate.clj" :platforms [:clj]
+             :row 3 :col 1 :end-row 3 :end-col 32
+             :ns 'duplicate :name 'run
+             :defined-by 'clojure.core/defn}
+        usage {:filename "src/duplicate.clj" :platforms [:clj]
+               :row 3 :col 14 :end-row 3 :end-col 22
+               :from 'duplicate :from-var 'run
+               :to 'duplicate :name 'target :arity 0}
+        second-usage (assoc usage :col 23 :end-col 31)
+        entities
+        (->> {:analysis {:namespace-definitions [namespace]
+                         :var-definitions [target target run]
+                         :var-usages [usage usage second-usage]}}
+             (clojure-analysis/materialize [file])
+             (mapcat :entities))]
+    (is (= 1 (count (filter #(= "duplicate/target"
+                                (:symbol/qualified-name %))
+                            entities))))
+    ;; Analyzer duplicates collapse because edge identity includes its precise
+    ;; call location; distinct source locations still remain distinct edges.
+    (is (= 2 (count (filter #(and (= :edge.kind/calls (:edge/kind %))
+                                  (= "duplicate/target"
+                                     (:edge/target-text %)))
+                            entities))))))
+
+(deftest smallest-enclosing-symbol-owns-local-call
+  (let [outer {:symbol/id "symbol:outer" :symbol/file "file:src/nested.clj"
+               :symbol/platform :clj
+               :source/start-line 1 :source/start-column 1
+               :source/end-line 8 :source/end-column 2}
+        inner {:symbol/id "symbol:inner" :symbol/file "file:src/nested.clj"
+               :symbol/platform :clj
+               :source/start-line 3 :source/start-column 3
+               :source/end-line 5 :source/end-column 20}
+        reference
+        (#'clojure-analysis/local-reference
+         [outer inner] []
+         {"src/nested.clj" {:content "\n\n\n    (callback)\n"}}
+         {:filename "src/nested.clj" :platform :clj
+          :row 4 :col 6 :end-row 4 :end-col 14 :name 'callback})]
+    (is (= "symbol:inner" (:reference/symbol reference)))))
+
+(deftest ambiguous-cross-file-definition-is-not-resolved-by-order
+  (let [owner {:symbol/id "symbol:owner" :symbol/platform :clj}
+        candidate-a {:symbol/id "symbol:a"}
+        candidate-b {:symbol/id "symbol:b"}
+        relationship
+        (#'clojure-analysis/var-relationship
+         {[:clj 'caller] [owner]}
+         {[:clj 'shared 'value] [candidate-a candidate-b]}
+         :clj
+         {:platform :clj :filename "src/caller.clj"
+          :row 1 :col 2 :end-row 1 :end-col 7
+          :from 'caller :to 'shared :name 'value})]
+    (is (= :entity.type/reference (:entity/type relationship)))
+    (is (= :ambiguous (:reference/classification relationship)))))
+
+(deftest protocol-and-instance-analysis-shapes-are-materialized
+  (let [root (Files/createTempDirectory
+              "llm-context-protocol-shapes-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        source (str "(ns sample.protocol)\n"
+                    "(defprotocol Renderable (render [x]))\n"
+                    "(defrecord View [] Renderable (render [x] 1))\n"
+                    "(defn text [x] (.toString x))\n")
+        files [(input root "src/protocol.clj" :language/clojure source)]
+        entities (->> files
+                      (clj-kondo/analyze! (project/context (str root)))
+                      (clojure-analysis/materialize files)
+                      (mapcat :entities))
+        view-id (:symbol/id
+                 (some #(when (= "sample.protocol/View"
+                                 (:symbol/qualified-name %))
+                          %)
+                       entities))]
+    (is (some #(and (= :edge.kind/protocol-implements (:edge/kind %))
+                    (= view-id (:edge/from %)))
+              entities))
+    (is (some #(= :clj-kondo-instance-invocation
+                  (:reference/evidence %))
+              entities))))
+
+(deftest same-named-methods-in-different-protocols-have-distinct-identities
+  (let [root (Files/createTempDirectory
+              "llm-context-protocol-method-identities-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        source (str "(ns sample.protocols)\n"
+                    "(defprotocol Alpha (render [x]))\n"
+                    "(defprotocol Beta (render [x]))\n")
+        files [(input root "src/protocols.clj" :language/clojure source)]
+        methods
+        (->> files
+             (clj-kondo/analyze! (project/context (str root)))
+             (clojure-analysis/materialize files)
+             (mapcat :entities)
+             (filter #(= :symbol.kind/method (:symbol/kind %))))]
+    (is (= 2 (count methods)))
+    (is (= #{"sample.protocols/Alpha.render"
+             "sample.protocols/Beta.render"}
+           (set (map :symbol/qualified-name methods))))
+    (is (= #{"Alpha" "Beta"}
+           (set (map :symbol/protocol-name methods))))
+    (is (= 2 (count (set (map :symbol/id methods)))))))
+
+(deftest topic-reader-never-evaluates-and-requires-static-data
+  (let [executed? (atom false)
+        unsafe (str "#=(reset! " (pr-str executed?) " true)")
+        owner {:symbol/id "symbol:owner"
+               :symbol/platform :cljs
+               :symbol/qualified-name "sample.ui/render"}
+        file {:content "(rf/dispatch [:save dynamic-value])"}
+        reference {:reference/symbol "symbol:owner"
+                   :reference/qualified-target "re-frame.core/dispatch"
+                   :source/start-line 1 :source/start-column 1
+                   :source/end-line 1 :source/end-column 36}
+        facts (clojure-topics/extract file [owner] [reference])]
+    (is (= ::clojure-topics/unreadable
+           (#'clojure-topics/read-form unsafe :cljs)))
+    (is (false? @executed?))
+    (is (empty? (filter #(= :entity.type/topic (:entity/type %)) facts)))
+    (is (= :dynamic (:reference/classification (first facts))))))
+
+(deftest source-byte-ranges-follow-utf8-not-character-columns
+  (let [root (Files/createTempDirectory
+              "llm-context-clojure-utf8-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        source (str "(ns café.core)\n"
+                    "(defn résumé [] \"😀\" (println :ok))\n")
+        files [(input root "src/unicode.clj" :language/clojure source)]
+        entities (->> files
+                      (clj-kondo/analyze! (project/context (str root)))
+                      (clojure-analysis/materialize files)
+                      (mapcat :entities))
+        println-reference
+        (some #(when (= "clojure.core/println"
+                        (:reference/qualified-target %))
+                 %)
+              entities)
+        character-offset (.indexOf source "(println")
+        expected-byte-offset
+        (alength
+         (.getBytes (subs source 0 character-offset)
+                    java.nio.charset.StandardCharsets/UTF_8))]
+    (is (some? println-reference))
+    (is (= expected-byte-offset (:source/start-byte println-reference)))
+    (is (< (:source/start-column println-reference)
+           (:source/start-byte println-reference)))
+    (is (every? #(and (contains? % :source/start-byte)
+                      (contains? % :source/end-byte))
+                (filter #(contains? % :source/start-line) entities)))))

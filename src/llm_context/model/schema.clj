@@ -2,7 +2,7 @@
   (:require [clojure.spec.alpha :as s]
             [clojure.string :as str]))
 
-(def graph-format-version 2)
+(def graph-format-version 3)
 
 (def entity-types #{:entity.type/file :entity.type/symbol :entity.type/edge
                     :entity.type/reference :entity.type/topic
@@ -25,6 +25,11 @@
                     :effect.kind/environment-read :effect.kind/global-mutation
                     :effect.kind/logging :effect.kind/unknown})
 (def platforms #{:clj :cljs :janet :data})
+(def symbol-scopes
+  #{:scope/namespace :scope/module :scope/top-level :scope/method})
+(def symbol-roles
+  #{:role/definition :role/macro :role/protocol :role/method
+    :role/variable :role/namespace :role/module})
 (def reference-classifications
   #{:external :dynamic :ambiguous :unresolved})
 (def topic-kinds
@@ -47,6 +52,10 @@
 (s/def :symbol/file :file/id)
 (s/def :symbol/platform platforms)
 (s/def :symbol/analyzer keyword?)
+(s/def :symbol/scope symbol-scopes)
+(s/def :symbol/role symbol-roles)
+(s/def :symbol/indexable? boolean?)
+(s/def :symbol/protocol-name (s/and string? seq))
 (s/def :symbol/private? boolean?)
 (s/def :symbol/macro? boolean?)
 (s/def :symbol/arglists string?)
@@ -87,48 +96,128 @@
 (s/def :source/end-line pos-int?)
 (s/def :source/end-column pos-int?)
 (s/def :source/snippet string?)
+(s/def :source/start-byte nat-int?)
+(s/def :source/end-byte nat-int?)
+
+;; Datalevin does not have a portable arbitrary-EDN value type. Provenance is
+;; therefore normalized into deterministic, queryable scalar attributes rather
+;; than serialized as an opaque map.
+(s/def :entity/evidence keyword?)
+(s/def :entity/analyzer keyword?)
+(s/def :entity/record-kind keyword?)
+
+(def source-line-range-keys
+  [:source/start-line :source/start-column
+   :source/end-line :source/end-column])
+
+(def source-byte-range-keys
+  [:source/start-byte :source/end-byte])
+
+(def source-range-keys
+  (into source-line-range-keys source-byte-range-keys))
+
+(defn source-range?
+  "True when all source coordinates form one ordered range. Lines and columns
+  are one-based display coordinates; byte offsets are zero-based UTF-8 offsets
+  with an exclusive end."
+  [entity]
+  (and (every? #(contains? entity %) source-line-range-keys)
+       (let [byte-count (count (filter #(contains? entity %)
+                                      source-byte-range-keys))]
+         (or (zero? byte-count) (= byte-count 2)))
+       (let [{:source/keys [start-line start-column end-line end-column
+                            start-byte end-byte]} entity]
+         (and (or (< start-line end-line)
+                  (and (= start-line end-line)
+                       (<= start-column end-column)))
+              (or (nil? start-byte)
+                  (<= start-byte end-byte))))))
+
+(defn valid-optional-source-range?
+  "Compatibility predicate for persisted source coordinates. Existing
+  analyzers may still emit partial line/column observations. A format-3 byte
+  range, when present, is always a complete ordered pair and accompanies a
+  complete line/column range."
+  [entity]
+  (let [line-count (count (filter #(contains? entity %)
+                                  source-line-range-keys))
+        byte-count (count (filter #(contains? entity %)
+                                  source-byte-range-keys))
+        complete-lines? (= line-count (count source-line-range-keys))]
+    (and
+     (contains? #{0 2} byte-count)
+     (or (not complete-lines?)
+         (let [{:source/keys [start-line start-column
+                              end-line end-column]} entity]
+           (or (< start-line end-line)
+               (and (= start-line end-line)
+                    (<= start-column end-column)))))
+     (or (zero? byte-count)
+         (and complete-lines?
+              (<= (:source/start-byte entity)
+                  (:source/end-byte entity)))))))
+
+(s/def ::provenance
+  (s/keys :req [:entity/evidence :entity/analyzer :entity/record-kind]))
 
 (s/def ::file
   (s/keys :req [:entity/type :file/id :file/path :file/language
                 :file/content-hash :file/size :file/modified-at]
           :opt [:file/semantic-hash]))
 (s/def ::source-range
-  (s/keys :req [:source/start-line :source/start-column
-                :source/end-line :source/end-column]))
+  (s/and (s/keys :req [:source/start-line :source/start-column
+                       :source/end-line :source/end-column]
+                 :opt [:source/start-byte :source/end-byte])
+         source-range?))
 (s/def ::symbol
   (s/and (s/keys :req [:entity/type :symbol/id :symbol/name
-                       :symbol/qualified-name :symbol/kind :symbol/file]
+                       :symbol/qualified-name :symbol/kind :symbol/file
+                       :symbol/platform :symbol/analyzer :symbol/scope
+                       :symbol/role :symbol/indexable?]
                  :opt [:symbol/signature :symbol/doc
-                       :symbol/search-text :symbol/platform :symbol/analyzer
+                       :symbol/search-text
                        :symbol/private? :symbol/macro? :symbol/arglists
+                       :symbol/protocol-name
                        :source/start-line :source/start-column
-                       :source/end-line :source/end-column])
-         #(or (not (contains? % :source/start-line))
-              (s/valid? ::source-range %))))
+                       :source/end-line :source/end-column
+                       :source/start-byte :source/end-byte
+                       :entity/evidence :entity/analyzer :entity/record-kind])
+         valid-optional-source-range?))
 (s/def ::edge
   (s/and
    (s/keys :req [:entity/type :edge/id :edge/kind :edge/from :edge/to
                  :edge/target-text :edge/resolution :edge/confidence
                  :edge/evidence]
            :opt [:source/start-line :source/start-column
-                 :source/end-line :source/end-column :source/snippet])
+                 :source/end-line :source/end-column
+                 :source/start-byte :source/end-byte :source/snippet
+                 :entity/evidence :entity/analyzer :entity/record-kind])
    #(= :resolution/exact (:edge/resolution %))
-   #(= 1.0 (double (:edge/confidence %)))))
+   #(= 1.0 (double (:edge/confidence %)))
+   valid-optional-source-range?))
 (s/def ::reference
-  (s/keys :req [:entity/type :reference/id :reference/symbol
-                :reference/kind :reference/target-text
-                :reference/classification :reference/evidence]
-          :opt [:reference/qualified-target
-                :source/start-line :source/start-column
-                :source/end-line :source/end-column :source/snippet]))
+  (s/and
+   (s/keys :req [:entity/type :reference/id :reference/symbol
+                 :reference/kind :reference/target-text
+                 :reference/classification :reference/evidence]
+           :opt [:reference/qualified-target
+                 :source/start-line :source/start-column
+                 :source/end-line :source/end-column
+                 :source/start-byte :source/end-byte :source/snippet
+                 :entity/evidence :entity/analyzer :entity/record-kind])
+   valid-optional-source-range?))
 (s/def ::topic
   (s/keys :req [:entity/type :topic/id :topic/kind :topic/key
                 :topic/platform]))
 (s/def ::effect
-  (s/keys :req [:entity/type :effect/id :effect/kind :effect/symbol
-                :effect/detail :effect/confidence]
-          :opt [:source/start-line :source/start-column
-                :source/end-line :source/end-column :source/snippet]))
+  (s/and
+   (s/keys :req [:entity/type :effect/id :effect/kind :effect/symbol
+                 :effect/detail :effect/confidence]
+           :opt [:source/start-line :source/start-column
+                 :source/end-line :source/end-column
+                 :source/start-byte :source/end-byte :source/snippet
+                 :entity/evidence :entity/analyzer :entity/record-kind])
+   valid-optional-source-range?))
 
 (def entity-specs
   {:entity.type/file ::file
@@ -282,6 +371,14 @@
                      :db/index true}
    :symbol/analyzer {:db/valueType :db.type/keyword
                      :db/index true}
+   :symbol/scope {:db/valueType :db.type/keyword
+                  :db/index true}
+   :symbol/role {:db/valueType :db.type/keyword
+                 :db/index true}
+   :symbol/indexable? {:db/valueType :db.type/boolean
+                       :db/index true}
+   :symbol/protocol-name {:db/valueType :db.type/string
+                          :db/index true}
    :symbol/private? {:db/valueType :db.type/boolean
                      :db/index true}
    :symbol/macro? {:db/valueType :db.type/boolean
@@ -344,8 +441,17 @@
    :effect/detail {:db/valueType :db.type/string}
    :effect/confidence {:db/valueType :db.type/double}
 
+   :entity/evidence {:db/valueType :db.type/keyword
+                     :db/index true}
+   :entity/analyzer {:db/valueType :db.type/keyword
+                     :db/index true}
+   :entity/record-kind {:db/valueType :db.type/keyword
+                        :db/index true}
+
    :source/start-line {:db/valueType :db.type/long}
    :source/start-column {:db/valueType :db.type/long}
    :source/end-line {:db/valueType :db.type/long}
    :source/end-column {:db/valueType :db.type/long}
+   :source/start-byte {:db/valueType :db.type/long}
+   :source/end-byte {:db/valueType :db.type/long}
    :source/snippet {:db/valueType :db.type/string}})

@@ -67,7 +67,11 @@
         file-language (get language-by-path relative)]
     (-> record
         (assoc :filename relative
-               :platforms (platforms-for file-language (:lang record)))
+               :platforms (platforms-for file-language (:lang record))
+               :row (or (:row record) (:name-row record))
+               :col (or (:col record) (:name-col record))
+               :end-row (or (:end-row record) (:name-end-row record))
+               :end-col (or (:end-col record) (:name-end-col record)))
         (dissoc :uri))))
 
 (defn- finding->diagnostic [project finding]

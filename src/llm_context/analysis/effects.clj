@@ -73,8 +73,12 @@
                              :effect/symbol (:edge/from edge)
                              :effect/detail (or (:source/snippet edge)
                                                 (:edge/target-text edge))
-                             :effect/confidence confidence}
+                             :effect/confidence confidence
+                             :entity/evidence :resolved-external-call
+                             :entity/analyzer :effect-analysis
+                             :entity/record-kind :entity.type/effect}
                             (select-keys edge [:source/start-line :source/start-column
                                                :source/end-line :source/end-column
+                                               :source/start-byte :source/end-byte
                                                :source/snippet])))))))
        vec))

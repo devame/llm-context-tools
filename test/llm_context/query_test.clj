@@ -20,6 +20,9 @@
                   :symbol/qualified-name (str "sample/" name)
                   :symbol/kind :symbol.kind/function :symbol/file (:file/id file)
                   :symbol/platform :clj :symbol/analyzer :test
+                  :symbol/scope :scope/top-level
+                  :symbol/role :role/definition
+                  :symbol/indexable? true
                   :source/start-line line :source/start-column 1
                   :source/end-line (+ line 2) :source/end-column 1})
         caller (assoc (symbol "symbol:caller" "caller" 1)

@@ -47,6 +47,7 @@
        "Commands:\n"
        "  init [--yes]         Confirm the project root and write llm-context.edn\n"
        "  analyze              Update the semantic graph\n"
+       "    --check            Validate a source snapshot without writing data\n"
        "  query                Query the semantic graph\n"
        "  semantic             Inspect or synchronize LateOn indexing\n"
        "  context              Build an LLM context packet\n"
@@ -173,35 +174,59 @@
     (flush)))
 
 (defmethod execute "analyze" [context _ args]
-  (when-let [unknown (first (remove #{"--full"} args))]
+  (when-let [unknown (first (remove #{"--full" "--check"} args))]
     (throw (ex-info (str "Unknown analyze option: " unknown) {:exit-code 2})))
+  (when (and (some #{"--full"} args) (some #{"--check"} args))
+    (throw (ex-info "analyze --full and --check cannot be combined"
+                    {:exit-code 2})))
   (let [settings (config/load-config context)
+        check? (boolean (some #{"--check"} args))
         force-full? (boolean (some #{"--full"} args))
-        graph-state (with-graph
-                      context settings
-                      #((resolve-fn 'llm-context.store/graph-state) %))
+        graph-state (when-not check?
+                      (with-graph
+                        context settings
+                        #((resolve-fn 'llm-context.store/graph-state) %)))
         _ (when (and (= :incompatible graph-state) (not force-full?))
             (throw
              (ex-info
               (str "This project graph uses an incompatible format. "
                    "Run `llm-context analyze --full` to rebuild it.")
               {:exit-code 2 :type :graph/rebuild-required})))
-        full? (or force-full? (= :empty graph-state))
+        ;; An interrupted batched rebuild is explicitly unavailable. A normal
+        ;; analyze invocation repairs it with a new fully preflighted rebuild.
+        full? (or force-full? (contains? #{:empty :unavailable} graph-state))
         progress (when-not (get-in context [:options :quiet?])
                    print-analysis-progress!)
-        remote (remote-value context
-                             {:op :analyze :full? full?}
-                             {:request-timeout 86400000})
-        result (if-not (= unavailable remote)
-                 remote
-                 (if full?
-                   ((resolve-fn 'llm-context.analysis.full/analyze!)
-                    context settings progress)
-                   ((resolve-fn 'llm-context.analysis.incremental/analyze!)
-                    context settings)))]
+        remote (if check?
+                 unavailable
+                 (remote-value context
+                               {:op :analyze :full? full?}
+                               {:request-timeout 86400000}))
+        result
+        (cond
+          check?
+          ((resolve-fn 'llm-context.analysis.check/check!) context settings)
+
+          (not= unavailable remote) remote
+
+          full?
+          ((resolve-fn 'llm-context.analysis.full/analyze!)
+           context settings progress)
+
+          :else
+          ((resolve-fn 'llm-context.analysis.incremental/analyze!)
+           context settings))]
     (when-not (get-in context [:options :quiet?])
       (println
-       (if (= :incremental (:mode result))
+       (case (:mode result)
+         :check
+         (format (str "Validated %d files and %d canonical entities: "
+                      "%d symbols, %d exact edges, %d references "
+                      "(%d diagnostics)")
+                 (:files result) (:entities result) (:symbols result)
+                 (:exact-edges result) (:references result)
+                 (count (:diagnostics result)))
+         :incremental
          (format "Analyzed %d files: %d changed, %d deleted (%d diagnostics)"
                  (:files result) (:changed result) (:deleted result)
                  (count (:diagnostics result)))

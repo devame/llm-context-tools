@@ -1,6 +1,7 @@
 (ns llm-context.main-test
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [llm-context.analysis.check :as analysis-check]
             [llm-context.cli :as cli]
             [llm-context.config :as config]
             [llm-context.main :as main]
@@ -76,6 +77,25 @@
       (is (zero? (cli/execute context "analyze" ["--full"])))
       (is (= {:op :analyze :full? true} (first @request)))
       (is (= 86400000 (:request-timeout (second @request)))))))
+
+(deftest analysis-check-is-read-only-and-does-not-contact-the-service
+  (let [root (Files/createTempDirectory
+              "llm-context-analysis-check-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        context (assoc (project/context (str root)) :options {:quiet? true})
+        checked? (atom false)]
+    (with-redefs [service-client/request
+                  (fn [& _]
+                    (throw (ex-info "service must not be contacted" {})))
+                  analysis-check/check!
+                  (fn [_ _]
+                    (reset! checked? true)
+                    {:mode :check :files 1 :entities 2 :symbols 1
+                     :exact-edges 0 :references 0 :diagnostics []})]
+      (is (zero? (cli/execute context "analyze" ["--check"])))
+      (is (true? @checked?))
+      (is (not (Files/exists (:db-dir context)
+                             (make-array java.nio.file.LinkOption 0)))))))
 
 (deftest semantic-status-remains-available-without-a-service
   (let [root (Files/createTempDirectory

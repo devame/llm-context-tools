@@ -20,6 +20,10 @@
         symbol {:entity/type :entity.type/symbol :symbol/id "symbol:a"
                 :symbol/name "a" :symbol/qualified-name "sample/a"
                 :symbol/kind :symbol.kind/function :symbol/file (:file/id file)
+                :symbol/platform :clj :symbol/analyzer :test
+                :symbol/scope :scope/top-level
+                :symbol/role :role/definition
+                :symbol/indexable? true
                 :symbol/signature "(defn a [])"
                 :source/start-line 1 :source/start-column 1
                 :source/end-line 1 :source/end-column 12}]

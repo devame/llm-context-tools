@@ -33,8 +33,14 @@
         :symbol/qualified-name "example/run"
         :symbol/kind :symbol.kind/function
         :symbol/file "file:src/example.clj"
+        :symbol/platform :clj
+        :symbol/analyzer :clj-kondo
+        :symbol/scope :scope/top-level
+        :symbol/role :role/definition
+        :symbol/indexable? true
         :source/start-line 2 :source/start-column 1
-        :source/end-line 2 :source/end-column 20})))
+        :source/end-line 2 :source/end-column 20
+        :source/start-byte 13 :source/end-byte 32})))
 
 (deftest invalid-entities-fail-before-storage
   (testing "confidence is bounded"
@@ -81,3 +87,39 @@
                    :edge/resolution :resolution/unresolved
                    :edge/confidence 0.0
                    :edge/evidence :tree-sitter-syntax})))))
+
+(deftest graph-format-three-has-explicit-symbol-and-range-contracts
+  (is (= 3 schema/graph-format-version))
+  (testing "semantic symbols cannot silently omit their role or scope"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (schema/validate-entity!
+                  {:entity/type :entity.type/symbol
+                   :symbol/id "symbol:incomplete"
+                   :symbol/name "run"
+                   :symbol/qualified-name "example/run"
+                   :symbol/kind :symbol.kind/function
+                   :symbol/file "file:src/example.clj"
+                   :symbol/platform :clj
+                   :symbol/analyzer :clj-kondo}))))
+  (testing "incomplete and reversed byte ranges are invalid"
+    (doseq [range [{:source/start-line 1 :source/start-column 1
+                    :source/end-line 1 :source/end-column 2
+                    :source/start-byte 0}
+                   {:source/start-line 1 :source/start-column 1
+                    :source/end-line 1 :source/end-column 2
+                    :source/start-byte 8 :source/end-byte 4}]]
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (schema/validate-entity!
+                    (merge
+                     {:entity/type :entity.type/symbol
+                      :symbol/id "symbol:bad-range"
+                      :symbol/name "run"
+                      :symbol/qualified-name "example/run"
+                      :symbol/kind :symbol.kind/function
+                      :symbol/file "file:src/example.clj"
+                      :symbol/platform :clj
+                      :symbol/analyzer :clj-kondo
+                      :symbol/scope :scope/top-level
+                      :symbol/role :role/definition
+                      :symbol/indexable? true}
+                     range)))))))

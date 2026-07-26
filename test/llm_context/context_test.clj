@@ -19,6 +19,10 @@
                       {:entity/type :entity.type/symbol :symbol/id id :symbol/name name
                        :symbol/qualified-name (str "chain/" name)
                        :symbol/kind :symbol.kind/function :symbol/file (:file/id file)
+                       :symbol/platform :clj :symbol/analyzer :test
+                       :symbol/scope :scope/top-level
+                       :symbol/role :role/definition
+                       :symbol/indexable? true
                        :symbol/signature (str "(defn " name " [])")
                        :source/start-line line :source/start-column 1
                        :source/end-line line :source/end-column 12})
@@ -56,6 +60,10 @@
                   :symbol/qualified-name (str "large/" name)
                   :symbol/kind :symbol.kind/function
                   :symbol/file (:file/id file)
+                  :symbol/platform :clj :symbol/analyzer :test
+                  :symbol/scope :scope/top-level
+                  :symbol/role :role/definition
+                  :symbol/indexable? true
                   :source/start-line line :source/start-column 1
                   :source/end-line line :source/end-column 5})
         focus (symbol "symbol:focus" "focus" 1)
@@ -98,6 +106,10 @@
                   :symbol/qualified-name (str "fanout/" name)
                   :symbol/kind :symbol.kind/function
                   :symbol/file (:file/id file)
+                  :symbol/platform :clj :symbol/analyzer :test
+                  :symbol/scope :scope/top-level
+                  :symbol/role :role/definition
+                  :symbol/indexable? true
                   :source/start-line line :source/start-column 1
                   :source/end-line line :source/end-column 5})
         focus (symbol "symbol:focus" "focus" 1)
@@ -147,6 +159,9 @@
                   :symbol/kind :symbol.kind/function
                   :symbol/file (:file/id file)
                   :symbol/platform :cljs :symbol/analyzer :test
+                  :symbol/scope :scope/top-level
+                  :symbol/role :role/definition
+                  :symbol/indexable? true
                   :source/start-line line :source/start-column 1
                   :source/end-line line :source/end-column 8})
         dispatcher (symbol "symbol:dispatch" "dispatch!" 1)
