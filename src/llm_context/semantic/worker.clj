@@ -4,7 +4,8 @@
   (:require [llm-context.semantic.document :as document]
             [llm-context.semantic.index :as index]
             [llm-context.semantic.reconcile :as reconcile]
-            [llm-context.semantic.state :as state])
+            [llm-context.semantic.state :as state]
+            [llm-context.store :as store])
   (:import [java.util UUID]))
 
 (defn- now [worker]
@@ -197,7 +198,8 @@
     (index/ensure-index! (:client worker))
     (state/record-watermark!
      (:graph worker)
-     {:provider reconcile/provider :state :idle})
+     {:provider reconcile/provider :state :idle
+      :graph-revision (:graph-revision planned)})
     {:recovered recovered :planned planned :health health}))
 
 (defn process-once!
@@ -233,10 +235,16 @@
              {:provider reconcile/provider
               :state :degraded
               :last-error-at (now worker)
-              :last-error "One or more semantic jobs exhausted retries"}
+              :last-error "One or more semantic jobs exhausted retries"
+              :graph-revision
+              (document/graph-revision
+               (store/database (:graph worker)))}
              {:provider reconcile/provider
               :state :ready
-              :last-success-at (now worker)}))
+              :last-success-at (now worker)
+              :graph-revision
+              (document/graph-revision
+               (store/database (:graph worker)))}))
           summary)))))
 
 (defn run!

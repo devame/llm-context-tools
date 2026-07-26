@@ -16,6 +16,11 @@
    :edge.kind/extends "Extends"
    :edge.kind/implements "Implements"})
 
+(def current-document-version 3)
+
+(def ^:private legacy-excluded-symbol-kinds
+  #{:symbol.kind/module :symbol.kind/namespace})
+
 (defn- utf8-bytes [value]
   (.getBytes ^String value StandardCharsets/UTF_8))
 
@@ -169,6 +174,11 @@
 (defn build
   "Build one versioned semantic document from canonical graph data."
   [lateon symbol file source relationships]
+  (when-not (= current-document-version (:document-version lateon))
+    (throw
+     (ex-info "Configured semantic document version is incompatible with this runtime"
+              {:configured-version (:document-version lateon)
+               :required-version current-document-version})))
   (let [body (extract-range source symbol)
         header (document-header symbol file relationships)
         chunks (render-chunks header body lateon)
@@ -196,6 +206,52 @@
            (range total)
            chunks)}))
 
+(defn- graph-format [db]
+  (d/q '[:find ?format .
+         :where
+         [_ :llm-context/graph-format ?format]]
+       db))
+
+(defn indexable-symbol?
+  "True only for symbols admitted by the canonical indexability contract.
+
+  Graph format 3 makes :symbol/indexable? authoritative. The kind fallback is
+  retained only for legacy graphs and focused fixtures without graph metadata."
+  [format symbol]
+  (if (contains? symbol :symbol/indexable?)
+    (true? (:symbol/indexable? symbol))
+    (and (or (nil? format) (< (long format) 3))
+         (not (contains? legacy-excluded-symbol-kinds
+                         (:symbol/kind symbol))))))
+
+(defn canonical-documents
+  "Deterministically deduplicate exact documents and reject conflicting
+  documents that claim the same canonical symbol identity."
+  [documents]
+  (->> documents
+       (sort-by (juxt :symbol-id :file-id :document-hash))
+       (reduce
+        (fn [by-symbol candidate]
+          (let [symbol-id (:symbol-id candidate)
+                existing (get by-symbol symbol-id)]
+            (cond
+              (nil? existing)
+              (assoc by-symbol symbol-id candidate)
+
+              (= existing candidate)
+              by-symbol
+
+              :else
+              (throw
+               (ex-info
+                "Conflicting semantic documents share a canonical symbol ID"
+                {:type :semantic/document-conflict
+                 :symbol-id symbol-id
+                 :documents [existing candidate]})))))
+        (sorted-map))
+       vals
+       vec))
+
 (defn- entity-by [db attribute value]
   (when-let [eid (d/q '[:find ?entity .
                         :in $ ?attribute ?value
@@ -204,18 +260,50 @@
     (d/pull db '[*] eid)))
 
 (defn- symbols-for-file [db file-eid]
-  (let [eids (d/q '[:find [?symbol ...]
+  (let [format (graph-format db)
+        eids (d/q '[:find [?symbol ...]
                     :in $ ?file
                     :where [?symbol :symbol/file ?file]]
                   db file-eid)]
     (->> eids
          (d/pull-many db '[*])
-         ;; Synthetic module symbols span whole files and duplicate every
-         ;; contained code unit. They remain in the graph but not in LateOn.
-         (remove #(contains? #{:symbol.kind/module :symbol.kind/namespace}
-                             (:symbol/kind %)))
+         (filter #(indexable-symbol? format %))
          (sort-by (juxt :source/start-line :source/start-column :symbol/id))
          vec)))
+
+(defn indexable-symbol-ids
+  "Return the exact desired semantic symbol identity set for this graph."
+  [db]
+  (let [format (graph-format db)
+        eids (d/q '[:find [?symbol ...]
+                    :where [?symbol :symbol/id _]]
+                  db)]
+    (->> (if (seq eids) (d/pull-many db '[*] eids) [])
+         (filter #(indexable-symbol? format %))
+         (map :symbol/id)
+         set)))
+
+(defn graph-revision
+  "Return a deterministic revision of graph inputs that affect semantic
+  documents. File semantic hashes cover analyzer-derived facts while content
+  hashes cover the exact source ranges embedded in documents."
+  [db]
+  (let [semantic-hashes
+        (into {}
+              (d/q '[:find ?id ?semantic
+                     :where
+                     [?file :file/id ?id]
+                     [?file :file/semantic-hash ?semantic]]
+                   db))
+        rows
+        (map (fn [[id content]]
+               [id content (get semantic-hashes id "")])
+             (d/q '[:find ?id ?content
+                    :where
+                    [?file :file/id ?id]
+                    [?file :file/content-hash ?content]]
+                  db))]
+    (ids/content-hash (pr-str (sort rows)))))
 
 (defn- relationships-for [db symbol-id]
   (->> (d/q '[:find ?kind ?target
@@ -277,7 +365,8 @@
          symbols)]
     (-> source-state
         (dissoc :source-text)
-        (assoc :documents (mapv :document (filter :document results))
+        (assoc :documents (canonical-documents
+                           (mapv :document (filter :document results)))
                :diagnostics (mapv :diagnostic
                                   (filter :diagnostic results))))))
 
@@ -310,6 +399,10 @@
 
       (or (nil? symbol) (not= (:db/id file) symbol-file-eid))
       {:status :symbol-missing :file-id file-id :symbol-id symbol-id
+       :documents [] :diagnostics []}
+
+      (not (indexable-symbol? (graph-format db) symbol))
+      {:status :not-indexable :file-id file-id :symbol-id symbol-id
        :documents [] :diagnostics []}
 
       :else

@@ -12,6 +12,18 @@
 (def settings
   (assoc-in (config/defaults) [:semantic :providers] [:lateon-code]))
 
+(defn graph-fixture []
+  (update (fixture/fixture) :entities
+          (fn [entities]
+            (mapv (fn [entity]
+                    (if (= :entity.type/symbol (:entity/type entity))
+                      (assoc entity
+                             :symbol/scope :scope/top-level
+                             :symbol/role :role/definition
+                             :symbol/indexable? true)
+                      entity))
+                  entities))))
+
 (defn indexed [symbol-id file-id hash]
   {:provider reconcile/provider
    :symbol-id symbol-id
@@ -38,7 +50,7 @@
     :llm_chunk_index chunk}})
 
 (deftest semantic-only-result-is-hydrated-from-the-graph
-  (let [{:keys [project file entities]} (fixture/fixture)
+  (let [{:keys [project file entities]} (graph-fixture)
         client (fake/create)]
     (store/with-store [graph project settings]
       (store/replace-file! graph file entities)
@@ -54,7 +66,7 @@
         (is (= "src/a.clj" (:file (first result))))))))
 
 (deftest multiple-chunks-collapse-to-the-best-symbol-score
-  (let [{:keys [project file entities]} (fixture/fixture)
+  (let [{:keys [project file entities]} (graph-fixture)
         client (fake/create)]
     (store/with-store [graph project settings]
       (store/replace-file! graph file entities)
@@ -68,7 +80,7 @@
       (is (= 1 (count (query/search graph client settings "network retry")))))))
 
 (deftest pending-dirty-deleted-and-model-mismatched-results-are-rejected
-  (let [{:keys [project file entities]} (fixture/fixture)
+  (let [{:keys [project file entities]} (graph-fixture)
         client (fake/create)]
     (store/with-store [graph project settings]
       (store/replace-file! graph file entities)
@@ -99,8 +111,26 @@
       (store/delete-file! graph (:file/id file))
       (is (empty? (query/search graph client settings "unmatched concept"))))))
 
+(deftest stale-graph-watermark-rejects-semantic-results-but-keeps-fts
+  (let [{:keys [project file entities]} (graph-fixture)
+        client (fake/create)]
+    (store/with-store [graph project settings]
+      (store/replace-file! graph file entities)
+      (state/put-indexed!
+       graph (indexed "symbol:caller" (:file/id file) "sha256:caller"))
+      (state/record-watermark!
+       graph {:provider reconcile/provider :state :ready
+              :graph-revision "sha256:stale"})
+      (fake/set-search-results!
+       client [(candidate "symbol:caller" (:file/id file)
+                          "sha256:caller" 0 10.0)])
+      (let [result (query/search graph client settings
+                                 "persistent database")]
+        (is (= ["symbol:caller"] (mapv :id result)))
+        (is (= #{:fts} (:matched-by (first result))))))))
+
 (deftest exact-lexical-match-keeps-priority-and-fuses-provenance
-  (let [{:keys [project file entities]} (fixture/fixture)
+  (let [{:keys [project file entities]} (graph-fixture)
         client (fake/create)]
     (store/with-store [graph project settings]
       (store/replace-file! graph file entities)
@@ -117,7 +147,7 @@
         (is (= #{:fts :lateon} (:matched-by (first result))))))))
 
 (deftest semantic-failure-falls-back-to-datalevin
-  (let [{:keys [project file entities]} (fixture/fixture)
+  (let [{:keys [project file entities]} (graph-fixture)
         failing
         (reify index/SemanticIndex
           (index-health [_] {:ready? true})
@@ -135,7 +165,7 @@
         (is (= #{:fts} (:matched-by (first result))))))))
 
 (deftest retrieval-explanation-distinguishes-timeouts-errors-and-no-matches
-  (let [{:keys [project file entities]} (fixture/fixture)
+  (let [{:keys [project file entities]} (graph-fixture)
         client
         (fn [error]
           (reify index/SemanticIndex
@@ -166,7 +196,7 @@
         (is (= 0 (get-in timeout [:retrieval :raw-candidate-count])))))))
 
 (deftest fresh-and-stale-candidate-counts-are-observable
-  (let [{:keys [project file entities]} (fixture/fixture)
+  (let [{:keys [project file entities]} (graph-fixture)
         client (fake/create)]
     (store/with-store [graph project settings]
       (store/replace-file! graph file entities)
@@ -186,7 +216,7 @@
         (is (= 1 (:rejected-stale-candidate-count retrieval)))))))
 
 (deftest interactive-deadline-allows-a-subsecond-lateon-response
-  (let [{:keys [project file entities]} (fixture/fixture)
+  (let [{:keys [project file entities]} (graph-fixture)
         slow
         (reify index/SemanticIndex
           (index-health [_] {:ready? true})

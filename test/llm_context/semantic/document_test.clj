@@ -12,6 +12,11 @@
 (def lateon
   (get-in (config/defaults) [:semantic :lateon-code]))
 
+(deftest semantic-document-contract-is-version-three
+  (is (= 3 document/current-document-version))
+  (is (= 3 (:document-version lateon)))
+  (is (= "llm-context-v3" (:index-name lateon))))
+
 (defn file [path source language]
   {:entity/type :entity.type/file
    :file/id (ids/file-id path)
@@ -28,6 +33,11 @@
    :symbol/qualified-name (str "sample/" name)
    :symbol/kind :symbol.kind/function
    :symbol/file (:file/id file)
+   :symbol/platform :clj
+   :symbol/analyzer :test
+   :symbol/scope :scope/top-level
+   :symbol/role :role/definition
+   :symbol/indexable? true
    :symbol/signature (str "(defn " name " [])")
    :source/start-line start-line
    :source/start-column start-column
@@ -66,18 +76,49 @@
     (is (= (:document-hash first)
            (get-in first [:chunks 0 :document-hash])))))
 
-(deftest model-and-format-identity-change-the-document-hash
+(deftest model-identity-changes-the-document-hash-and-format-drift-is-rejected
   (let [source "(defn a [] 1)"
         file (file "src/a.clj" source :language/clojure)
         symbol (symbol-entity file "symbol:a" "a" 1 1 1 14)
         base (document/build lateon symbol file source [])
         changed-model (document/build (assoc lateon :model-revision
                                              (apply str (repeat 40 "a")))
-                                      symbol file source [])
-        changed-format (document/build (update lateon :document-version inc)
-                                       symbol file source [])]
+                                      symbol file source [])]
     (is (not= (:document-hash base) (:document-hash changed-model)))
-    (is (not= (:document-hash base) (:document-hash changed-format)))))
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo #"document version is incompatible"
+         (document/build (update lateon :document-version inc)
+                         symbol file source [])))))
+
+(deftest indexability-is-explicit-in-format-three
+  (is (true? (document/indexable-symbol?
+              3 {:symbol/kind :symbol.kind/function
+                 :symbol/indexable? true})))
+  (is (false? (document/indexable-symbol?
+               3 {:symbol/kind :symbol.kind/function
+                  :symbol/indexable? false})))
+  (is (false? (document/indexable-symbol?
+               3 {:symbol/kind :symbol.kind/function})))
+  (is (true? (document/indexable-symbol?
+              2 {:symbol/kind :symbol.kind/function})))
+  (is (false? (document/indexable-symbol?
+               2 {:symbol/kind :symbol.kind/namespace}))))
+
+(deftest canonical-documents-deduplicate-or-reject-by-symbol-identity
+  (let [document {:symbol-id "symbol:a"
+                  :file-id "file:src/a.clj"
+                  :document-hash "sha256:a"
+                  :chunks []}]
+    (is (= [document]
+           (document/canonical-documents [document document])))
+    (let [error
+          (try
+            (document/canonical-documents
+             [document (assoc document :document-hash "sha256:b")])
+            nil
+            (catch clojure.lang.ExceptionInfo error error))]
+      (is (= :semantic/document-conflict (:type (ex-data error))))
+      (is (= "symbol:a" (:symbol-id (ex-data error)))))))
 
 (deftest oversized-symbols-become-overlapping-bounded-chunks
   (let [lines (map #(str "  (println \"line-" % "\")\n") (range 30))
@@ -107,7 +148,10 @@
         file (file "src/app.clj" source :language/clojure)
         function (symbol-entity file "symbol:useful" "useful" 1 1 2 17)
         module (assoc (symbol-entity file "symbol:module" "app" 1 1 2 17)
-                      :symbol/kind :symbol.kind/module)]
+                      :symbol/kind :symbol.kind/module
+                      :symbol/scope :scope/module
+                      :symbol/role :role/module
+                      :symbol/indexable? false)]
     (Files/createDirectories (.getParent path)
                              (make-array java.nio.file.attribute.FileAttribute 0))
     (spit (str path) source)

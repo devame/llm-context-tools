@@ -53,6 +53,11 @@
        (= (count (:chunks desired))
           (:semantic.indexed/chunk-count indexed))))
 
+(defn- desired-by-symbol [documents]
+  (into (sorted-map)
+        (map (juxt :symbol-id identity))
+        (document/canonical-documents documents)))
+
 (defn- reconcile-file!
   [graph project lateon marker now]
   (let [file-id (:semantic.dirty/file-id marker)
@@ -69,8 +74,7 @@
        :queued-upserts 0 :queued-deletes 0
        :cancelled 0 :unchanged 0}
       (let [db (store/database graph)
-            desired (into {} (map (juxt :symbol-id identity))
-                          (:documents built))
+            desired (desired-by-symbol (:documents built))
             current (graph-read/semantic-indexed-for-file
                      db provider file-id)
             pending (graph-read/semantic-jobs-for-file
@@ -167,7 +171,30 @@
      {:enabled? false :queued-upserts 0 :queued-deletes 0
       :cancelled 0 :unchanged 0 :deferred 0 :diagnostics []}
      (let [lateon (get-in config [:semantic :lateon-code])
+           db (store/database graph)
+           graph-revision (document/graph-revision db)
            markers (state/dirty-records graph provider)
+           desired-symbol-ids (document/indexable-symbol-ids db)
+           indexed-symbol-ids
+           (set (map :semantic.indexed/symbol-id
+                     (state/indexed-records graph provider)))
+           job-symbol-ids
+           (set (map :semantic.job/symbol-id
+                     (state/job-records graph provider)))
+           watermark-revision
+           (:semantic.watermark/graph-revision
+            (state/watermark graph provider))
+           uncovered? (not= desired-symbol-ids
+                            (into indexed-symbol-ids job-symbol-ids))
+           stale-watermark? (and watermark-revision
+                                 (not= graph-revision watermark-revision))
+           recovery? (and (empty? markers)
+                          (or uncovered? stale-watermark?))
+           markers (if recovery?
+                     [(state/dirty-entity
+                       (dirty-marker project-marker nil
+                                     :reconcile-all now))]
+                     markers)
            full? (some #(= :reconcile-all
                            (:semantic.dirty/operation %))
                        markers)
@@ -217,6 +244,8 @@
         :cancelled (reduce + (map :cancelled results))
         :unchanged (reduce + (map :unchanged results))
         :deferred deferred
+        :recovered-missing-markers? recovery?
+        :graph-revision graph-revision
         :diagnostics (vec (mapcat :diagnostics results))}))))
 
 (defn retry-failed!

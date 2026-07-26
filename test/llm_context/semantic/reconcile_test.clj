@@ -109,6 +109,21 @@
         (is (= :delete (:semantic.job/operation (job graph))))
         (is (empty? (state/dirty-records graph reconcile/provider)))))))
 
+(deftest reconciliation-recovers-when-reset-lost-all-markers-and-jobs
+  (let [{:keys [project]}
+        (project-with-source "(ns sample.app)\n(defn useful [] :ok)")]
+    (full/analyze! project settings)
+    (store/with-store [graph project settings]
+      ;; Simulate interruption after semantic operational state was reset but
+      ;; before the full-reconcile marker could be committed.
+      (store/reset-semantic-state! graph)
+      (is (empty? (state/dirty-records graph reconcile/provider)))
+      (is (empty? (state/job-records graph reconcile/provider)))
+      (let [result (reconcile/reconcile! graph project settings 20)]
+        (is (true? (:recovered-missing-markers? result)))
+        (is (= 1 (:queued-upserts result)))
+        (is (= :upsert (:semantic.job/operation (job graph))))))))
+
 (deftest source-edited-after-analysis-defers-and-retains-dirty-state
   (let [{:keys [project path]}
         (project-with-source "(ns sample.app)\n(defn useful [] :old)")]

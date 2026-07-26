@@ -1,8 +1,10 @@
 (ns llm-context.semantic.hybrid
   "Freshness-safe rank fusion between Datalevin FTS and LateOn candidates."
   (:require [llm-context.graph.read :as graph-read]
+            [llm-context.semantic.document :as document]
             [llm-context.semantic.index :as index]
             [llm-context.semantic.reconcile :as reconcile]
+            [llm-context.semantic.state :as state]
             [llm-context.store :as store]))
 
 (def ^:private rrf-k 60.0)
@@ -17,7 +19,8 @@
      :chunk-index (:llm_chunk_index metadata)}))
 
 (defn- current-candidate?
-  [lateon symbols {:keys [indexed jobs dirty-files]} candidate]
+  [lateon symbols {:keys [indexed jobs dirty-files graph-revision
+                          watermark-revision]} candidate]
   (let [{:keys [symbol-id file-id document-hash model-revision
                 document-version]} (candidate-metadata candidate)
         symbol (get symbols symbol-id)
@@ -33,6 +36,10 @@
             (:semantic.indexed/document-version recorded))
          (= model-revision (:model-revision lateon))
          (= (long document-version) (:document-version lateon))
+         ;; Older state may not have a watermark revision. Once present, it
+         ;; must describe this exact committed graph snapshot.
+         (or (nil? watermark-revision)
+             (= graph-revision watermark-revision))
          (not (contains? jobs symbol-id))
          (not (contains? dirty-files file-id))
          (not (contains? dirty-files reconcile/project-marker)))))
@@ -100,8 +107,13 @@
         db (store/database graph)
         symbols (graph-read/symbols-by-ids db candidate-ids)
         operational
-        (graph-read/semantic-candidate-state
-         db reconcile/provider raw-semantic-ids)
+        (assoc
+         (graph-read/semantic-candidate-state
+          db reconcile/provider raw-semantic-ids)
+         :graph-revision (document/graph-revision db)
+         :watermark-revision
+         (:semantic.watermark/graph-revision
+          (state/watermark graph reconcile/provider)))
         semantic-candidates
         (->> raw-semantic-candidates
              (filter #(current-candidate?

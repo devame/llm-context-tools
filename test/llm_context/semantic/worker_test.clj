@@ -52,7 +52,12 @@
         (is (= :ready
                (get-in (state/semantic-summary
                         graph reconcile/provider (System/currentTimeMillis))
-                       [:watermark :semantic.watermark/state])))))))
+                       [:watermark :semantic.watermark/state])))
+        (is (string?
+             (get-in (state/semantic-summary
+                      graph reconcile/provider (System/currentTimeMillis))
+                     [:watermark
+                      :semantic.watermark/graph-revision])))))))
 
 (deftest worker-deletes-all-chunks-for-removed-symbol
   (let [{:keys [project path]} (fixture)
