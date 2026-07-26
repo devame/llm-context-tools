@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.9.0
+
+- Introduced graph format 3 with a canonical analyzer interchange contract,
+  normalized provenance, explicit persistent-symbol roles and scopes, and
+  paired UTF-8 byte offsets alongside analyzer display-coordinate ranges.
+- Added whole-snapshot integrity checks for conflicting identities, missing
+  owners or targets, partial ranges, and ranges outside their owning files.
+- Added `analyze --check` for the same canonical source-snapshot audit without
+  opening or changing the graph database.
+- Canonicalization collapses only structurally identical observations. It
+  preserves legitimate same-name constructs in distinct scopes and fails
+  closed when different facts claim the same canonical identity.
+- Required Clojure-family and Janet analyzers to emit evidence-backed canonical
+  definitions, relationships, diagnostic references, and effects before
+  persistence.
+- Replaced regex literal extraction with structural parsing: Janet walks
+  Tree-sitter nodes, while Clojure uses tools.reader with evaluation disabled
+  and emits topics only for forms proven static.
+- Made Clojure declarations analyzer-local until a concrete definition exists,
+  assigned observations to the smallest enclosing definition, and materialized
+  protocol implementations plus statically proven Java and instance calls.
+- Reworked Janet resolution around ordered lexical and module scopes, including
+  shadowing, imports, visibility, destructuring, and stable rebinding
+  identities. Malformed analyzer snapshots fail closed without persisting
+  partial facts.
+- Gated queries while graph updates are active and coordinated full,
+  incremental, and read-only analysis with project-level concurrency locks.
+- Introduced semantic document/index v3 with explicit symbol indexability,
+  deterministic document conflict detection, graph-revision freshness
+  watermarks, and automatic reconciliation recovery.
+- Added a release-quality corpus covering Clojure and Janet, packaged-jar graph
+  analysis, canonical invariant checks, and full-versus-incremental convergence
+  to both CI and tagged-release validation.
+
+Existing generated graphs require one `llm-context analyze --full` rebuild
+after upgrading; no format-2 graph migration is attempted.
+
 ## 0.8.1
 
 - Recovered ClojureScript macro-bound local call names from clj-kondo source

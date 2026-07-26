@@ -23,7 +23,8 @@ jobs:
       - run: npm ci
       - run: clojure -M:test
       - run: clojure -T:build dist
-      - run: java --enable-native-access=ALL-UNNAMED -jar dist/llm-context.jar version
+      - name: Verify packaged graph quality
+        run: scripts/verify-release-quality.sh dist/llm-context.jar
       - run: test/install-unix.sh
       - run: npm pack --dry-run
 

@@ -1,0 +1,4 @@
+{:analysis {:include ["src" "janet"]}
+ :semantic {:providers []
+            :lateon-code {:enabled false
+                          :mode :disabled}}}

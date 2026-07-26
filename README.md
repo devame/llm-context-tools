@@ -57,7 +57,7 @@ cached once per user. Repository-derived data is not stored there: every
 project owns its graph and semantic index below its own `.llm-context/`
 directory. Open a new terminal after an installer changes `PATH`.
 
-Set `LLM_CONTEXT_VERSION=0.8.1` to pin a release or
+Set `LLM_CONTEXT_VERSION=0.9.0` to pin a release or
 `LLM_CONTEXT_INSTALL_DIR` to choose another destination. The installers are
 idempotent: running them again replaces the jar and launcher only after
 checksum validation and reuse a verified model snapshot. Set
@@ -99,7 +99,7 @@ around the same jar:
 
 ```bash
 npm pack
-npm install --global ./llm-context-0.8.1.tgz
+npm install --global ./llm-context-0.9.0.tgz
 llm-context doctor
 ```
 
@@ -112,7 +112,7 @@ unrelated registry package.
 ```text
 llm-context init [--yes]
 llm-context doctor
-llm-context analyze [--full]
+llm-context analyze [--full|--check]
 llm-context query stats
 llm-context query find-symbol <name-or-id>
 llm-context query search <natural-language-query> [--explain]
@@ -144,13 +144,19 @@ candidates whose content hash or model revision is stale, and falls back to
 Datalevin whenever the sidecar is unavailable.
 
 `analyze` runs embedded clj-kondo once over the complete Clojure source set and
-a two-pass lexical/module resolver over Janet. It never invokes Clojure,
+a two-pass Tree-sitter AST/module resolver over Janet. Static Clojure topic
+forms are read with evaluation disabled; dynamic forms remain diagnostic
+observations instead of becoming graph facts. Analysis never invokes Clojure,
 Leiningen, shadow-cljs, Janet, project build tools, or project macros. Per-file
 semantic fingerprints make subsequent runs incremental while still updating
 unchanged callers when cross-file resolution changes. The default scan covers
 the whole confirmed project root and silently ignores unsupported extensions.
 Full analysis reports timestamped stages and persists in transactions of at
 most 100 records.
+
+`analyze --check` runs the same discovery, analyzers, canonicalization, and
+whole-snapshot integrity audit without opening or changing the graph database.
+Use it as a read-only source validation gate.
 
 ## Configuration
 
@@ -203,7 +209,7 @@ source of truth. The disposable LateOn index lives under
 `.llm-context/semantic/next-plaid/`. JSONL, JSON, EDN, and Markdown are
 deterministic projections for interoperability, debugging, and artifacts.
 
-Release `0.8.0` introduces graph format 2. Existing generated graphs must be
+Release `0.9.0` introduces graph format 3. Existing generated graphs must be
 rebuilt once with `llm-context analyze --full`; source and configuration files
 are never changed. Normal queries detect older state and print this instruction
 instead of opening it as if it were current.
@@ -248,8 +254,9 @@ identifiers and bounded errors, not source documents.
 clojure -M:test
 clojure -M:bench 50
 clojure -M:bench 500
-clojure -M:semantic-bench /path/to/project queries.edn
 clojure -T:build dist
+scripts/verify-release-quality.sh dist/llm-context.jar
+clojure -M:semantic-bench /path/to/project queries.edn
 npm pack --dry-run
 ```
 

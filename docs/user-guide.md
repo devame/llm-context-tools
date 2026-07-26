@@ -24,16 +24,22 @@ Git ignores and configured generated/cache exclusions. It recognizes `.clj`,
 `shadow-cljs.edn`, and `.clj-kondo/config.edn` files. Other extensions are
 intentionally and silently ignored.
 
-Clojure-family analysis uses the embedded clj-kondo API project-wide. Janet
-uses its packaged Tree-sitter grammar followed by a lexical and module-aware
-resolver pinned to Janet 1.41.2. Analysis never runs dependency commands,
-project build tools, Janet, or project macros. Existing `.clj-kondo` config and
-hooks are read, but generated analyzer cache stays under `.llm-context/cache/`.
+Clojure-family analysis uses the embedded clj-kondo API project-wide. Focused
+literal adapters use tools.reader with evaluation disabled and emit topics only
+for provably static forms. Janet walks nodes from its packaged Tree-sitter
+grammar before applying a module-aware resolver pinned to Janet 1.41.2.
+Analysis never runs dependency commands, project build tools, Janet, or project
+macros. Existing `.clj-kondo` config and hooks are read, but generated analyzer
+cache stays under `.llm-context/cache/`.
 
 Subsequent `llm-context analyze` runs use source and semantic fingerprints.
 They persist only files whose facts changed, including unchanged source files
 whose cross-file resolution changed. If a resident service owns the project,
 analysis is sent to that process so there is only one Datalevin writer.
+
+Run `llm-context analyze --check` to apply the same discovery, analyzer,
+canonicalization, and whole-snapshot integrity checks without opening or
+changing the graph database.
 
 ## What the graph guarantees
 
@@ -43,6 +49,11 @@ External library calls, local/dynamic calls, ambiguous definitions, and
 unresolved names are diagnostic `reference` records, not graph edges. They are
 searchable, but callers, callees, context traversal, and graph paths cannot
 walk through them.
+
+Malformed or internally conflicting analyzer snapshots fail before persistence,
+so the last complete graph remains queryable. Queries do not observe a graph
+while an update is in progress; full, incremental, and read-only checks share
+project-level coordination.
 
 ClojureScript adapters also create typed topics for literal re-frame events,
 subscriptions, effects, coeffects, and statically recoverable application-state
@@ -103,9 +114,14 @@ available with partial completeness; it is not globally unavailable. Failed
 jobs remain terminal until `retry --failed`. `sync --wait` exits non-zero until
 pending, leased, failed, and dirty counts all converge.
 
-## Upgrade to graph format 2
+Graph format 3 makes `:symbol/indexable?` authoritative for semantic document
+selection. Document/index v3 rejects conflicting documents, uses graph-revision
+freshness watermarks, and automatically recreates missing reconciliation work.
 
-Version `0.8.0` replaces the older generic graph. After upgrading, run:
+## Upgrade to graph format 3
+
+Version `0.9.0` replaces the analyzer interchange contract. After upgrading,
+run:
 
 ```bash
 llm-context analyze --full
@@ -113,10 +129,10 @@ llm-context analyze --full
 
 Normal queries against an older graph stop with that actionable instruction.
 The rebuild removes only generated graph/queue metadata, records analyzer and
-catalog versions, and uses the versioned `llm-context-v2` NextPlaid index so
-old vectors cannot appear in new results. Source files and `llm-context.edn`
-are untouched. If the project service is running, leave it running—the rebuild
-is coordinated through its Unix socket (loopback TCP on Windows).
+catalog versions, and uses the current versioned NextPlaid index so stale
+vectors cannot appear in new results. Source files and `llm-context.edn` are
+untouched. If the project service is running, leave it running—the rebuild is
+coordinated through its Unix socket (loopback TCP on Windows).
 
 ## Installation and troubleshooting
 
