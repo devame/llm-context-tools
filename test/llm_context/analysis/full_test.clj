@@ -6,6 +6,26 @@
             [llm-context.store :as store])
   (:import [java.nio.file Files]))
 
+(deftest invalid-snapshots-do-not-reset-semantic-state
+  (let [reset-called? (atom false)
+        invalid [{:entity/type :entity.type/reference
+                  :reference/id "reference:invalid"
+                  :reference/symbol "symbol:owner"
+                  :reference/kind :edge.kind/calls
+                  :reference/target-text ""
+                  :reference/classification :dynamic
+                  :reference/evidence :clj-kondo-local-usage}]]
+    (with-redefs [store/validate-replacement!
+                  (fn [_ entities]
+                    (is (= invalid entities))
+                    (throw (ex-info "invalid snapshot" {})))
+                  store/reset-semantic-state!
+                  (fn [_] (reset! reset-called? true))]
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo #"invalid snapshot"
+           (#'full/persist! :graph {} invalid nil)))
+      (is (false? @reset-called?)))))
+
 (deftest complete-analysis-persists-and-removes-files
   (let [root (Files/createTempDirectory "llm-context-full-"
                                         (make-array java.nio.file.attribute.FileAttribute 0))

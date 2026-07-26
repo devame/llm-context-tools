@@ -235,6 +235,31 @@
                    (subs line 0 (min (count line) (dec column))))]
       (boolean (and before (re-find #"\(\s*$" before)))))))
 
+(defn- local-name
+  "Prefer clj-kondo's normalized local name, but recover it from the precise
+  name range when analysis-data omits :name. clj-kondo can emit this shape for
+  ClojureScript macro-bound locals such as cljs.test/async's `done` callback."
+  [content record]
+  (let [reported (some-> (:name record) str)]
+    (or (when-not (str/blank? reported) reported)
+        (let [row (or (:name-row record) (:row record))
+              end-row (or (:name-end-row record) row)
+              start-column (or (:name-col record) (:col record))
+              end-column (or (:name-end-col record) (:end-col record))
+              line (when (and content
+                              (pos-int? row)
+                              (= row end-row))
+                     (nth (str/split-lines content) (dec row) nil))
+              start (when (pos-int? start-column) (dec start-column))
+              end (when (pos-int? end-column) (dec end-column))]
+          (when (and line start end
+                     (<= 0 start)
+                     (< start end)
+                     (<= end (count line)))
+            (let [recovered (subs line start end)]
+              (when-not (str/blank? recovered)
+                recovered)))))))
+
 (defn- contains-position? [entity row col]
   (let [start [(:source/start-line entity) (:source/start-column entity)]
         end [(:source/end-line entity) (:source/end-column entity)]]
@@ -262,9 +287,10 @@
                         namespaces))
         content (:content (get files-by-path (:filename record)))]
     (when (and owner (local-call? content record))
-      (diagnostic-reference
-       :edge.kind/calls owner record (str (:name record)) :dynamic
-       :clj-kondo-local-usage nil))))
+      (when-let [target (local-name content record)]
+        (diagnostic-reference
+         :edge.kind/calls owner record target :dynamic
+         :clj-kondo-local-usage nil)))))
 
 (defn materialize
   "Convert a clj-kondo snapshot into file-owned canonical entities."

@@ -103,6 +103,16 @@
       (throw (ex-info "Exact graph edge targets do not exist"
                       {:missing-targets missing})))))
 
+(defn validate-replacement!
+  "Preflight a complete canonical snapshot without changing Datalevin. Full
+  analysis calls this before clearing versioned semantic operational state."
+  [store entities]
+  (doseq [entity entities]
+    (schema/validate-entity! entity))
+  (validate-edge-targets! (database store) entities true)
+  (validate-identities! entities)
+  entities)
+
 (defn- transact-batches!
   [connection items batch-size tx-fn phase on-progress]
   (let [batches (vec (partition-all batch-size items))

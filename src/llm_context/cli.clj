@@ -579,6 +579,17 @@
   (throw (ex-info (str "Unknown command: " command)
                   {:exit-code 2 :command command})))
 
+(defn- print-error! [error]
+  (let [{:keys [entity explain]} (ex-data error)]
+    (println (.getMessage error))
+    (when entity
+      (println "Offending entity:" (pr-str entity)))
+    (when-let [problem (first (:clojure.spec.alpha/problems explain))]
+      (println "Validation failure:"
+               (pr-str {:path (:path problem)
+                        :value (:val problem)
+                        :predicate (str (:pred problem))})))))
+
 (defn run [args]
   (try
     (let [{:keys [project command args] :as options} (parse-args args)
@@ -587,5 +598,5 @@
       (execute (assoc context :options options) command args))
     (catch clojure.lang.ExceptionInfo error
       (binding [*out* *err*]
-        (println (.getMessage error)))
+        (print-error! error))
       (or (:exit-code (ex-data error)) 1))))

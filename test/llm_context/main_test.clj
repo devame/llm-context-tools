@@ -40,6 +40,22 @@
          #"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] Graph quality: 1000 exact edges, 25 references"
          output))))
 
+(deftest validation-errors-identify-the-offending-fact
+  (let [entity {:entity/type :entity.type/reference
+                :reference/target-text ""}
+        error (ex-info
+               "Invalid semantic graph entity"
+               {:entity entity
+                :explain
+                {:clojure.spec.alpha/problems
+                 [{:path [:reference/target-text]
+                   :val ""
+                   :pred 'clojure.core/seq}]}})
+        output (with-out-str (#'cli/print-error! error))]
+    (is (str/includes? output "Offending entity:"))
+    (is (str/includes? output ":reference/target-text \"\""))
+    (is (str/includes? output "Validation failure:"))))
+
 (deftest project-context-is-canonical
   (let [context (project/context ".")]
     (is (.isAbsolute (:root context)))

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.8.1
+
+- Recovered ClojureScript macro-bound local call names from clj-kondo source
+  ranges when analysis-data omits `:name`, preventing valid callbacks such as
+  `cljs.test/async`'s `done` from producing blank diagnostic references.
+- Added a safe omission path when an unnamed local has no recoverable source
+  token and regression coverage for both normalized and real clj-kondo input.
+- Preflight the complete graph replacement before clearing semantic queue and
+  freshness records, so an invalid analyzer snapshot cannot partially alter
+  existing generated state.
+- Print the offending entity and concise spec failure when canonical graph
+  validation rejects analyzer output.
+
 ## 0.8.0
 
 - Restricted analysis to Clojure, ClojureScript, CLJC, Janet, and selected EDN

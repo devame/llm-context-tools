@@ -44,6 +44,50 @@
           :to 'clojure.core :name 'some? :arity 1})]
     (is (nil? relationship))))
 
+(deftest unnamed-local-calls-recover-their-source-token
+  (let [content "(defn run [done]\n  (done))\n"
+        owner {:entity/type :entity.type/symbol
+               :symbol/id "symbol:owner"
+               :symbol/file "file:src/sample.cljs"
+               :symbol/platform :cljs
+               :symbol/qualified-name "sample/run"
+               :source/start-line 1 :source/start-column 1
+               :source/end-line 2 :source/end-column 10}
+        record {:filename "src/sample.cljs" :platform :cljs
+                :row 2 :col 3 :end-row 2 :end-col 9
+                :name-row 2 :name-col 4
+                :name-end-row 2 :name-end-col 8}
+        reference
+        (#'clojure-analysis/local-reference
+         [owner] [] {"src/sample.cljs" {:content content}} record)]
+    (is (= "done" (:reference/target-text reference)))
+    (is (= :dynamic (:reference/classification reference)))
+    (is (nil?
+         (#'clojure-analysis/local-reference
+          [owner] [] {"src/sample.cljs" {:content ""}} record)))))
+
+(deftest cljs-async-callback-with-omitted-kondo-name-remains-valid
+  (let [root (Files/createTempDirectory
+              "llm-context-cljs-async-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        source
+        (str "(ns sample.async\n"
+             "  (:require [cljs.test :refer-macros [deftest async]]))\n"
+             "(deftest completes\n"
+             "  (async done\n"
+             "    (done)))\n")
+        files [(input root "src/async.cljs" :language/clojurescript source)]
+        project (project/context (str root))
+        snapshot (clj-kondo/analyze! project files)
+        entities (mapcat :entities
+                         (clojure-analysis/materialize files snapshot))
+        dynamic-references
+        (filter #(and (= :entity.type/reference (:entity/type %))
+                      (= :dynamic (:reference/classification %)))
+                entities)]
+    (is (every? #(seq (:reference/target-text %)) dynamic-references))
+    (is (some #(= "done" (:reference/target-text %)) dynamic-references))))
+
 (deftest kondo-facts-separate-exact-external-and-dynamic-relationships
   (let [root (Files/createTempDirectory
               "llm-context-clojure-"

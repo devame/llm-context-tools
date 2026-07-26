@@ -18,6 +18,8 @@
   ;; A full analysis is the format upgrade boundary. Semantic operational
   ;; records belong to a versioned document/index contract and must not make a
   ;; new graph appear complete merely because an older index was complete.
+  ;; Preflight the entire replacement before changing either state domain.
+  (store/validate-replacement! graph entities)
   (store/reset-semantic-state! graph)
   (store/replace-all! graph entities
                       {:batch-size persistence-batch-size
