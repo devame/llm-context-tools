@@ -104,6 +104,39 @@
     (is (not= ::timeout (deref running 5000 ::timeout)))
     (is (:closed? (fake/snapshot semantic-index)))))
 
+(deftest semantic-status-remains-readable-while-worker-processes-a-batch
+  (let [root (Files/createTempDirectory
+              "llm-context-semantic-status-concurrent-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        project (project/context (str root))
+        semantic-index (fake/create)
+        entered (promise)
+        release (promise)
+        runtime-factory (fn [_ _]
+                          {:status :ready
+                           :endpoint "http://127.0.0.1:12345"
+                           :client semantic-index})]
+    (with-redefs [semantic-worker/process-once!
+                  (fn [_]
+                    (deliver entered true)
+                    @release
+                    {:leased 0 :completed 0 :retried 0
+                     :failed 0 :superseded 0})]
+      (let [running (future
+                      (with-out-str
+                        (server/start! project
+                                       {:runtime-factory runtime-factory})))]
+        (is (= true (deref entered 5000 false)))
+        (let [status (client/request project {:op :semantic-status}
+                                     {:request-timeout 1000})]
+          (is (= true (:ok status)))
+          (is (= 0 (get-in status [:value :pending])))
+          (is (= :ready (get-in status [:value :runtime :status]))))
+        (deliver release true)
+        (is (= {:ok true :value :stopping}
+               (client/request project {:op :stop})))
+        (is (not= ::timeout (deref running 5000 ::timeout)))))))
+
 (deftest project-lock-prevents-a-second-unreachable-service-owner
   (let [root (Files/createTempDirectory
               "llm-context-service-owner-"

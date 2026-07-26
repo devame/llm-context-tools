@@ -14,6 +14,10 @@
 (defn- sleep! [worker milliseconds]
   ((:sleep-fn worker) milliseconds))
 
+(defn- with-graph-lock [worker f]
+  (locking (:graph worker)
+    (f)))
+
 (defn- retry-delay [settings attempts]
   (let [shift (min 20 (max 0 attempts))
         calculated (* (:retry-base-ms settings)
@@ -26,9 +30,11 @@
         deadline (+ (now worker) (:visibility-timeout-ms settings))]
     (loop []
       (let [time (now worker)
-            renewed? (state/renew-job-lease!
-                      (:graph worker) (:semantic.job/id job)
-                      (:owner worker) time (:lease-ms settings))
+            renewed? (with-graph-lock
+                       worker
+                       #(state/renew-job-lease!
+                         (:graph worker) (:semantic.job/id job)
+                         (:owner worker) time (:lease-ms settings)))
             _ (when-not renewed?
                 (throw
                  (ex-info "Semantic job lease was superseded"
@@ -53,10 +59,12 @@
             (recur)))))))
 
 (defn- document-for-job [worker job]
-  (let [built (document/build-symbol
-               (:graph worker) (:project worker) (:settings worker)
-               (:semantic.job/file-id job)
-               (:semantic.job/symbol-id job))]
+  (let [built (with-graph-lock
+                worker
+                #(document/build-symbol
+                  (:graph worker) (:project worker) (:settings worker)
+                  (:semantic.job/file-id job)
+                  (:semantic.job/symbol-id job)))]
     (when-not (= :ready (:status built))
       (throw
        (ex-info "Source changed before semantic ingestion"
@@ -97,9 +105,11 @@
     (doseq [batch (partition-all (:update-batch-size (:settings worker))
                                  (:chunks desired))]
       (when-not
-       (state/renew-job-lease!
-        (:graph worker) (:semantic.job/id job) (:owner worker)
-        (now worker) (:lease-ms (:settings worker)))
+       (with-graph-lock
+        worker
+        #(state/renew-job-lease!
+          (:graph worker) (:semantic.job/id job) (:owner worker)
+          (now worker) (:lease-ms (:settings worker))))
         (throw
          (ex-info "Semantic job lease was superseded"
                   {:type :semantic/lease-lost :retriable? false
@@ -132,12 +142,14 @@
                              :retriable? false
                              :operation operation})))
         completed-at (now worker)]
-    (if (state/complete-job!
-         (:graph worker)
-         {:job-id (:semantic.job/id job)
-          :lease-owner (:owner worker)
-          :indexed indexed
-          :completed-at completed-at})
+    (if (with-graph-lock
+          worker
+          #(state/complete-job!
+            (:graph worker)
+            {:job-id (:semantic.job/id job)
+             :lease-owner (:owner worker)
+             :indexed indexed
+             :completed-at completed-at}))
       {:status :completed :operation operation}
       {:status :superseded :operation operation})))
 
@@ -149,14 +161,16 @@
         max-attempts (if retriable? (:max-attempts settings) 1)
         available-at (+ failed-at (retry-delay settings attempts))
         result
-        (state/retry-job!
-         (:graph worker)
-         {:job-id (:semantic.job/id job)
-          :lease-owner (:owner worker)
-          :failed-at failed-at
-          :available-at available-at
-          :error (.getMessage ^Throwable error)
-          :max-attempts max-attempts})]
+        (with-graph-lock
+          worker
+          #(state/retry-job!
+            (:graph worker)
+            {:job-id (:semantic.job/id job)
+             :lease-owner (:owner worker)
+             :failed-at failed-at
+             :available-at available-at
+             :error (.getMessage ^Throwable error)
+             :max-attempts max-attempts}))]
     (when (= :failed (:status result))
       (binding [*out* *err*]
         (println
@@ -176,30 +190,38 @@
   the project index before consuming jobs."
   [worker]
   (let [time (now worker)
-        recovered (state/recover-expired-leases!
-                   (:graph worker) reconcile/provider time)
-        planned (reconcile/reconcile! (:graph worker)
-                                      (:project worker)
-                                      (:config worker)
-                                      time)
+        {:keys [recovered planned]}
+        (with-graph-lock
+          worker
+          #(let [recovered (state/recover-expired-leases!
+                            (:graph worker) reconcile/provider time)
+                 planned (reconcile/reconcile! (:graph worker)
+                                               (:project worker)
+                                               (:config worker)
+                                               time)]
+             {:recovered recovered :planned planned}))
         health (index/index-health (:client worker))]
     (when-not (:ready? health)
-      (state/record-watermark!
-       (:graph worker)
-       {:provider reconcile/provider
-        :state :degraded
-        :last-error-at time
-        :last-error "NextPlaid or its pinned model is not ready"})
+      (with-graph-lock
+        worker
+        #(state/record-watermark!
+          (:graph worker)
+          {:provider reconcile/provider
+           :state :degraded
+           :last-error-at time
+           :last-error "NextPlaid or its pinned model is not ready"}))
       (throw
        (ex-info "NextPlaid or its pinned LateOn model is not ready"
                 {:type :semantic/not-ready
                  :retriable? true
                  :health (dissoc health :raw)})))
     (index/ensure-index! (:client worker))
-    (state/record-watermark!
-     (:graph worker)
-     {:provider reconcile/provider :state :idle
-      :graph-revision (:graph-revision planned)})
+    (with-graph-lock
+      worker
+      #(state/record-watermark!
+        (:graph worker)
+        {:provider reconcile/provider :state :idle
+         :graph-revision (:graph-revision planned)}))
     {:recovered recovered :planned planned :health health}))
 
 (defn process-once!
@@ -207,15 +229,19 @@
   [worker]
   (let [time (now worker)
         settings (:settings worker)
-        jobs (state/lease-jobs!
-              (:graph worker) reconcile/provider (:owner worker)
-              time (:lease-ms settings) (:update-batch-size settings))]
+        jobs (with-graph-lock
+               worker
+               #(state/lease-jobs!
+                 (:graph worker) reconcile/provider (:owner worker)
+                 time (:lease-ms settings) (:update-batch-size settings)))]
     (if (empty? jobs)
       {:leased 0 :completed 0 :retried 0 :failed 0 :superseded 0}
       (do
-        (state/record-watermark!
-         (:graph worker)
-         {:provider reconcile/provider :state :indexing})
+        (with-graph-lock
+          worker
+          #(state/record-watermark!
+            (:graph worker)
+            {:provider reconcile/provider :state :indexing}))
         (let [results
               (mapv (fn [job]
                       (try
@@ -229,32 +255,32 @@
                        :retried (get frequencies :pending 0)
                        :failed (get frequencies :failed 0)
                        :superseded (get frequencies :superseded 0)}]
-          (state/record-watermark!
-           (:graph worker)
-           (if (pos? (:failed summary))
-             {:provider reconcile/provider
-              :state :degraded
-              :last-error-at (now worker)
-              :last-error "One or more semantic jobs exhausted retries"
-              :graph-revision
-              (document/graph-revision
-               (store/database (:graph worker)))}
-             {:provider reconcile/provider
-              :state :ready
-              :last-success-at (now worker)
-              :graph-revision
-              (document/graph-revision
-               (store/database (:graph worker)))}))
+          (with-graph-lock
+            worker
+            #(state/record-watermark!
+              (:graph worker)
+              (if (pos? (:failed summary))
+                {:provider reconcile/provider
+                 :state :degraded
+                 :last-error-at (now worker)
+                 :last-error "One or more semantic jobs exhausted retries"
+                 :graph-revision
+                 (document/graph-revision
+                  (store/database (:graph worker)))}
+                {:provider reconcile/provider
+                 :state :ready
+                 :last-success-at (now worker)
+                 :graph-revision
+                 (document/graph-revision
+                  (store/database (:graph worker)))})))
           summary)))))
 
 (defn run!
   "Prepare and consume jobs until stop! is requested."
   [worker]
-  (locking (:graph worker)
-    (prepare! worker))
+  (prepare! worker)
   (while (not @(:stop? worker))
-    (let [result (locking (:graph worker)
-                   (process-once! worker))]
+    (let [result (process-once! worker)]
       (when (zero? (:leased result))
         (sleep! worker (:idle-poll-ms (:settings worker))))))
   :stopped)
