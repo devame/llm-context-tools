@@ -64,44 +64,112 @@
       (throw (ex-info "Duplicate canonical entity identities in transaction"
                       {:duplicates duplicates})))))
 
-(defn- edge-target-identities [entities]
-  (set (keep (fn [entity]
-               (when (= :entity.type/edge (:entity/type entity))
-                 (:edge/to entity)))
-             entities)))
-
-(defn- asserted-target-identities [entities]
-  (set (concat (keep :symbol/id entities)
-               (keep :topic/id entities))))
-
-(defn- existing-target-identities [db targets]
-  (if-not (seq targets)
+(defn- existing-identities [db attribute ids]
+  (if-not (seq ids)
     #{}
     (set
-     (concat
-      (d/q '[:find [?id ...]
-             :in $ ?targets
-             :where
-             [?entity :symbol/id ?id]
-             [(contains? ?targets ?id)]]
-           db targets)
-      (d/q '[:find [?id ...]
-             :in $ ?targets
-             :where
-             [?entity :topic/id ?id]
-             [(contains? ?targets ?id)]]
-           db targets)))))
+     (d/q '[:find [?id ...]
+            :in $ ?attribute ?ids
+            :where
+            [?entity ?attribute ?id]
+            [(contains? ?ids ?id)]]
+          db attribute ids))))
 
-(defn- validate-edge-targets! [db entities replace-all?]
-  (let [targets (edge-target-identities entities)
-        asserted (asserted-target-identities entities)
-        available (if replace-all?
-                    asserted
-                    (into asserted (existing-target-identities db targets)))
-        missing (vec (sort (remove available targets)))]
-    (when (seq missing)
-      (throw (ex-info "Exact graph edge targets do not exist"
-                      {:missing-targets missing})))))
+(defn- relationship-requirements [entities]
+  {:files (set (keep (fn [entity]
+                       (when (= :entity.type/symbol (:entity/type entity))
+                         (:symbol/file entity)))
+                     entities))
+   :symbols
+   (set
+    (keep
+     identity
+     (mapcat
+      (fn [entity]
+        (case (:entity/type entity)
+          :entity.type/edge [(:edge/from entity)
+                             (when (str/starts-with? (:edge/to entity) "symbol:")
+                               (:edge/to entity))]
+          :entity.type/reference [(:reference/symbol entity)]
+          :entity.type/effect [(:effect/symbol entity)]
+          []))
+      entities)))
+   :topics
+   (set (keep (fn [entity]
+                (when (and (= :entity.type/edge (:entity/type entity))
+                           (str/starts-with? (:edge/to entity) "topic:"))
+                  (:edge/to entity)))
+              entities))})
+
+(defn- asserted-identities [entities attribute]
+  (set (keep attribute entities)))
+
+(defn- validate-relationships!
+  ([db entities replace-all?]
+   (validate-relationships! db entities replace-all? #{}))
+  ([db entities replace-all? unavailable-symbols]
+   (let [{:keys [files symbols topics]} (relationship-requirements entities)
+         asserted-files (asserted-identities entities :file/id)
+         asserted-symbols (asserted-identities entities :symbol/id)
+         asserted-topics (asserted-identities entities :topic/id)
+         available-files
+         (if replace-all?
+           asserted-files
+           (into asserted-files (existing-identities db :file/id files)))
+         available-symbols
+         (if replace-all?
+           asserted-symbols
+           (into asserted-symbols
+                 (remove unavailable-symbols
+                         (existing-identities db :symbol/id symbols))))
+         available-topics
+         (if replace-all?
+           asserted-topics
+           (into asserted-topics (existing-identities db :topic/id topics)))
+         missing {:symbol-files (vec (sort (remove available-files files)))
+                  :edge-or-fact-symbols
+                  (vec (sort (remove available-symbols symbols)))
+                  :edge-topics (vec (sort (remove available-topics topics)))}
+         missing (into {} (filter (comp seq val)) missing)]
+     (when (seq missing)
+       (throw
+        (ex-info "Canonical graph relationships refer to missing owners or targets"
+                 {:missing-relationships missing}))))))
+
+(defn- validate-file-ownership!
+  "A file-scoped replacement may point to project-global targets, but every
+  asserted symbol and every source-owned fact must belong to the file being
+  replaced. Otherwise later file deletion could not retract facts reliably."
+  [file entities]
+  (let [file-id (:file/id file)
+        symbol-ids (set (keep :symbol/id entities))
+        foreign-symbols
+        (->> entities
+             (keep (fn [entity]
+                     (when (and (= :entity.type/symbol (:entity/type entity))
+                                (not= file-id (:symbol/file entity)))
+                       (:symbol/id entity))))
+             sort vec)
+        foreign-facts
+        (->> entities
+             (keep
+              (fn [entity]
+                (let [owner
+                      (case (:entity/type entity)
+                        :entity.type/edge (:edge/from entity)
+                        :entity.type/reference (:reference/symbol entity)
+                        :entity.type/effect (:effect/symbol entity)
+                        nil)]
+                  (when (and owner (not (contains? symbol-ids owner)))
+                    (entity-identity entity)))))
+             (sort-by pr-str)
+             vec)]
+    (when (or (seq foreign-symbols) (seq foreign-facts))
+      (throw
+       (ex-info "File replacement contains facts owned by another file"
+                {:file-id file-id
+                 :foreign-symbols foreign-symbols
+                 :foreign-facts foreign-facts})))))
 
 (defn validate-replacement!
   "Preflight a complete canonical snapshot without changing Datalevin. Full
@@ -109,8 +177,8 @@
   [store entities]
   (doseq [entity entities]
     (schema/validate-entity! entity))
-  (validate-edge-targets! (database store) entities true)
   (validate-identities! entities)
+  (validate-relationships! (database store) entities true)
   entities)
 
 (defn- transact-batches!
@@ -201,6 +269,7 @@
                        :llm-context/search-schema-version 1}])))))
 
 (def graph-metadata-key "analysis-format")
+(def ^:private graph-update-analyzer-name "update-in-progress")
 
 (defn graph-metadata
   "Return the persisted analyzer/graph compatibility contract, or nil before
@@ -222,6 +291,8 @@
                      db))
         metadata (graph-metadata store)]
     (cond
+      (= graph-update-analyzer-name
+         (:llm-context/analyzer-name metadata)) :unavailable
       (not files?) :empty
       (= schema/graph-format-version
          (:llm-context/graph-format metadata)) :ready
@@ -231,7 +302,8 @@
   "Refuse graph reads when derived state predates the current evidence
   contract. Full analysis intentionally does not call this function."
   [store]
-  (when (= :incompatible (graph-state store))
+  (case (graph-state store)
+    :incompatible
     (throw
      (ex-info
       (str "This project graph uses an incompatible format. "
@@ -239,8 +311,30 @@
       {:exit-code 2
        :type :graph/rebuild-required
        :required-format schema/graph-format-version
-       :metadata (graph-metadata store)})))
+       :metadata (graph-metadata store)}))
+    :unavailable
+    (throw
+     (ex-info
+      (str "The previous full analysis did not finish activating its graph. "
+           "Run `llm-context analyze --full` from the project root to recover.")
+      {:exit-code 2
+       :type :graph/update-incomplete
+       :required-format schema/graph-format-version
+       :metadata (graph-metadata store)}))
+    nil)
   store)
+
+(defn begin-full-replacement!
+  "Persist an unavailable marker before the first mutation of a multi-
+  transaction full replacement. A process interruption therefore leaves an
+  explicit recovery state instead of advertising whatever batches happened
+  to commit as a queryable graph."
+  [store]
+  (d/transact!
+   (:connection store)
+   [{:llm-context/meta-key graph-metadata-key
+     :llm-context/graph-format schema/graph-format-version
+     :llm-context/analyzer-name graph-update-analyzer-name}]))
 
 (defn write-graph-metadata!
   [store {:keys [analyzer-name analyzer-version janet-catalog-version
@@ -350,6 +444,72 @@
          (conj marker))))
    markers))
 
+(defn- eid-attributes
+  [db eid]
+  (d/q '[:find ?attribute ?value
+         :in $ ?entity
+         :where [?entity ?attribute ?value]]
+       db eid))
+
+(defn- stale-attribute-tx
+  "Map upserts do not retract attributes omitted by a newer canonical entity.
+  Explicitly remove those old values while retaining the entity's stable eid."
+  [db entities]
+  (mapcat
+   (fn [entity]
+     (when-let [eid (existing-eid db (entity-identity entity))]
+       (let [desired (schema/with-derived-attributes entity)
+             desired-attributes (set (keys desired))]
+         (keep (fn [[attribute value]]
+                 (when-not (contains? desired-attributes attribute)
+                   [:db/retract eid attribute value]))
+               (eid-attributes db eid)))))
+   entities))
+
+(defn- replacement-retraction-tx
+  "Retract only file-owned identities absent from the proposed replacement.
+  Retained identities are updated in place so Datalevin never sees
+  retractEntity and an upsert of the same unique identity in one transaction."
+  [db file-id asserted-identities]
+  (let [{:keys [owned inbound]} (file-retraction-plan db file-id)
+        identity-by-eid
+        (into {}
+              (keep (fn [eid]
+                      (when-let [identity
+                                 (entity-identity (d/pull db '[*] eid))]
+                        [eid identity])))
+              owned)
+        removed-symbol-eids
+        (set
+         (keep (fn [[eid identity]]
+                 (when (and (= :symbol/id (first identity))
+                            (not (contains? asserted-identities identity)))
+                   eid))
+               identity-by-eid))
+        removed-owned
+        (keep (fn [[eid identity]]
+                (when-not (contains? asserted-identities identity)
+                  eid))
+              identity-by-eid)
+        removed-inbound
+        (keep (fn [[edge target]]
+                (when (contains? removed-symbol-eids target)
+                  edge))
+              inbound)]
+    (mapv (fn [eid] [:db/retractEntity eid])
+          (distinct (concat removed-owned removed-inbound)))))
+
+(defn- file-replacement-tx
+  [db file entities]
+  (let [all-entities (vec (cons file entities))
+        asserted-identities (set (map entity-identity all-entities))
+        retractions
+        (replacement-retraction-tx db (:file/id file)
+                                   asserted-identities)
+        stale-attributes (stale-attribute-tx db all-entities)
+        assertions (entities->tx db all-entities #{})]
+    (vec (concat retractions stale-attributes assertions))))
+
 (defrecord DatalevinStore [connection path]
   GraphStore
   (database [_] (d/db connection))
@@ -357,7 +517,8 @@
   (transact! [_ entities]
     (doseq [entity entities]
       (schema/validate-entity! entity))
-    (validate-edge-targets! (d/db connection) entities false)
+    (validate-identities! entities)
+    (validate-relationships! (d/db connection) entities false)
     (when (seq entities)
       (d/transact! connection (entities->tx (d/db connection) entities #{}))))
 
@@ -371,9 +532,9 @@
                       {:batch-size batch-size})))
     (doseq [entity entities]
       (schema/validate-entity! entity))
-    (validate-edge-targets! (d/db connection) entities true)
+    (validate-identities! entities)
+    (validate-relationships! (d/db connection) entities true)
     (let [ordered (vec (dependency-order entities))
-          _ (validate-identities! ordered)
           existing (vec (d/q '[:find [?entity ...]
                                :where [?entity :entity/type _]]
                              (d/db connection)))]
@@ -390,33 +551,45 @@
     (schema/validate-entity! file)
     (doseq [entity entities]
       (schema/validate-entity! entity))
-    (validate-edge-targets! (d/db connection) entities false)
+    (validate-file-ownership! file entities)
     (let [db (d/db connection)
-          preserved (set (keep :symbol/id entities))
-          retractions (retract-owned-tx db (:file/id file) preserved)
           all-entities (vec (cons file entities))
-          force-new (set (remove #(and (= :symbol/id (first %))
-                                       (contains? preserved (second %)))
-                                 (map entity-identity entities)))
-          assertions (entities->tx db all-entities force-new)]
-      (d/transact! connection (into retractions assertions))))
+          old-symbol-ids
+          (set
+           (d/q '[:find [?id ...]
+                  :in $ ?file-id
+                  :where
+                  [?file :file/id ?file-id]
+                  [?symbol :symbol/file ?file]
+                  [?symbol :symbol/id ?id]]
+                db (:file/id file)))
+          _ (validate-identities! all-entities)
+          _ (validate-relationships! db all-entities false old-symbol-ids)
+          tx (file-replacement-tx db file entities)]
+      (d/transact! connection tx)))
 
   (replace-file-and-mark! [_ file entities dirty-markers]
     (schema/validate-entity! file)
     (doseq [entity entities]
       (schema/validate-entity! entity))
-    (validate-edge-targets! (d/db connection) entities false)
+    (validate-file-ownership! file entities)
     (let [db (d/db connection)
-          preserved (set (keep :symbol/id entities))
-          retractions (retract-owned-tx db (:file/id file) preserved)
           all-entities (vec (cons file entities))
-          force-new (set (remove #(and (= :symbol/id (first %))
-                                       (contains? preserved (second %)))
-                                 (map entity-identity entities)))
-          assertions (entities->tx db all-entities force-new)
+          old-symbol-ids
+          (set
+           (d/q '[:find [?id ...]
+                  :in $ ?file-id
+                  :where
+                  [?file :file/id ?file-id]
+                  [?symbol :symbol/file ?file]
+                  [?symbol :symbol/id ?id]]
+                db (:file/id file)))
+          _ (validate-identities! all-entities)
+          _ (validate-relationships! db all-entities false old-symbol-ids)
+          graph-tx (file-replacement-tx db file entities)
           markers (dirty-marker-tx db dirty-markers)]
       (d/transact! connection
-                   (vec (concat retractions assertions markers)))))
+                   (vec (concat graph-tx markers)))))
 
   (delete-file! [_ file-id]
     (let [db (d/db connection)

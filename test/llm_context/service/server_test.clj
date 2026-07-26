@@ -1,12 +1,15 @@
 (ns llm-context.service.server-test
   (:require [clojure.test :refer [deftest is]]
+            [llm-context.analysis.full :as full]
+            [llm-context.analysis.incremental :as incremental]
             [llm-context.query :as query]
             [llm-context.semantic.fake-index :as fake]
             [llm-context.semantic.worker :as semantic-worker]
             [llm-context.project :as project]
             [llm-context.service.client :as client]
             [llm-context.service.server :as server]
-            [llm-context.service.transport :as transport])
+            [llm-context.service.transport :as transport]
+            [llm-context.store :as store])
   (:import [java.nio.file Files LinkOption]))
 
 (defn- await-service [project]
@@ -189,6 +192,38 @@
         (is (= {:ok true :value :stopping}
                (client/request project {:op :stop})))
         (is (not= ::timeout (deref running 5000 ::timeout)))))))
+
+(deftest graph-reads-wait-for-analysis-activation
+  (let [graph (Object.)
+        entered-analysis (promise)
+        release-analysis (promise)
+        entered-query (promise)
+        runtime-state (atom {})]
+    (with-redefs [incremental/index-present? (constantly false)
+                  full/analyze!
+                  (fn [& _]
+                    (deliver entered-analysis true)
+                    @release-analysis
+                    {:mode :full})
+                  store/assert-query-compatible! identity
+                  query/stats
+                  (fn [_]
+                    (deliver entered-query true)
+                    {:entities 0})]
+      (let [analysis
+            (future
+              (#'server/dispatch nil {} graph runtime-state
+                                 {:op :analyze :full? true}))]
+        (is (= true (deref entered-analysis 1000 false)))
+        (let [read
+              (future
+                (#'server/dispatch nil {} graph runtime-state
+                                   {:op :query :subcommand "stats" :args []}))]
+          (is (= ::blocked (deref entered-query 100 ::blocked)))
+          (deliver release-analysis true)
+          (is (= {:mode :full} (deref analysis 1000 ::timeout)))
+          (is (= true (deref entered-query 1000 false)))
+          (is (= {:entities 0} (deref read 1000 ::timeout))))))))
 
 (deftest unreadable-service-response-is-an-explicit-protocol-error
   (let [root (Files/createTempDirectory

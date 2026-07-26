@@ -76,6 +76,7 @@
 (defn- analyze! [graph project settings force-full?]
   (locking graph
     (if (and (not force-full?)
+             (= :ready (store/graph-state graph))
              (incremental/index-present? graph))
       (incremental/analyze! graph project settings)
       (full/analyze! graph project settings service-progress!))))
@@ -85,24 +86,27 @@
     (case (:op request)
     :ping :pong
     :analyze (analyze! graph project settings (:full? request))
-    :query (do
+    :query (locking graph
              (store/assert-query-compatible! graph)
              (query-value graph (:client runtime) settings
                           (:subcommand request) (:args request)))
     :context
-    (let [_ (store/assert-query-compatible! graph)
-          packet (context/build graph (:options request))]
-      (if (= :markdown (get-in request [:options :format]))
-        (context/markdown packet)
-        packet))
-    :export (do
+    (locking graph
+      (store/assert-query-compatible! graph)
+      (let [packet (context/build graph (:options request))]
+        (if (= :markdown (get-in request [:options :format]))
+          (context/markdown packet)
+          packet)))
+    :export (locking graph
               (store/assert-query-compatible! graph)
               (export/render graph (:format request)))
-    :semantic-status (semantic-status graph runtime)
+    :semantic-status (locking graph (semantic-status graph runtime))
     :semantic-failures
-    (semantic-state/failure-records graph semantic-reconcile/provider)
+    (locking graph
+      (semantic-state/failure-records graph semantic-reconcile/provider))
     :semantic-dirty
-    (semantic-state/dirty-details graph semantic-reconcile/provider)
+    (locking graph
+      (semantic-state/dirty-details graph semantic-reconcile/provider))
     :semantic-retry-failed
     (locking graph
       (semantic-reconcile/retry-failed! graph project settings)
@@ -133,8 +137,10 @@
             {:ok true :value
              (dispatch project settings graph runtime-state request)}
             (catch Throwable error
-              {:ok false :error (.getMessage error)
-               :exit-code (or (:exit-code (ex-data error)) 1)}))]
+              (cond-> {:ok false :error (.getMessage error)
+                       :exit-code (or (:exit-code (ex-data error)) 1)}
+                (:type (ex-data error))
+                (assoc :type (:type (ex-data error))))))]
       (.println writer (pr-str response))
       (and (:ok response) (= :stop (:op request))))))
 

@@ -1,6 +1,8 @@
 (ns llm-context.analysis.full-test
   (:require [clojure.test :refer [deftest is]]
+            [llm-context.analysis.files :as analysis-files]
             [llm-context.analysis.full :as full]
+            [llm-context.analysis.project-analyzer :as project-analyzer]
             [llm-context.config :as config]
             [llm-context.project :as project]
             [llm-context.store :as store])
@@ -25,6 +27,65 @@
            clojure.lang.ExceptionInfo #"invalid snapshot"
            (#'full/persist! :graph {} invalid nil)))
       (is (false? @reset-called?)))))
+
+(deftest failed-graph-replacement-keeps-semantic-state-and-unavailable-marker
+  (let [project (project/context
+                 (str (Files/createTempDirectory
+                       "llm-context-full-failure-"
+                       (make-array java.nio.file.attribute.FileAttribute 0))))
+        settings (assoc-in (config/defaults) [:semantic :providers] [])
+        file {:entity/type :entity.type/file
+              :file/id "file:src/a.clj"
+              :file/path "src/a.clj"
+              :file/language :language/clojure
+              :file/content-hash (str "sha256:" (apply str (repeat 64 "0")))
+              :file/size 0
+              :file/modified-at 1}
+        reset-called? (atom false)]
+    (store/with-store [graph project settings]
+      (with-redefs [store/reset-semantic-state!
+                    (fn [_] (reset! reset-called? true))]
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo #"interrupted write"
+             (#'full/persist!
+              graph settings [file]
+              (fn [_] (throw (ex-info "interrupted write" {})))))))
+      (is (false? @reset-called?))
+      (is (= :unavailable (store/graph-state graph))))))
+
+(deftest preserved-analyzer-output-aborts-before-persistence
+  (let [project (project/context
+                 (str (Files/createTempDirectory
+                       "llm-context-full-preserve-"
+                       (make-array java.nio.file.attribute.FileAttribute 0))))
+        settings (assoc-in (config/defaults) [:semantic :providers] [])
+        file {:entity/type :entity.type/file
+              :file/id "file:src/broken.janet"
+              :file/path "src/broken.janet"
+              :file/language :language/janet
+              :file/content-hash (str "sha256:" (apply str (repeat 64 "0")))
+              :file/size 1
+              :file/modified-at 1}
+        output {:file file :entities []
+                :preserve? true
+                :diagnostics [{:level :warning :kind :parse-error
+                               :file "src/broken.janet"}]}
+        persisted? (atom false)]
+    (with-redefs [analysis-files/discover
+                  (fn [& _] {:files [{:relative-path "src/broken.janet"}]
+                             :diagnostics []})
+                  project-analyzer/analyze
+                  (fn [& _] {:outputs [output] :diagnostics []})
+                  store/validate-replacement!
+                  (fn [& _] (reset! persisted? true))]
+      (let [error
+            (try
+              (full/analyze! project settings)
+              nil
+              (catch clojure.lang.ExceptionInfo error error))]
+        (is (= :analysis/incomplete-snapshot (:type (ex-data error))))
+        (is (= ["src/broken.janet"] (:files (ex-data error))))
+        (is (false? @persisted?))))))
 
 (deftest complete-analysis-persists-and-removes-files
   (let [root (Files/createTempDirectory "llm-context-full-"

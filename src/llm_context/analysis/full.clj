@@ -20,12 +20,18 @@
   ;; new graph appear complete merely because an older index was complete.
   ;; Preflight the entire replacement before changing either state domain.
   (store/validate-replacement! graph entities)
-  (store/reset-semantic-state! graph)
+  (store/begin-full-replacement! graph)
   (store/replace-all! graph entities
                       {:batch-size persistence-batch-size
                        :on-progress
                        (when progress
                          #(emit! progress :persist-progress %))})
+  ;; Only reset versioned semantic state after the canonical graph has
+  ;; completely landed. If graph persistence fails, the unavailable marker is
+  ;; durable and the previous semantic recovery records remain intact.
+  (store/reset-semantic-state! graph)
+  (when (semantic-reconcile/enabled? config)
+    (semantic-reconcile/mark-full! graph))
   (let [lateon (get-in config [:semantic :lateon-code])]
     (store/write-graph-metadata!
      graph
@@ -34,8 +40,7 @@
       :janet-catalog-version janet/catalog-version
       :semantic-document-version (:document-version lateon)
       :semantic-index-name (:index-name lateon)}))
-  (when (semantic-reconcile/enabled? config)
-    (semantic-reconcile/mark-full! graph)))
+  nil)
 
 (defn analyze!
   "Perform a complete project scan and replace Datalevin facts in bounded
@@ -62,8 +67,20 @@
                        :file (some-> files first :relative-path)})
              project-snapshot (project-analyzer/analyze project files)
              extracted (:outputs project-snapshot)
+             preserved (filterv :preserve? extracted)
              _ (emit! progress :parse-complete
                       {:completed total :total total})
+             _ (when (seq preserved)
+                 (throw
+                  (ex-info
+                   "Full analysis produced an incomplete snapshot; existing graph was preserved"
+                   {:exit-code 1
+                    :type :analysis/incomplete-snapshot
+                    :files (mapv (comp :file/path :file) preserved)
+                    :diagnostics
+                    (vec (concat diagnostics
+                                 (:diagnostics project-snapshot)
+                                 (mapcat :diagnostics preserved)))})))
              all-entities (vec (mapcat (fn [{:keys [file entities]}]
                                          (cons file entities))
                                        extracted))

@@ -33,6 +33,11 @@
      :symbol/qualified-name name
      :symbol/kind :symbol.kind/function
      :symbol/file (:file/id file)
+     :symbol/platform :clj
+     :symbol/analyzer :test
+     :symbol/scope :scope/top-level
+     :symbol/role :role/definition
+     :symbol/indexable? true
      :symbol/signature "[]"
      :source/start-line line :source/start-column 1
      :source/end-line line :source/end-column 10}))
@@ -140,6 +145,76 @@
                                  :where [?entity :entity/type _]]
                                []))))))
 
+(deftest retained-file-facts-update-in-place-and-remove-stale-attributes
+  (let [project (temp-project)
+        file (file-entity "src/a.clj" "old")
+        target-file (file-entity "src/target.clj" "target")
+        symbol (assoc (symbol-entity file "sample/a" 1)
+                      :symbol/doc "old documentation")
+        target (symbol-entity target-file "sample/target" 1)
+        edge {:entity/type :entity.type/edge
+              :edge/id "edge:retained"
+              :edge/kind :edge.kind/calls
+              :edge/from (:symbol/id symbol)
+              :edge/to (:symbol/id target)
+              :edge/target-text "sample/target"
+              :edge/resolution :resolution/exact
+              :edge/confidence 1.0
+              :edge/evidence :test-exact
+              :source/snippet "(target)"}
+        reference {:entity/type :entity.type/reference
+                   :reference/id "reference:retained"
+                   :reference/symbol (:symbol/id symbol)
+                   :reference/kind :edge.kind/calls
+                   :reference/target-text "dynamic-target"
+                   :reference/classification :dynamic
+                   :reference/evidence :test-dynamic
+                   :source/snippet "(dynamic-target)"}
+        effect {:entity/type :entity.type/effect
+                :effect/id "effect:retained"
+                :effect/kind :effect.kind/logging
+                :effect/symbol (:symbol/id symbol)
+                :effect/detail "old detail"
+                :effect/confidence 1.0
+                :source/snippet "(println value)"}
+        new-file (file-entity "src/a.clj" "new")
+        new-symbol (dissoc symbol :symbol/doc)
+        new-edge (dissoc edge :source/snippet)
+        new-reference (dissoc reference :source/snippet)
+        new-effect (-> effect
+                       (assoc :effect/detail "new detail")
+                       (dissoc :source/snippet))]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-file! graph target-file [target])
+      (store/replace-file! graph file [symbol edge reference effect])
+      (store/replace-file! graph new-file
+                           [new-symbol new-edge new-reference new-effect])
+      (is (= #{["edge:retained"]
+               ["reference:retained"]
+               ["effect:retained"]}
+             (set
+              (store/query
+               graph
+               '[:find ?identity
+                 :where
+                 (or [_ :edge/id ?identity]
+                     [_ :reference/id ?identity]
+                     [_ :effect/id ?identity])]
+               []))))
+      (is (empty?
+           (store/query
+            graph
+            '[:find ?value
+              :where
+              (or [_ :symbol/doc ?value]
+                  [_ :source/snippet ?value])]
+            [])))
+      (is (= #{["new detail"]}
+             (store/query
+              graph
+              '[:find ?detail :where [_ :effect/detail ?detail]]
+              []))))))
+
 (deftest file-mutations-can-atomically-assert-semantic-dirty-markers
   (let [project (temp-project)
         file (file-entity "src/a.clj" "old")
@@ -239,8 +314,96 @@
     (store/with-store [graph project (config/defaults)]
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo
-           #"Exact graph edge targets do not exist"
+           #"relationships refer to missing owners or targets"
            (store/replace-all! graph [file source edge]))))))
+
+(deftest every-canonical-relationship-requires-an-asserted-owner
+  (let [project (temp-project)
+        file (file-entity "src/a.clj" "source")
+        symbol (symbol-entity file "sample/source" 1)
+        missing-file-symbol
+        (assoc symbol :symbol/id "symbol:missing-file-owner"
+               :symbol/file "file:missing")
+        missing-from
+        {:entity/type :entity.type/edge
+         :edge/id "edge:missing-from"
+         :edge/kind :edge.kind/calls
+         :edge/from "symbol:missing"
+         :edge/to (:symbol/id symbol)
+         :edge/target-text "sample/source"
+         :edge/resolution :resolution/exact
+         :edge/confidence 1.0
+         :edge/evidence :test-exact}
+        missing-reference
+        {:entity/type :entity.type/reference
+         :reference/id "reference:missing-owner"
+         :reference/symbol "symbol:missing"
+         :reference/kind :edge.kind/calls
+         :reference/target-text "dynamic"
+         :reference/classification :dynamic
+         :reference/evidence :test-dynamic}
+        missing-effect
+        {:entity/type :entity.type/effect
+         :effect/id "effect:missing-owner"
+         :effect/kind :effect.kind/logging
+         :effect/symbol "symbol:missing"
+         :effect/detail "fixture"
+         :effect/confidence 1.0}]
+    (store/with-store [graph project (config/defaults)]
+      (doseq [snapshot [[file missing-file-symbol]
+                        [file symbol missing-from]
+                        [file missing-reference]
+                        [file missing-effect]]]
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"relationships refer to missing owners or targets"
+             (store/validate-replacement! graph snapshot)))))))
+
+(deftest file-replacement-rejects-facts-owned-by-another-file
+  (let [project (temp-project)
+        file-a (file-entity "src/a.clj" "a")
+        file-b (file-entity "src/b.clj" "b")
+        symbol-a (symbol-entity file-a "sample/a" 1)
+        symbol-b (symbol-entity file-b "sample/b" 1)
+        edge {:entity/type :entity.type/edge
+              :edge/id "edge:foreign-owner"
+              :edge/kind :edge.kind/calls
+              :edge/from (:symbol/id symbol-b)
+              :edge/to (:symbol/id symbol-a)
+              :edge/target-text "sample/a"
+              :edge/resolution :resolution/exact
+              :edge/confidence 1.0
+              :edge/evidence :test-exact}]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-file! graph file-a [symbol-a])
+      (store/replace-file! graph file-b [symbol-b])
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"facts owned by another file"
+           (store/replace-file! graph file-a [symbol-a edge]))))))
+
+(deftest interrupted-full-replacement-is-explicitly-unavailable-until-activation
+  (let [project (temp-project)
+        settings (config/defaults)
+        file (file-entity "src/a.clj" "source")
+        symbol (symbol-entity file "sample/source" 1)]
+    (store/with-store [graph project settings]
+      (store/replace-all! graph [file symbol])
+      (store/begin-full-replacement! graph)
+      (is (= :unavailable (store/graph-state graph)))
+      (is (= :graph/update-incomplete
+             (try
+               (store/assert-query-compatible! graph)
+               nil
+               (catch clojure.lang.ExceptionInfo error
+                 (:type (ex-data error))))))
+      (store/write-graph-metadata!
+       graph {:analyzer-name "fixture"
+              :analyzer-version "1"
+              :janet-catalog-version "1.41.2"
+              :semantic-document-version 2
+              :semantic-index-name "llm-context-v2"})
+      (is (= :ready (store/graph-state graph))))))
 
 (deftest incremental-topic-cleanup-retracts-only-unreferenced-topics
   (let [project (temp-project)
