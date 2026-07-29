@@ -7,6 +7,41 @@
             [llm-context.store :as store])
   (:import [java.nio.file Files]))
 
+(deftest intent-focus-selects-one-seed-and-retains-bounded-alternatives
+  (let [results
+        (mapv (fn [index]
+                {:id (str "symbol:" index)
+                 :qualified-name (str "fixture/symbol-" index)
+                 :matched-by (if (zero? index) #{:lateon :fts} #{:lateon})
+                 :score (/ 1.0 (inc index))})
+              (range 7))
+        retrieval {:status :ok :latency-ms 12}
+        resolution
+        (context/resolve-intent-focus
+         "where is retry handled?"
+         {:results results :retrieval retrieval})]
+    (is (= :intent (:mode resolution)))
+    (is (= :hybrid (:strategy resolution)))
+    (is (= ["symbol:0"] (mapv :id (:selected resolution))))
+    (is (= ["symbol:1" "symbol:2" "symbol:3" "symbol:4"]
+           (mapv :id (:alternatives resolution))))
+    (is (= retrieval (:retrieval resolution))))
+  (is (= :lexical-fallback
+         (:strategy
+          (context/resolve-intent-focus
+           "retry"
+           {:results [{:id "symbol:retry"
+                       :qualified-name "fixture/retry"
+                       :matched-by #{:fts}
+                       :score 0.1}]
+            :retrieval {:status :unavailable}}))))
+  (is (thrown-with-msg?
+       clojure.lang.ExceptionInfo
+       #"No symbol matches context intent"
+       (context/resolve-intent-focus
+        "missing intent"
+        {:results [] :retrieval {:status :no-matches}}))))
+
 (deftest context-packets-are-focused-depth-bounded-and-renderable
   (let [root (Files/createTempDirectory "llm-context-packet-"
                                         (make-array java.nio.file.attribute.FileAttribute 0))
@@ -40,10 +75,37 @@
     (store/with-store [graph project (config/defaults)]
       (store/replace-file! graph file entities)
       (let [packet (context/build graph {:focus "a" :depth 1 :max-tokens 1000})]
+        (is (= 3 (:packet/version packet)))
+        (is (= :exact (get-in packet [:focus-resolution :strategy])))
+        (is (= ["symbol:a"]
+               (mapv :id (get-in packet [:focus-resolution :selected]))))
         (is (= #{"symbol:a" "symbol:b"} (set (map :id (:symbols packet)))))
         (is (not-any? #(= "symbol:c" (:id %)) (:symbols packet)))
         (is (re-find #"Code context: a" (context/markdown packet)))
-        (is (<= (get-in packet [:budget :estimated-tokens]) 1000))))))
+        (is (re-find #"Focus resolution: exact"
+                     (context/markdown packet)))
+        (is (<= (get-in packet [:budget :estimated-tokens]) 1000)))
+      (let [resolution
+            {:mode :intent
+             :strategy :hybrid
+             :selected [{:id "symbol:a" :rank 1 :matched-by #{:lateon}}]
+             :alternatives [{:id "symbol:c" :rank 2
+                             :matched-by #{:lateon}}]}
+            packet
+            (context/build-from-seeds
+             graph {:focus "entry behavior" :depth 1 :max-tokens 1000}
+             resolution)]
+        (is (= resolution (:focus-resolution packet)))
+        (is (= #{"symbol:a" "symbol:b"} (set (map :id (:symbols packet)))))
+        (is (not-any? #(= "symbol:c" (:id %)) (:symbols packet))))
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"unknown symbols"
+           (context/build-from-seeds
+            graph {:focus "missing" :depth 1 :max-tokens 1000}
+            {:mode :intent :strategy :hybrid
+             :selected [{:id "symbol:missing"}]
+             :alternatives []}))))))
 
 (deftest disconnected-symbols-do-not-enter-focused-context
   (let [root (Files/createTempDirectory

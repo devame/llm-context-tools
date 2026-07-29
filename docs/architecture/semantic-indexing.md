@@ -132,6 +132,13 @@ If NextPlaid is unavailable, loading, unhealthy, or exceeds its query timeout,
 the command returns Datalevin results. Semantic retrieval is an enhancement,
 not a command availability dependency.
 
+Natural-language context requests reuse the same retrieval and freshness
+checks. The highest-ranked accepted symbol becomes the sole zero-cost context
+seed; a bounded set of alternatives is retained only as provenance. Semantic
+scores never add graph edges or change traversal costs. Context expansion
+continues over exact canonical relationships, and an unavailable semantic
+runtime degrades to Datalevin lexical seed resolution.
+
 ## Process model
 
 The first implementation uses one project-scoped `llm-context` coordinator and

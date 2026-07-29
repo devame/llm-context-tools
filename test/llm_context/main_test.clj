@@ -30,6 +30,15 @@
                         #"requires a path"
                         (cli/parse-args ["analyze" "--project"]))))
 
+(deftest context-intent-argument-parsing
+  (is (= {:intent? true
+          :focus "where is authentication handled?"
+          :max-tokens 2000}
+         (#'cli/parse-context-args
+          ["--intent" "where is authentication handled?"
+           "--max-tokens" "2000"]
+          {}))))
+
 (deftest analysis-progress-is-timestamped-and-counted
   (let [output
         (with-out-str

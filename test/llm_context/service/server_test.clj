@@ -2,6 +2,7 @@
   (:require [clojure.test :refer [deftest is]]
             [llm-context.analysis.full :as full]
             [llm-context.analysis.incremental :as incremental]
+            [llm-context.context :as context]
             [llm-context.query :as query]
             [llm-context.semantic.fake-index :as fake]
             [llm-context.semantic.worker :as semantic-worker]
@@ -103,6 +104,39 @@
            (client/request project {:op :stop})))
     (is (not= ::timeout (deref running 5000 ::timeout)))
     (is (:closed? (fake/snapshot semantic-index)))))
+
+(deftest semantic-status-remains-readable-while-worker-processes-a-batch
+  (let [root (Files/createTempDirectory
+              "llm-context-semantic-status-concurrent-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        project (project/context (str root))
+        semantic-index (fake/create)
+        entered (promise)
+        release (promise)
+        runtime-factory (fn [_ _]
+                          {:status :ready
+                           :endpoint "http://127.0.0.1:12345"
+                           :client semantic-index})]
+    (with-redefs [semantic-worker/process-once!
+                  (fn [_]
+                    (deliver entered true)
+                    @release
+                    {:leased 0 :completed 0 :retried 0
+                     :failed 0 :superseded 0})]
+      (let [running (future
+                      (with-out-str
+                        (server/start! project
+                                       {:runtime-factory runtime-factory})))]
+        (is (= true (deref entered 5000 false)))
+        (let [status (client/request project {:op :semantic-status}
+                                     {:request-timeout 1000})]
+          (is (= true (:ok status)))
+          (is (= 0 (get-in status [:value :pending])))
+          (is (= :ready (get-in status [:value :runtime :status]))))
+        (deliver release true)
+        (is (= {:ok true :value :stopping}
+               (client/request project {:op :stop})))
+        (is (not= ::timeout (deref running 5000 ::timeout)))))))
 
 (deftest project-lock-prevents-a-second-unreachable-service-owner
   (let [root (Files/createTempDirectory
@@ -224,6 +258,74 @@
           (is (= {:mode :full} (deref analysis 1000 ::timeout)))
           (is (= true (deref entered-query 1000 false)))
           (is (= {:entities 0} (deref read 1000 ::timeout))))))))
+
+(deftest semantic-retrieval-does-not-hold-the-graph-lock
+  (let [graph (Object.)
+        entered-retrieval (promise)
+        release-retrieval (promise)
+        acquired-graph (promise)
+        runtime-state (atom {:client :semantic-client})]
+    (with-redefs [query/semantic-search-attempt
+                  (fn [_ _ _]
+                    (deliver entered-retrieval true)
+                    @release-retrieval
+                    {:status :unavailable :candidates [] :latency-ms 0})
+                  store/assert-query-compatible! identity
+                  query/search-explain-with-attempt
+                  (fn [& _] {:results []})]
+      (let [search
+            (future
+              (#'server/dispatch nil {} graph runtime-state
+                                 {:op :query :subcommand "search"
+                                  :args ["semantic intent"]}))]
+        (is (= true (deref entered-retrieval 1000 false)))
+        (future
+          (locking graph
+            (deliver acquired-graph true)))
+        (is (= true (deref acquired-graph 1000 false)))
+        (deliver release-retrieval true)
+        (is (= {:results []} (deref search 1000 ::timeout)))))))
+
+(deftest intent-context-resolves-a-hybrid-seed-before-traversal
+  (let [graph (Object.)
+        runtime-state (atom {:client :semantic-client})
+        seen (atom nil)
+        attempt {:status :ok :candidates [:candidate] :latency-ms 4}
+        search
+        {:results [{:id "symbol:selected"
+                    :qualified-name "fixture/selected"
+                    :matched-by #{:lateon}
+                    :score 0.5}
+                   {:id "symbol:alternative"
+                    :qualified-name "fixture/alternative"
+                    :matched-by #{:lateon}
+                    :score 0.4}]
+         :retrieval {:status :ok :latency-ms 4}}]
+    (with-redefs [query/semantic-search-attempt
+                  (fn [client _ term]
+                    (is (= :semantic-client client))
+                    (is (= "where is selection handled?" term))
+                    attempt)
+                  query/search-explain-with-attempt
+                  (fn [_ _ term actual-attempt]
+                    (is (= "where is selection handled?" term))
+                    (is (= attempt actual-attempt))
+                    search)
+                  context/build-from-seeds
+                  (fn [_ options resolution]
+                    (reset! seen {:options options :resolution resolution})
+                    {:packet/version 3})
+                  store/assert-query-compatible! identity]
+      (is (= {:packet/version 3}
+             (#'server/dispatch
+              nil {} graph runtime-state
+              {:op :context
+               :options {:focus "where is selection handled?"
+                         :intent? true :format :edn}})))
+      (is (= ["symbol:selected"]
+             (mapv :id (get-in @seen [:resolution :selected]))))
+      (is (= ["symbol:alternative"]
+             (mapv :id (get-in @seen [:resolution :alternatives])))))))
 
 (deftest unreadable-service-response-is-an-explicit-protocol-error
   (let [root (Files/createTempDirectory

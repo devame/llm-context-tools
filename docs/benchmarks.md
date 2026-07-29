@@ -54,10 +54,12 @@ IDs/names:
   :expected ["authenticate-user" "auth.core/authenticate-user"]}]
 ```
 
-The harness requires a running, synchronized project service and reports
-recall-at-k, the fraction of queries with LateOn candidates, mean/p50/p95/max
-latency, and misses. Keep the same graph, model revision, query set, and
-hardware when comparing changes.
+The harness requires a running, synchronized project service. For every query
+it evaluates both hybrid search and `context --intent`, reporting search
+recall-at-k, context seed recall-at-1, final packet recall, LateOn query/seed
+rates, separate search and end-to-end context latency distributions, misses,
+and context errors. Keep the same graph, model revision, query set, context
+budget, and hardware when comparing changes.
 
 Benchmark output is descriptive rather than a universal release gate because
 filesystem location, JDK, native architecture, and project language mix have

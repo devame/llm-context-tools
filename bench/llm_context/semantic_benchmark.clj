@@ -16,23 +16,52 @@
   (let [identities (set ((juxt :id :name :qualified-name) result))]
     (boolean (some identities expected))))
 
+(defn- elapsed-ms [started]
+  (/ (- (System/nanoTime) started) 1000000.0))
+
 (defn- run-query [project {:keys [query expected]}]
-  (let [started (System/nanoTime)
-        response (client/request project
-                                 {:op :query :subcommand "search"
-                                  :args [query]})
-        milliseconds (/ (- (System/nanoTime) started) 1000000.0)]
-    (when-not (:ok response)
-      (throw (ex-info (or (:error response)
+  (let [search-started (System/nanoTime)
+        search-response
+        (client/request project
+                        {:op :query :subcommand "search"
+                         :args [query]})
+        search-ms (elapsed-ms search-started)]
+    (when-not (:ok search-response)
+      (throw (ex-info (or (:error search-response)
                           "Project service is not reachable")
-                      {:query query :response response})))
-    (let [results (:value response)]
+                      {:query query :response search-response})))
+    (let [search-value (:value search-response)
+          results (if (map? search-value)
+                    (:results search-value)
+                    search-value)
+          context-started (System/nanoTime)
+          context-response
+          (client/request project
+                          {:op :context
+                           :options {:focus query
+                                     :intent? true
+                                     :format :edn
+                                     :depth 4
+                                     :max-tokens 2000}})
+          context-ms (elapsed-ms context-started)
+          packet (when (:ok context-response) (:value context-response))
+          expected (set expected)
+          selected (get-in packet [:focus-resolution :selected])
+          packet-symbols (:symbols packet)]
       {:query query
-       :milliseconds milliseconds
-       :hit? (boolean (some #(expected? % (set expected)) results))
+       :search-ms search-ms
+       :context-ms context-ms
+       :search-hit? (boolean (some #(expected? % expected) results))
+       :seed-hit? (boolean (some #(expected? % expected) selected))
+       :packet-hit? (boolean (some #(expected? % expected) packet-symbols))
        :lateon? (boolean
                  (some #(contains? (:matched-by %) :lateon) results))
-       :result-count (count results)})))
+       :seed-lateon?
+       (boolean
+        (some #(contains? (:matched-by %) :lateon) selected))
+       :result-count (count results)
+       :context-error (when-not (:ok context-response)
+                        (:error context-response))})))
 
 (defn -main [& [project-path query-path]]
   (when-not (and project-path query-path)
@@ -59,17 +88,35 @@
         "Query set must be a non-empty vector of {:query string :expected [...]}"
         {:exit-code 2})))
     (let [results (mapv #(run-query project %) queries)
-          times (mapv :milliseconds results)
-          count (count results)]
+          search-times (mapv :search-ms results)
+          context-times (mapv :context-ms results)
+          query-count (count results)]
       (prn
-       {:benchmark/version 1
-        :queries count
-        :recall-at-k (/ (count (filter :hit? results)) (double count))
+       {:benchmark/version 2
+        :queries query-count
+        :search-recall-at-k
+        (/ (count (filter :search-hit? results)) (double query-count))
+        :context-seed-recall-at-1
+        (/ (count (filter :seed-hit? results)) (double query-count))
+        :context-packet-recall
+        (/ (count (filter :packet-hit? results)) (double query-count))
         :lateon-query-rate
-        (/ (count (filter :lateon? results)) (double count))
-        :latency-ms
-        {:mean (/ (reduce + times) count)
-         :p50 (percentile times 0.50)
-         :p95 (percentile times 0.95)
-         :max (apply max times)}
-        :misses (mapv :query (remove :hit? results))}))))
+        (/ (count (filter :lateon? results)) (double query-count))
+        :lateon-seed-rate
+        (/ (count (filter :seed-lateon? results)) (double query-count))
+        :search-latency-ms
+        {:mean (/ (reduce + search-times) query-count)
+         :p50 (percentile search-times 0.50)
+         :p95 (percentile search-times 0.95)
+         :max (apply max search-times)}
+        :context-latency-ms
+        {:mean (/ (reduce + context-times) query-count)
+         :p50 (percentile context-times 0.50)
+         :p95 (percentile context-times 0.95)
+         :max (apply max context-times)}
+        :search-misses (mapv :query (remove :search-hit? results))
+        :seed-misses (mapv :query (remove :seed-hit? results))
+        :packet-misses (mapv :query (remove :packet-hit? results))
+        :context-errors
+        (mapv #(select-keys % [:query :context-error])
+              (filter :context-error results))}))))
