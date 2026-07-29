@@ -86,6 +86,7 @@ explicit warning.
 
 ```bash
 llm-context context authenticate --depth 3 --max-tokens 4000
+llm-context context --intent "where is authentication failure handled?"
 llm-context context authenticate --format edn
 ```
 
@@ -94,6 +95,12 @@ protocol implementations, and event/state topic bridges. Every selected symbol
 includes the path that admitted it. External and unresolved references consume
 only a compact diagnostic budget. Graph-limit and token-limit truncation are
 reported separately.
+
+`--intent` asks the local LateOn index and Datalevin FTS to resolve a
+natural-language request before traversal. The highest-ranked fresh result is
+the only traversal seed; up to four alternatives are retained as packet
+metadata but are not expanded. If LateOn is unavailable or times out, lexical
+retrieval remains available and the packet records `:lexical-fallback`.
 
 ## Semantic indexing
 

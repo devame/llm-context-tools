@@ -207,6 +207,7 @@
 
 (defn- focus-candidate [rank matched-by symbol]
   {:id (:id symbol)
+   :name (:name symbol)
    :qualified-name (:qualified-name symbol)
    :rank rank
    :matched-by matched-by})
@@ -246,6 +247,7 @@
   (let [candidate
         (fn [rank symbol]
           {:id (:id symbol)
+           :name (:name symbol)
            :qualified-name (:qualified-name symbol)
            :rank rank
            :matched-by (:matched-by symbol)

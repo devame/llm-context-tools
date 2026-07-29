@@ -125,6 +125,7 @@ llm-context query unresolved [--classification unresolved|ambiguous|dynamic|exte
 llm-context query topics|registrations|dispatchers|subscribers
 llm-context query state-readers|state-writers
 llm-context context <name-or-id> [--depth N] [--max-tokens N]
+llm-context context --intent <natural-language-query> [--depth N] [--max-tokens N]
 llm-context export --format edn|json|jsonl|markdown [--output PATH]
 llm-context summary [--output PATH]
 llm-context integrate claude|codex|generic [--force]
@@ -142,6 +143,12 @@ local and model-free. `query search` fuses those lexical results with the local
 LateOn multi-vector index. It preserves exact identifiers, rejects semantic
 candidates whose content hash or model revision is stale, and falls back to
 Datalevin whenever the sidecar is unavailable.
+
+`context --intent` performs that freshness-safe hybrid retrieval first, selects
+only the highest-ranked symbol as the traversal seed, and records up to four
+unexpanded alternatives in the packet. LateOn chooses the likely starting
+symbol; every relationship admitted afterward is still an exact canonical
+graph edge. Without the resident service it falls back to Datalevin retrieval.
 
 `analyze` runs embedded clj-kondo once over the complete Clojure source set and
 a two-pass Tree-sitter AST/module resolver over Janet. Static Clojure topic
