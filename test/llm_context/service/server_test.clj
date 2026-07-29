@@ -258,6 +258,33 @@
           (is (= true (deref entered-query 1000 false)))
           (is (= {:entities 0} (deref read 1000 ::timeout))))))))
 
+(deftest semantic-retrieval-does-not-hold-the-graph-lock
+  (let [graph (Object.)
+        entered-retrieval (promise)
+        release-retrieval (promise)
+        acquired-graph (promise)
+        runtime-state (atom {:client :semantic-client})]
+    (with-redefs [query/semantic-search-attempt
+                  (fn [_ _ _]
+                    (deliver entered-retrieval true)
+                    @release-retrieval
+                    {:status :unavailable :candidates [] :latency-ms 0})
+                  store/assert-query-compatible! identity
+                  query/search-explain-with-attempt
+                  (fn [& _] {:results []})]
+      (let [search
+            (future
+              (#'server/dispatch nil {} graph runtime-state
+                                 {:op :query :subcommand "search"
+                                  :args ["semantic intent"]}))]
+        (is (= true (deref entered-retrieval 1000 false)))
+        (future
+          (locking graph
+            (deliver acquired-graph true)))
+        (is (= true (deref acquired-graph 1000 false)))
+        (deliver release-retrieval true)
+        (is (= {:results []} (deref search 1000 ::timeout)))))))
+
 (deftest unreadable-service-response-is-an-explicit-protocol-error
   (let [root (Files/createTempDirectory
               "llm-context-unreadable-service-"

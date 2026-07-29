@@ -79,14 +79,14 @@
     :timeout
     :error))
 
-(defn search-with-metadata
-  "Fuse lexical results with fresh LateOn candidates and explain semantic
-  availability, latency, raw recall, freshness acceptance, and stale rejects."
-  [graph client config term lexical-results]
+(defn retrieve
+  "Perform only the external semantic retrieval phase. The returned attempt is
+  intentionally graph-independent so callers can keep model and HTTP latency
+  outside graph coordination locks."
+  [client config term]
   (let [lateon (get-in config [:semantic :lateon-code])
-        lexical-ids (vec (keep :id lexical-results))
         started (System/nanoTime)
-        semantic-attempt
+        attempt
         (if (and client (reconcile/enabled? config))
           (try
             {:status :ok
@@ -97,8 +97,18 @@
               {:status (failure-status error)
                :error (or (.getMessage error) (str (class error)))
                :candidates []}))
-          {:status :unavailable :candidates []})
-        latency-ms (long (/ (- (System/nanoTime) started) 1000000))
+          {:status :unavailable :candidates []})]
+    (assoc attempt
+           :latency-ms
+           (long (/ (- (System/nanoTime) started) 1000000)))))
+
+(defn fuse-with-metadata
+  "Fuse lexical results with a completed LateOn retrieval attempt after
+  validating every semantic candidate against current graph state."
+  [graph config term lexical-results semantic-attempt]
+  (let [lateon (get-in config [:semantic :lateon-code])
+        lexical-ids (vec (keep :id lexical-results))
+        latency-ms (:latency-ms semantic-attempt 0)
         raw-semantic-candidates (:candidates semantic-attempt)
         raw-semantic-ids
         (mapv #(get-in % [:metadata :llm_symbol_id])
@@ -160,6 +170,12 @@
               :rejected-stale-candidate-count (- raw-count accepted-count)}
        (:error semantic-attempt)
        (assoc :error (:error semantic-attempt)))}))
+
+(defn search-with-metadata
+  "Compatibility composition of external retrieval and freshness-safe fusion."
+  [graph client config term lexical-results]
+  (fuse-with-metadata graph config term lexical-results
+                      (retrieve client config term)))
 
 (defn search
   "Compatibility result-vector surface for hybrid search."

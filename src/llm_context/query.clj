@@ -157,13 +157,23 @@
     (hybrid/search graph semantic-client config term
                    (symbols graph term candidate-limit))))
 
-(defn search-explain [graph semantic-client config term]
+(defn semantic-search-attempt
+  "Run only the external semantic phase of search."
+  [semantic-client config term]
+  (hybrid/retrieve semantic-client config term))
+
+(defn search-explain-with-attempt
+  "Fuse a completed semantic attempt with current lexical and graph state."
+  [graph config term semantic-attempt]
   (let [candidate-limit (or (get-in config
                                     [:semantic :lateon-code :candidate-count])
                             50)]
-    (hybrid/search-with-metadata
-     graph semantic-client config term
-     (symbols graph term candidate-limit))))
+    (hybrid/fuse-with-metadata
+     graph config term (symbols graph term candidate-limit) semantic-attempt)))
+
+(defn search-explain [graph semantic-client config term]
+  (search-explain-with-attempt
+   graph config term (semantic-search-attempt semantic-client config term)))
 
 (defn callers [graph target]
   (->> (store/query
