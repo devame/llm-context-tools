@@ -40,10 +40,37 @@
     (store/with-store [graph project (config/defaults)]
       (store/replace-file! graph file entities)
       (let [packet (context/build graph {:focus "a" :depth 1 :max-tokens 1000})]
+        (is (= 3 (:packet/version packet)))
+        (is (= :exact (get-in packet [:focus-resolution :strategy])))
+        (is (= ["symbol:a"]
+               (mapv :id (get-in packet [:focus-resolution :selected]))))
         (is (= #{"symbol:a" "symbol:b"} (set (map :id (:symbols packet)))))
         (is (not-any? #(= "symbol:c" (:id %)) (:symbols packet)))
         (is (re-find #"Code context: a" (context/markdown packet)))
-        (is (<= (get-in packet [:budget :estimated-tokens]) 1000))))))
+        (is (re-find #"Focus resolution: exact"
+                     (context/markdown packet)))
+        (is (<= (get-in packet [:budget :estimated-tokens]) 1000)))
+      (let [resolution
+            {:mode :intent
+             :strategy :hybrid
+             :selected [{:id "symbol:a" :rank 1 :matched-by #{:lateon}}]
+             :alternatives [{:id "symbol:c" :rank 2
+                             :matched-by #{:lateon}}]}
+            packet
+            (context/build-from-seeds
+             graph {:focus "entry behavior" :depth 1 :max-tokens 1000}
+             resolution)]
+        (is (= resolution (:focus-resolution packet)))
+        (is (= #{"symbol:a" "symbol:b"} (set (map :id (:symbols packet)))))
+        (is (not-any? #(= "symbol:c" (:id %)) (:symbols packet))))
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"unknown symbols"
+           (context/build-from-seeds
+            graph {:focus "missing" :depth 1 :max-tokens 1000}
+            {:mode :intent :strategy :hybrid
+             :selected [{:id "symbol:missing"}]
+             :alternatives []}))))))
 
 (deftest disconnected-symbols-do-not-enter-focused-context
   (let [root (Files/createTempDirectory

@@ -137,7 +137,7 @@
                     (recur selected)))))))))))
 
 (defn- packet-for
-  [focus max-tokens traversal n db]
+  [focus focus-resolution max-tokens traversal n db]
   (let [selected (vec (take n (:order traversal)))
         selected-ids (set (map :id selected))
         selected-symbols (filter #(str/starts-with? (:id %) "symbol:")
@@ -156,8 +156,9 @@
                      (sorted-map))
              vals vec)
         packet
-        {:packet/version 2
+        {:packet/version 3
          :focus focus
+         :focus-resolution focus-resolution
          :budget
          {:max-tokens max-tokens
           :allocation
@@ -192,38 +193,76 @@
                             (some true? (vals (:truncation packet)))))
         (assoc-in [:budget :estimated-tokens] (estimate-tokens packet)))))
 
-(defn- largest-fitting-prefix [focus max-tokens traversal db]
+(defn- largest-fitting-prefix
+  [focus focus-resolution max-tokens traversal db]
   (loop [low 1 high (count (:order traversal)) best nil]
     (if (> low high)
       best
       (let [middle (quot (+ low high) 2)
-            packet (packet-for focus max-tokens traversal middle db)]
+            packet (packet-for focus focus-resolution max-tokens
+                               traversal middle db)]
         (if (<= (get-in packet [:budget :estimated-tokens]) max-tokens)
           (recur (inc middle) high middle)
           (recur low (dec middle) best))))))
 
-(defn build
-  [graph {:keys [focus max-tokens depth directions edge-kinds]
-          :or {max-tokens 8000 depth 4 directions #{:outgoing :incoming}
-               edge-kinds default-edge-kinds}}]
+(defn- focus-candidate [rank matched-by symbol]
+  {:id (:id symbol)
+   :qualified-name (:qualified-name symbol)
+   :rank rank
+   :matched-by matched-by})
+
+(defn resolve-symbol-focus
+  "Resolve the historical symbol-name-or-ID context focus without semantic
+  retrieval. All returned selected IDs are canonical graph symbol IDs."
+  [graph focus limit]
   (let [db (store/database graph)
-        max-nodes (max 1 (quot max-tokens 8))
-        exact (graph-read/exact-symbols db focus max-nodes)
+        exact (graph-read/exact-symbols db focus limit)
         matches (or (seq exact)
-                    (seq (query/symbols graph focus max-nodes)))
-        seeds (mapv :id (or (seq exact) (seq matches)))]
-    (when-not (seq seeds)
+                    (seq (query/symbols graph focus limit)))
+        selected (mapv #(focus-candidate
+                         (inc %1)
+                         (if (seq exact) #{:exact} #{:fts})
+                         %2)
+                       (range)
+                       (or (seq exact) (seq matches)))]
+    (when-not (seq selected)
       (throw (ex-info (str "No symbol matches context focus: " focus)
                       {:exit-code 2 :focus focus
                        :suggestions (query/symbol-suggestions graph focus)})))
+    {:mode :symbol
+     :strategy (if (seq exact) :exact :lexical)
+     :selected selected
+     :alternatives []}))
+
+(defn build-from-seeds
+  "Build a bounded context packet from an explicit focus-resolution record.
+  Only canonical IDs in :selected seed traversal; alternatives are explanatory
+  metadata and never become zero-cost traversal roots."
+  [graph {:keys [focus max-tokens depth directions edge-kinds]
+          :or {max-tokens 8000 depth 4 directions #{:outgoing :incoming}
+               edge-kinds default-edge-kinds}}
+   focus-resolution]
+  (let [db (store/database graph)
+        max-nodes (max 1 (quot max-tokens 8))
+        seeds (mapv :id (:selected focus-resolution))
+        existing (graph-read/symbols-by-ids db seeds)
+        missing (vec (remove #(contains? existing %) seeds))]
+    (when-not (seq seeds)
+      (throw (ex-info "Context focus resolution selected no symbols"
+                      {:exit-code 2 :focus focus})))
+    (when (seq missing)
+      (throw (ex-info "Context focus resolution contains unknown symbols"
+                      {:exit-code 2 :focus focus :missing-symbol-ids missing})))
     (let [traversal
           (traverse db seeds {:depth depth :max-nodes max-nodes
                               :directions (set directions)
                               :edge-kinds (set edge-kinds)})
-          best-count (largest-fitting-prefix focus max-tokens traversal db)]
+          best-count (largest-fitting-prefix
+                      focus focus-resolution max-tokens traversal db)]
       (if best-count
-        (packet-for focus max-tokens traversal best-count db)
-        (let [minimum (packet-for focus Long/MAX_VALUE traversal 1 db)
+        (packet-for focus focus-resolution max-tokens traversal best-count db)
+        (let [minimum (packet-for focus focus-resolution Long/MAX_VALUE
+                                  traversal 1 db)
               tokens (get-in minimum [:budget :estimated-tokens])]
           (throw
            (ex-info
@@ -231,11 +270,24 @@
                  tokens)
             {:exit-code 2 :minimum-tokens tokens})))))))
 
+(defn build
+  [graph {:keys [focus max-tokens] :as options
+          :or {max-tokens 8000}}]
+  (let [max-nodes (max 1 (quot max-tokens 8))
+        resolution (resolve-symbol-focus graph focus max-nodes)]
+    (build-from-seeds graph options resolution)))
+
 (defn markdown [packet]
   (str "# Code context: " (:focus packet) "\n\n"
        "Estimated tokens: " (get-in packet [:budget :estimated-tokens])
        " / " (get-in packet [:budget :max-tokens])
        (when (:truncated? packet) " (truncated)") "\n\n"
+       "Focus resolution: "
+       (name (get-in packet [:focus-resolution :strategy]))
+       " (`"
+       (str/join "`, `"
+                 (map :id (get-in packet [:focus-resolution :selected])))
+       "`)\n\n"
        "## Symbols\n\n"
        (str/join
         "\n"
