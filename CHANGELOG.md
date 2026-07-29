@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.0
+
+- Kept semantic status responsive by moving NextPlaid I/O and semantic
+  retrieval outside the graph coordination lock.
+- Added `context --intent` for freshness-safe LateOn plus Datalevin hybrid
+  resolution of a natural-language request into one canonical context seed.
+- Preserved exact graph traversal as the source of context relationships;
+  semantic alternatives remain bounded provenance metadata only.
+- Added lexical fallback, focus-resolution packet metadata, and benchmark
+  measurements for context seed and packet recall.
+
 ## 0.9.0
 
 - Introduced graph format 3 with a canonical analyzer interchange contract,

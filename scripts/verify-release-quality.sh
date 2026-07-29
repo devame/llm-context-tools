@@ -5,7 +5,7 @@ ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 JAR_PATH=${1:-"$ROOT_DIR/dist/llm-context.jar"}
 FIXTURE_DIR="$ROOT_DIR/quality/release-corpus"
 CHECKER="$ROOT_DIR/script/verify-release-graph.clj"
-EXPECTED_VERSION=0.9.0
+EXPECTED_VERSION=0.10.0
 EXPECTED_GRAPH_FORMAT=3
 
 if [[ "$JAR_PATH" != /* ]]; then
