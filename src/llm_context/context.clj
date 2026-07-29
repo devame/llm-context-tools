@@ -234,6 +234,32 @@
      :selected selected
      :alternatives []}))
 
+(defn resolve-intent-focus
+  "Select one fresh hybrid-search result as the traversal seed. Additional
+  results remain bounded explanatory alternatives and are not traversed."
+  [focus {:keys [results retrieval]}]
+  (when-not (seq results)
+    (throw
+     (ex-info
+      (str "No symbol matches context intent: " focus)
+      {:exit-code 2 :focus focus :retrieval retrieval})))
+  (let [candidate
+        (fn [rank symbol]
+          {:id (:id symbol)
+           :qualified-name (:qualified-name symbol)
+           :rank rank
+           :matched-by (:matched-by symbol)
+           :score (:score symbol)})
+        candidates (mapv candidate (range 1 (inc (count results))) results)
+        selected (first candidates)]
+    {:mode :intent
+     :strategy (if (contains? (:matched-by selected) :lateon)
+                 :hybrid
+                 :lexical-fallback)
+     :selected [selected]
+     :alternatives (vec (take 4 (next candidates)))
+     :retrieval retrieval}))
+
 (defn build-from-seeds
   "Build a bounded context packet from an explicit focus-resolution record.
   Only canonical IDs in :selected seed traversal; alternatives are explanatory

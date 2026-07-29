@@ -50,7 +50,7 @@
        "    --check            Validate a source snapshot without writing data\n"
        "  query                Query the semantic graph\n"
        "  semantic             Inspect or synchronize LateOn indexing\n"
-       "  context              Build an LLM context packet\n"
+       "  context              Build a symbol or natural-language context packet\n"
        "  export               Export graph data\n"
        "  summary              Export a Markdown graph summary\n"
        "  integrate            Install agent guidance\n"
@@ -462,6 +462,7 @@
   (loop [remaining (seq args) result defaults]
     (if-let [arg (first remaining)]
       (case arg
+        "--intent" (recur (next remaining) (assoc result :intent? true))
         "--max-tokens" (if-let [value (second remaining)]
                          (recur (nnext remaining)
                                 (assoc result :max-tokens (parse-long value)))
@@ -502,7 +503,8 @@
                        :depth (get-in settings [:context :trace-depth])
                        :format "markdown"})]
     (when-not (:focus options)
-      (throw (ex-info "context requires a symbol name or ID" {:exit-code 2})))
+      (throw (ex-info "context requires a symbol name, ID, or --intent query"
+                      {:exit-code 2})))
     (when-not (and (pos-int? (:max-tokens options)) (nat-int? (:depth options)))
       (throw (ex-info "context budgets must be positive tokens and non-negative depth"
                       {:exit-code 2})))
@@ -516,7 +518,23 @@
         (if (= :edn format) (pprint/pprint remote) (print remote))
         (with-compatible-graph cli-context settings
           (fn [graph]
-            (let [packet ((resolve-fn 'llm-context.context/build) graph options)]
+            (let [packet
+                  (if (:intent? options)
+                    (let [attempt
+                          ((resolve-fn
+                            'llm-context.query/semantic-search-attempt)
+                           nil settings (:focus options))
+                          search
+                          ((resolve-fn
+                            'llm-context.query/search-explain-with-attempt)
+                           graph settings (:focus options) attempt)
+                          resolution
+                          ((resolve-fn
+                            'llm-context.context/resolve-intent-focus)
+                           (:focus options) search)]
+                      ((resolve-fn 'llm-context.context/build-from-seeds)
+                       graph options resolution))
+                    ((resolve-fn 'llm-context.context/build) graph options))]
               (case format
                 :edn (pprint/pprint packet)
                 :markdown (print ((resolve-fn 'llm-context.context/markdown) packet))

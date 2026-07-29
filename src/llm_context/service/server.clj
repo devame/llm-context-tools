@@ -104,12 +104,27 @@
         (query-value graph (:client runtime) settings
                      (:subcommand request) (:args request))))
     :context
-    (locking graph
-      (store/assert-query-compatible! graph)
-      (let [packet (context/build graph (:options request))]
-        (if (= :markdown (get-in request [:options :format]))
-          (context/markdown packet)
-          packet)))
+    (let [options (:options request)
+          packet
+          (if (:intent? options)
+            (let [term (:focus options)
+                  semantic-attempt
+                  (query/semantic-search-attempt
+                   (:client runtime) settings term)]
+              (locking graph
+                (store/assert-query-compatible! graph)
+                (let [search
+                      (query/search-explain-with-attempt
+                       graph settings term semantic-attempt)
+                      resolution
+                      (context/resolve-intent-focus term search)]
+                  (context/build-from-seeds graph options resolution))))
+            (locking graph
+              (store/assert-query-compatible! graph)
+              (context/build graph options)))]
+      (if (= :markdown (:format options))
+        (context/markdown packet)
+        packet))
     :export (locking graph
               (store/assert-query-compatible! graph)
               (export/render graph (:format request)))

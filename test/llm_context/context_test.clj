@@ -7,6 +7,41 @@
             [llm-context.store :as store])
   (:import [java.nio.file Files]))
 
+(deftest intent-focus-selects-one-seed-and-retains-bounded-alternatives
+  (let [results
+        (mapv (fn [index]
+                {:id (str "symbol:" index)
+                 :qualified-name (str "fixture/symbol-" index)
+                 :matched-by (if (zero? index) #{:lateon :fts} #{:lateon})
+                 :score (/ 1.0 (inc index))})
+              (range 7))
+        retrieval {:status :ok :latency-ms 12}
+        resolution
+        (context/resolve-intent-focus
+         "where is retry handled?"
+         {:results results :retrieval retrieval})]
+    (is (= :intent (:mode resolution)))
+    (is (= :hybrid (:strategy resolution)))
+    (is (= ["symbol:0"] (mapv :id (:selected resolution))))
+    (is (= ["symbol:1" "symbol:2" "symbol:3" "symbol:4"]
+           (mapv :id (:alternatives resolution))))
+    (is (= retrieval (:retrieval resolution))))
+  (is (= :lexical-fallback
+         (:strategy
+          (context/resolve-intent-focus
+           "retry"
+           {:results [{:id "symbol:retry"
+                       :qualified-name "fixture/retry"
+                       :matched-by #{:fts}
+                       :score 0.1}]
+            :retrieval {:status :unavailable}}))))
+  (is (thrown-with-msg?
+       clojure.lang.ExceptionInfo
+       #"No symbol matches context intent"
+       (context/resolve-intent-focus
+        "missing intent"
+        {:results [] :retrieval {:status :no-matches}}))))
+
 (deftest context-packets-are-focused-depth-bounded-and-renderable
   (let [root (Files/createTempDirectory "llm-context-packet-"
                                         (make-array java.nio.file.attribute.FileAttribute 0))

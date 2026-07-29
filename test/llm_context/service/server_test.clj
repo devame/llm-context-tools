@@ -2,6 +2,7 @@
   (:require [clojure.test :refer [deftest is]]
             [llm-context.analysis.full :as full]
             [llm-context.analysis.incremental :as incremental]
+            [llm-context.context :as context]
             [llm-context.query :as query]
             [llm-context.semantic.fake-index :as fake]
             [llm-context.semantic.worker :as semantic-worker]
@@ -284,6 +285,47 @@
         (is (= true (deref acquired-graph 1000 false)))
         (deliver release-retrieval true)
         (is (= {:results []} (deref search 1000 ::timeout)))))))
+
+(deftest intent-context-resolves-a-hybrid-seed-before-traversal
+  (let [graph (Object.)
+        runtime-state (atom {:client :semantic-client})
+        seen (atom nil)
+        attempt {:status :ok :candidates [:candidate] :latency-ms 4}
+        search
+        {:results [{:id "symbol:selected"
+                    :qualified-name "fixture/selected"
+                    :matched-by #{:lateon}
+                    :score 0.5}
+                   {:id "symbol:alternative"
+                    :qualified-name "fixture/alternative"
+                    :matched-by #{:lateon}
+                    :score 0.4}]
+         :retrieval {:status :ok :latency-ms 4}}]
+    (with-redefs [query/semantic-search-attempt
+                  (fn [client _ term]
+                    (is (= :semantic-client client))
+                    (is (= "where is selection handled?" term))
+                    attempt)
+                  query/search-explain-with-attempt
+                  (fn [_ _ term actual-attempt]
+                    (is (= "where is selection handled?" term))
+                    (is (= attempt actual-attempt))
+                    search)
+                  context/build-from-seeds
+                  (fn [_ options resolution]
+                    (reset! seen {:options options :resolution resolution})
+                    {:packet/version 3})
+                  store/assert-query-compatible! identity]
+      (is (= {:packet/version 3}
+             (#'server/dispatch
+              nil {} graph runtime-state
+              {:op :context
+               :options {:focus "where is selection handled?"
+                         :intent? true :format :edn}})))
+      (is (= ["symbol:selected"]
+             (mapv :id (get-in @seen [:resolution :selected]))))
+      (is (= ["symbol:alternative"]
+             (mapv :id (get-in @seen [:resolution :alternatives])))))))
 
 (deftest unreadable-service-response-is-an-explicit-protocol-error
   (let [root (Files/createTempDirectory
