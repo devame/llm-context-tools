@@ -131,6 +131,18 @@
    (or (:end-col record) 0)
    (pr-str (dissoc record :platforms))])
 
+(defn- effective-namespaces
+  "Collapse repeated declarations of one namespace in a file/platform to its
+  first source declaration. A namespace has one canonical identity; retaining
+  later declaration ranges under that identity creates contradictory facts."
+  [records]
+  (->> records
+       distinct
+       (group-by (juxt :platform :filename :name))
+       (sort-by key)
+       (mapv (fn [[_ observations]]
+               (first (sort-by source-order observations))))))
+
 (defn- effective-definitions
   "Collapse repeated analyzer observations for one file-owned var. A concrete
   definition supersedes declarations, while declaration-only groups produce no
@@ -549,8 +561,8 @@
                                  files)
         analysis (:analysis snapshot)
         namespace-definitions
-        (vec (distinct
-              (expand-platforms (:namespace-definitions analysis))))
+        (effective-namespaces
+         (vec (expand-platforms (:namespace-definitions analysis))))
         var-definitions
         (effective-definitions
          (vec (expand-platforms (:var-definitions analysis))))

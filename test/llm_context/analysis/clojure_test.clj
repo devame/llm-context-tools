@@ -347,6 +347,24 @@
                                      (:edge/target-text %)))
                             entities))))))
 
+(deftest repeated-namespace-declarations-have-one-canonical-fact
+  (let [file {:relative-path "src/repeated.clj"
+              :language :language/clojure
+              :content "(ns repeated)\n(ns repeated)\n(defn value [] 1)\n"
+              :size 49 :modified-at 1}
+        namespace {:filename "src/repeated.clj" :platforms [:clj]
+                   :row 1 :col 1 :end-row 1 :end-col 14
+                   :name 'repeated}
+        repeated (assoc namespace :row 2 :end-row 2)
+        entities
+        (->> {:analysis {:namespace-definitions [namespace repeated]}}
+             (clojure-analysis/materialize [file])
+             (mapcat :entities))
+        namespaces
+        (filter #(= :symbol.kind/namespace (:symbol/kind %)) entities)]
+    (is (= 1 (count namespaces)))
+    (is (= 1 (:source/start-line (first namespaces))))))
+
 (deftest smallest-enclosing-symbol-owns-local-call
   (let [outer {:symbol/id "symbol:outer" :symbol/file "file:src/nested.clj"
                :symbol/platform :clj
