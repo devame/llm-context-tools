@@ -154,6 +154,26 @@
     (is (= (count chunks) (:chunk-count (first chunks))))
     (is (str/includes? (:text (second chunks)) "Chunk: 2/"))))
 
+(deftest oversized-relationship-metadata-is-truncated-deterministically
+  (let [source "(defn hub [] :ok)"
+        file (file "src/hub.clj" source :language/clojure)
+        symbol (symbol-entity file "symbol:hub" "hub" 1 1 1 18)
+        relationships (mapv (fn [index]
+                              {:kind :edge.kind/calls
+                               :target (str "sample.target/operation-" index)})
+                            (range 300))
+        first (document/build lateon symbol file source relationships)
+        second (document/build lateon symbol file source
+                               (reverse relationships))
+        texts (mapv :text (:chunks first))]
+    (is (= first second))
+    (is (some #(str/includes? % "Metadata: [truncated]") texts))
+    (is (some #(str/includes? % source) texts))
+    (is (every? #(<= (count (.getBytes ^String %
+                                      java.nio.charset.StandardCharsets/UTF_8))
+                     (:max-document-bytes lateon))
+                texts))))
+
 (deftest build-file-verifies-source-hash-and-skips-synthetic-modules
   (let [root (Files/createTempDirectory
               "llm-context-semantic-document-"

@@ -134,6 +134,16 @@
        (mapcat #(split-long-piece % limit))
        vec))
 
+(defn- bounded-metadata [metadata limit]
+  (if (<= (utf8-size metadata) limit)
+    metadata
+    (let [suffix "\nMetadata: [truncated]"
+          suffix-size (utf8-size suffix)]
+      (if (< suffix-size limit)
+        (str (first (split-long-piece metadata (- limit suffix-size)))
+             suffix)
+        (first (split-long-piece metadata limit))))))
+
 (defn- chunk-pieces [pieces limit overlap]
   (loop [start 0
          chunks []]
@@ -155,14 +165,21 @@
 
 (defn- render-chunks [header source {:keys [max-document-bytes
                                              chunk-overlap-lines]}]
-  (let [prefix (str header "\n\nSource:\n")
+  (let [separator "\n\nSource:\n"
+        ;; Reserve a useful source window in addition to the stable chunk
+        ;; annotation. High-connectivity symbols can otherwise spend the
+        ;; entire document budget on relationship metadata.
+        source-reserve (min 512 (max 1 (quot max-document-bytes 4)))
+        header-limit (- max-document-bytes (utf8-size separator) 64
+                        source-reserve)
+        _ (when-not (pos? header-limit)
+            (throw (ex-info "Semantic document byte limit is too small"
+                            {:max-document-bytes max-document-bytes})))
+        header (bounded-metadata header header-limit)
+        prefix (str header separator)
         ;; Reserve enough space for a stable chunk annotation even when the
         ;; total chunk count has several digits.
         source-limit (- max-document-bytes (utf8-size prefix) 64)]
-    (when-not (pos? source-limit)
-      (throw (ex-info "Semantic document metadata exceeds configured byte limit"
-                      {:header-bytes (utf8-size prefix)
-                       :max-document-bytes max-document-bytes})))
     (let [pieces (source-pieces source source-limit)
           bodies (if (seq pieces)
                    (chunk-pieces pieces source-limit chunk-overlap-lines)
