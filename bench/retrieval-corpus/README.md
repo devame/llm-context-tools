@@ -33,12 +33,41 @@ generated symbol IDs, so judgments remain stable across graph rebuilds.
 Hard negatives are plausible but wrong answers that should not outrank a
 relevant result.
 
+Repository-specific corpora may use format 2 selectors when qualified names
+alone are not unique:
+
+```clojure
+{:corpus/version 2
+ :queries
+ [{:id :synthetic/load-session
+   :language :clojurescript
+   :query-type :behavior
+   :domain :sessions
+   :query "where is persisted session state loaded?"
+   :relevance
+   [{:qualified-name "example.session/load-state"
+     :platform :cljs
+     :grade 3}]
+   :hard-negatives
+   [{:qualified-name "example.session/validate-state"
+     :platform :cljs}]}]}
+```
+
+A structured selector must provide `:id` or `:qualified-name` and may add
+`:platform`, `:file`, or `:kind`. The validator matches all supplied fields and
+requires exactly one canonical analyzer symbol per format-2 selector. It also
+rejects relevant and hard-negative selectors that resolve to the same symbol.
+Repeated result candidates cannot earn gain for the same judgment twice.
+
 Validate the schema and every judged identity against real clj-kondo and Janet
 analyzer output:
 
 ```bash
 clojure -M:validate-semantic-corpus
 ```
+
+Analyzer warnings are counted in the validation summary; analyzer errors still
+fail validation. A warning does not invalidate selectors that resolve exactly.
 
 ## Running the benchmark
 

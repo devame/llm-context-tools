@@ -63,23 +63,36 @@ For a repository-specific semantic query set, use:
 clojure -M:semantic-bench /path/to/project query-set.edn
 ```
 
-The preferred EDN input is a versioned corpus with natural-language queries,
-stable slice metadata, graded relevance judgments, and hard negatives:
+Corpus format 2 uses structured selectors so judgments can distinguish symbols
+that share a qualified name across platforms or files. Every selector must
+contain `:id` or `:qualified-name`; optional `:platform`, `:file`, and `:kind`
+fields are matched together with that identity:
 
 ```clojure
-{:corpus/version 1
+{:corpus/version 2
  :queries
- [{:id :clojure/authenticate-session
-   :language :clojure
+ [{:id :synthetic/authenticate-session
+   :language :clojurescript
    :query-type :behavior
+   :domain :sessions
    :query "where is a user session authenticated?"
-   :relevance {"auth.core/authenticate-user" 3
-               "auth.core/decode-session" 1}
-   :hard-negatives ["auth.core/authorize-user"]}]}
+   :relevance
+   [{:qualified-name "example.session/authenticate-user"
+     :platform :cljs
+     :grade 3}
+    {:qualified-name "example.session/decode-session"
+     :platform :cljs
+     :grade 1}]
+   :hard-negatives
+   [{:qualified-name "example.session/authorize-user"
+     :platform :cljs}]}]}
 ```
 
-The legacy vector of `{:query string :expected [...]}` entries remains
-accepted and is normalized to ungraded relevance for compatibility.
+The validator resolves each format-2 selector to exactly one analyzer symbol
+and rejects ambiguous selectors and relevant/hard-negative overlap. Each
+relevance judgment can contribute gain only once, even when duplicate
+candidates match it. Format 1 string judgments and the legacy vector of
+`{:query string :expected [...]}` entries remain accepted unchanged.
 
 The harness requires a running, synchronized project service. For every query
 it evaluates both hybrid search and `context --intent`, reporting search
@@ -89,6 +102,22 @@ LateOn query/seed rates, separate search and end-to-end context latency
 distributions, misses, and context errors. Here `k` is the returned hybrid
 candidate count. Keep the same graph, model revision, query set, candidate
 count, context budget, and hardware when comparing changes.
+
+When query-level details must remain in a local result file, pass `--output`:
+
+```bash
+clojure -M:semantic-bench /path/to/project query-set.edn \
+  --output /path/to/private-result.edn
+```
+
+The result file contains the full benchmark result, including query-level
+misses and hard-negative diagnostics. Standard output contains only aggregate
+quality metrics, slice metrics, latency summaries, and diagnostic counts. When
+`--output` is absent, the existing full standard-output behavior is preserved.
+Every run records the scorer version, retrieval model and revision, document
+version, candidate count, context depth, and context token budget.
+The benchmark also records its service-request timeout so context latency runs
+made with different execution envelopes are not treated as directly comparable.
 
 Benchmark output is descriptive rather than a universal release gate because
 filesystem location, JDK, native architecture, and project language mix have
