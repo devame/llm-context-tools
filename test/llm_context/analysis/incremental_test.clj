@@ -86,10 +86,17 @@
     (is (= :exact (relationship-state)))
 
     (spit (str duplicate) "(ns first) (defn target [] 2)")
+    (store/with-store [graph project settings]
+      (let [closure (#'incremental/closure-candidate
+                     graph project settings nil)
+            complete (full/prepare-current project settings nil :incremental)]
+        (is (= (:outputs complete) (:outputs closure)))))
     (let [result (incremental/analyze! project settings)]
       ;; Only the new duplicate and the caller whose resolution changed need
       ;; replacement. The original target's canonical facts are unchanged.
-      (is (= 2 (:changed result))))
+      (is (= 2 (:changed result)))
+      (is (= {:changed 1 :deleted 0 :affected 2 :reused 1}
+             (get-in result [:analysis-metrics :incremental-closure]))))
     (is (= :ambiguous (relationship-state)))
 
     (Files/delete duplicate)
@@ -159,6 +166,48 @@
       (is (= (clj-kondo/config-fingerprint project)
              (:llm-context/analyzer-configuration-fingerprint
               (store/graph-metadata graph)))))))
+
+(deftest corrupt-manifest-falls-back-to-whole-project-preparation
+  (let [root (Files/createTempDirectory
+              "llm-context-incremental-corrupt-manifest-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        src (.resolve root "src")
+        first-path (.resolve src "first.clj")
+        project (project/context (str root))
+        settings (assoc-in (config/defaults) [:semantic :providers] [])]
+    (Files/createDirectories src
+                             (make-array java.nio.file.attribute.FileAttribute 0))
+    (spit (str first-path) "(ns first) (defn value [] 1)")
+    (spit (str (.resolve src "second.clj")) "(ns second) (defn stable [] 2)")
+    (full/analyze! project settings)
+    (spit (str (.resolve (:state-dir project)
+                         "cache/analyzer-manifests/index.edn"))
+          "{:corrupt")
+    (spit (str first-path) "(ns first) (defn value [] 3)")
+    (let [result (incremental/analyze! project settings)]
+      (is (= 1 (:changed result)))
+      (is (nil? (get-in result
+                        [:analysis-metrics :incremental-closure]))))))
+
+(deftest namespace-rename-rebuilds-importing-callers
+  (let [root (Files/createTempDirectory
+              "llm-context-incremental-namespace-rename-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        src (.resolve root "src")
+        target (.resolve src "target.clj")
+        project (project/context (str root))
+        settings (assoc-in (config/defaults) [:semantic :providers] [])]
+    (Files/createDirectories src
+                             (make-array java.nio.file.attribute.FileAttribute 0))
+    (spit (str target) "(ns old.target) (defn value [] 1)")
+    (spit (str (.resolve src "caller.clj"))
+          "(ns caller (:require [old.target :as target])) (defn call [] (target/value))")
+    (full/analyze! project settings)
+    (spit (str target) "(ns new.target) (defn value [] 1)")
+    (let [result (incremental/analyze! project settings)]
+      (is (= 2 (get-in result
+                       [:analysis-metrics :incremental-closure :affected])))
+      (is (= 2 (:changed result))))))
 
 (deftest malformed-incremental-source-preserves-the-complete-active-graph
   (let [root (Files/createTempDirectory

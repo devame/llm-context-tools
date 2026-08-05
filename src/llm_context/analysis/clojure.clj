@@ -553,7 +553,7 @@
                                 (when class-name target)))))))
 
 (defn- materialize*
-  [files snapshot stats]
+  [files snapshot stats external-symbols]
   (let [files (vec files)
         file-entities (into {} (map (fn [file]
                                      [(:relative-path file)
@@ -578,14 +578,21 @@
                       (when-let [file (get file-entities (:filename record))]
                         (var-symbol file (:platform record) record))))
               var-definitions)
+        external-namespaces
+        (filterv #(= :symbol.kind/namespace (:symbol/kind %)) external-symbols)
+        external-definitions
+        (filterv #(not= :symbol.kind/namespace (:symbol/kind %)) external-symbols)
+        all-namespaces (into namespaces external-namespaces)
+        all-symbols (into symbols external-definitions)
         symbols-by-position (positional-index symbols)
         namespaces-by-file-platform
         (into {}
               (map (fn [entity]
                      [[(:symbol/file entity) (:symbol/platform entity)] entity]))
-              namespaces)
+              all-namespaces)
         symbol-by-id
-        (into {} (map (juxt :symbol/id identity)) (concat namespaces symbols))
+        (into {} (map (juxt :symbol/id identity))
+              (concat all-namespaces all-symbols))
         namespace-by-key
         (reduce (fn [result entity]
                   (update result
@@ -593,7 +600,7 @@
                            (clojure.core/symbol
                             (:symbol/qualified-name entity))]
                           (fnil conj []) entity))
-                {} namespaces)
+                {} all-namespaces)
         definitions-by-key
         (reduce (fn [result entity]
                   (update result
@@ -604,7 +611,7 @@
                               (:symbol/qualified-name entity))))
                            (clojure.core/symbol (:symbol/name entity))]
                           (fnil conj []) entity))
-                {} symbols)
+                {} all-symbols)
         var-links
         (keep (fn [record]
                 (var-relationship namespace-by-key definitions-by-key
@@ -726,14 +733,16 @@
 (defn materialize-with-metrics
   "Convert a clj-kondo snapshot into file-owned canonical entities and return
   deterministic operation counts for scale regression checks."
-  [files snapshot]
-  (let [stats (atom {:ownership-lookups 0
+  ([files snapshot]
+   (materialize-with-metrics files snapshot []))
+  ([files snapshot external-symbols]
+   (let [stats (atom {:ownership-lookups 0
                      :positional-candidates-examined 0
                      :fact-owner-lookups 0
                      :source-indexes-built 0})
-        outputs (materialize* files snapshot stats)]
-    {:outputs outputs
-     :metrics (assoc @stats
+         outputs (materialize* files snapshot stats external-symbols)]
+     {:outputs outputs
+      :metrics (assoc @stats
                      :namespace-definitions
                      (count (get-in snapshot [:analysis :namespace-definitions]))
                      :var-definitions
@@ -743,7 +752,7 @@
                      :var-usages
                      (count (get-in snapshot [:analysis :var-usages]))
                      :generated-facts
-                     (reduce + 0 (map (comp count :entities) outputs)))}))
+                     (reduce + 0 (map (comp count :entities) outputs)))})))
 
 (defn materialize
   "Convert a clj-kondo snapshot into file-owned canonical entities."

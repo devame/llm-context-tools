@@ -99,7 +99,7 @@
     :entity.type/topic (get topic-owner-by-id (:topic/id entity))
     nil))
 
-(defn- canonicalize-outputs
+(defn canonicalize-outputs
   "Canonicalize the complete project before facts are assigned back to
   file-scoped persistence units. Shared topics get one deterministic owner;
   legitimate repeated observations retain their distinct identities."
@@ -158,8 +158,13 @@
                 :entities (vec (get grouped relative-path [])))))
      files)))
 
-(defn- fingerprint-outputs [outputs]
+(defn fingerprint-outputs [outputs]
   (mapv with-fingerprint outputs))
+
+(defn finalize-outputs
+  "Canonicalize and fingerprint a complete output collection."
+  [files outputs]
+  (fingerprint-outputs (canonicalize-outputs files outputs)))
 
 (defn analyze
   "Analyze every discovered supported file and return one output per file in
@@ -167,6 +172,9 @@
   ([project files]
    (analyze project files nil))
   ([project files progress]
+   (analyze project files progress {}))
+  ([project files progress {:keys [clojure-snapshot external-symbols
+                                   defer-finalization?]}]
   (let [files (vec files)
         clojure-files
         (filterv #(contains? clj-kondo/clojure-languages (:language %)) files)
@@ -174,7 +182,8 @@
         edn-files (filterv #(= :language/edn-data (:language %)) files)
         clojure-phase
         (run-phase progress :clj-kondo
-                   #(clj-kondo/analyze! project clojure-files)
+                   #(or clojure-snapshot
+                        (clj-kondo/analyze! project clojure-files))
                    (fn [snapshot]
                      {:files (count clojure-files)
                       :records (reduce + 0 (vals (analysis-counts snapshot)))}))
@@ -205,7 +214,7 @@
         (run-phase progress :relationship-materialization
                    #(let [clojure-result
                           (clojure-analysis/materialize-with-metrics
-                           clojure-files clojure-snapshot)]
+                           clojure-files clojure-snapshot external-symbols)]
                       {:outputs
                        (mapv ir/normalize-output
                              (concat (:outputs clojure-result)
@@ -220,13 +229,17 @@
         raw-outputs (:outputs materialized)
         canonical-phase
         (run-phase progress :canonicalization
-                   #(canonicalize-outputs files raw-outputs)
+                   #(if defer-finalization?
+                      raw-outputs
+                      (canonicalize-outputs files raw-outputs))
                    output-counts)
         canonical-outputs (:value canonical-phase)
         canonical-ms (:elapsed-ms canonical-phase)
         fingerprint-phase
         (run-phase progress :fingerprinting
-                   #(fingerprint-outputs canonical-outputs)
+                   #(if defer-finalization?
+                      canonical-outputs
+                      (fingerprint-outputs canonical-outputs))
                    output-counts)
         outputs (:value fingerprint-phase)
         fingerprint-ms (:elapsed-ms fingerprint-phase)

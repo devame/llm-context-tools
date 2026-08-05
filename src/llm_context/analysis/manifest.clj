@@ -45,8 +45,9 @@
      :symbol-id (:symbol/id entity)}))
 
 (defn- dependency-target [entity]
-  (when (contains? #{:entity.type/edge :entity.type/reference}
-                   (:entity/type entity))
+  (when (and (contains? #{:entity.type/edge :entity.type/reference}
+                        (:entity/type entity))
+             (not= :edge.kind/contains (:edge/kind entity)))
     (or (:edge/target-text entity) (:reference/qualified-target entity)
         (:reference/target-text entity))))
 
@@ -66,6 +67,7 @@
      :file-id (:file/id file)
      :content-hash (:file/content-hash file)
      :semantic-hash (:file/semantic-hash file)
+     :output (select-keys output [:file :entities :diagnostics :status :preserve?])
      :exports exports
      :exported-keys (set (map (juxt :platform :qualified-name) exports))
      :imported-namespaces (set (keep imported-namespace entities))
@@ -131,7 +133,11 @@
                                             (= content-hash
                                                (:content-hash manifest))
                                             (= semantic-hash
-                                               (:semantic-hash manifest)))
+                                               (:semantic-hash manifest))
+                                            (= path
+                                               (get-in manifest
+                                                       [:output :file
+                                                        :file/path])))
                                (throw (ex-info "Stale analyzer manifest shard"
                                                {:path path})))
                              [path manifest])))

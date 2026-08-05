@@ -97,14 +97,16 @@
           (let [full? (or force-full?
                           (not= :ready (store/graph-state graph))
                           (not (incremental/index-present? graph)))
-                unchanged (when-not full?
-                            (incremental/unchanged-result
-                             graph project settings))]
-            (if unchanged
-              {:complete-result unchanged}
-              (let [candidate (full/prepare-current
-                               project settings service-progress!
-                               (if full? :full :incremental))]
+                incremental-prepared
+                (when-not full?
+                  (incremental/prepare-current
+                   graph project settings service-progress!))]
+            (if (:complete-result incremental-prepared)
+              incremental-prepared
+              (let [candidate (if full?
+                                (full/prepare-current
+                                 project settings service-progress! :full)
+                                incremental-prepared)]
                 (if (:stale? candidate)
                   candidate
                   {:full? full?

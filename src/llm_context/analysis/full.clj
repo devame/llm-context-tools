@@ -55,7 +55,7 @@
       :semantic-index-name (:index-name lateon)}))
   nil))
 
-(defn- source-inventory [files]
+(defn source-inventory [files]
   (mapv (fn [{:keys [relative-path content]}]
           [relative-path (ids/content-hash content)])
         files))
