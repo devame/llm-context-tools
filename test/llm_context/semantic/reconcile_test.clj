@@ -8,7 +8,8 @@
             [llm-context.semantic.document :as document]
             [llm-context.semantic.reconcile :as reconcile]
             [llm-context.semantic.state :as state]
-            [llm-context.store :as store])
+            [llm-context.store :as store]
+            [llm-context.test-support.db :as db-support])
   (:import [java.nio.file Files]))
 
 (def settings
@@ -124,6 +125,30 @@
         (is (= 1 (:queued-upserts result)))
         (is (= :upsert (:semantic.job/operation (job graph))))))))
 
+(defn reconciliation-operation-counts [symbol-count]
+  (let [source (str "(ns sample.cardinality)\n"
+                    (str/join "\n"
+                              (map #(str "(defn item-" % " [] " % ")")
+                                   (range symbol-count))))
+        {:keys [project]} (project-with-source source)]
+    (full/analyze! project settings)
+    (store/with-store [graph project settings]
+      (doseq [record (state/job-records graph reconcile/provider)]
+        (state/cancel-job! graph reconcile/provider
+                           (:semantic.job/symbol-id record)))
+      (reconcile/mark-full! graph)
+      (:counts
+       (db-support/with-operation-counts
+         (reconcile/reconcile! graph project settings 100))))))
+
+(deftest file-reconciliation-has-constant-database-cardinality
+  (let [small (reconciliation-operation-counts 5)
+        large (reconciliation-operation-counts 50)]
+    (is (= small large))
+    (is (= 2 (:transact large)))
+    (is (zero? (:entity large)))
+    (is (<= (:pull large) 3))))
+
 (deftest source-edited-after-analysis-defers-and-retains-dirty-state
   (let [{:keys [project path]}
         (project-with-source "(ns sample.app)\n(defn useful [] :old)")]
@@ -148,6 +173,37 @@
           (is (empty? (state/job-records graph reconcile/provider)))
           (is (= 1 (count (state/dirty-records
                            graph reconcile/provider)))))))))
+
+(deftest reconciliation-replans-when-a-dirty-marker-changes-before-commit
+  (let [{:keys [project]}
+        (project-with-source "(ns sample.app)\n(defn useful [] :ok)")]
+    (full/analyze! project settings)
+    (store/with-store [graph project settings]
+      (doseq [record (state/job-records graph reconcile/provider)]
+        (state/cancel-job! graph reconcile/provider
+                           (:semantic.job/symbol-id record)))
+      (let [[file-id file-hash]
+            (first (store/query
+                    graph
+                    '[:find ?id ?hash
+                      :where
+                      [?file :file/id ?id]
+                      [?file :file/content-hash ?hash]] []))
+            original state/apply-reconciliation!
+            attempts (atom 0)]
+        (state/mark-dirty!
+         graph (reconcile/dirty-marker file-id file-hash :upsert 10))
+        (with-redefs [state/apply-reconciliation!
+                      (fn [target plan]
+                        (when (= 1 (swap! attempts inc))
+                          (state/mark-dirty!
+                           target (reconcile/dirty-marker
+                                   file-id file-hash :upsert 20)))
+                        (original target plan))]
+          (let [result (reconcile/reconcile! graph project settings 30)]
+            (is (= 2 @attempts))
+            (is (= 1 (:queued-upserts result)))
+            (is (empty? (state/dirty-records graph reconcile/provider)))))))))
 
 (deftest one-file-failure-does-not-block-unrelated-semantic-work
   (let [{:keys [project]} (project-with-source

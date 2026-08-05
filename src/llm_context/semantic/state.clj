@@ -130,6 +130,8 @@
     "Create or supersede one coalesced symbol job.")
   (cancel-job! [graph provider symbol-id]
     "Remove queued or leased work that is no longer desired.")
+  (apply-reconciliation! [graph plan]
+    "Apply one file's precomputed job changes and dirty-marker clear atomically.")
   (lease-jobs! [graph provider owner now lease-ms limit]
     "Atomically lease up to limit currently available jobs.")
   (renew-job-lease! [graph job-id owner now lease-ms]
@@ -250,6 +252,89 @@
                              (job-id provider symbol-id))]
         (d/transact! conn [[:db/retractEntity eid]])
         true)))
+
+  (apply-reconciliation!
+    [graph {:keys [provider file-id file-hash operation marker
+                   pending indexed actions]}]
+    (let [conn (connection graph)
+          db (d/db conn)
+          current-pending (graph-read/semantic-jobs-for-file
+                           db provider file-id)
+          current-indexed (graph-read/semantic-indexed-for-file
+                           db provider file-id)
+          current-file-hash
+          (d/q '[:find ?hash .
+                 :in $ ?file-id
+                 :where
+                 [?file :file/id ?file-id]
+                 [?file :file/content-hash ?hash]]
+               db file-id)
+          marker-eid (:db/id marker)
+          current-marker (when marker-eid (d/pull db '[*] marker-eid))
+          marker-keys [:semantic.dirty/id :semantic.dirty/provider
+                       :semantic.dirty/file-id :semantic.dirty/file-hash
+                       :semantic.dirty/operation :semantic.dirty/created-at]
+          marker-current?
+          (if marker-eid
+            (= (select-keys marker marker-keys)
+               (select-keys current-marker marker-keys))
+            true)
+          file-current?
+          (= file-hash current-file-hash)
+          state-current?
+          (and (= pending current-pending)
+               (= indexed current-indexed))]
+      (if-not (and marker-current? file-current? state-current?)
+        {:applied? false :reason :stale-plan}
+        (let [job-tx
+              (mapcat
+               (fn [{:keys [action job existing]}]
+                 (case action
+                   :cancel
+                   (when existing [[:db/retractEntity (:db/id existing)]])
+
+                   :enqueue
+                   (let [{:keys [provider symbol-id file-id operation
+                                 document-hash available-at updated-at]}
+                         (validate-job! job)
+                         same? (and existing
+                                    (= operation
+                                       (:semantic.job/operation existing))
+                                    (= document-hash
+                                       (:semantic.job/document-hash existing))
+                                    (contains? #{:pending :leased}
+                                               (:semantic.job/status existing)))
+                         entity
+                         (cond-> {:semantic.job/id (job-id provider symbol-id)
+                                  :semantic.job/provider provider
+                                  :semantic.job/symbol-id symbol-id
+                                  :semantic.job/file-id file-id
+                                  :semantic.job/operation operation
+                                  :semantic.job/status :pending
+                                  :semantic.job/attempts 0
+                                  :semantic.job/available-at available-at
+                                  :semantic.job/updated-at updated-at}
+                           document-hash
+                           (assoc :semantic.job/document-hash document-hash))]
+                     (when-not same?
+                       (concat
+                        (when existing
+                          (retract-present
+                           existing [:semantic.job/document-hash
+                                     :semantic.job/lease-owner
+                                     :semantic.job/lease-until
+                                     :semantic.job/last-error]))
+                        [entity])))
+
+                   (throw (ex-info "Unknown semantic reconciliation action"
+                                   {:action action :file-id file-id}))))
+               actions)
+              tx (vec (concat job-tx
+                              (when marker-eid
+                                [[:db/retractEntity marker-eid]])))]
+          (when (seq tx)
+            (d/transact! conn tx))
+          {:applied? true :actions (count actions)}))))
 
   (lease-jobs! [graph provider owner now lease-ms limit]
     (when-not (and (string? owner) (seq owner))

@@ -58,7 +58,61 @@
         (map (juxt :symbol-id identity))
         (document/canonical-documents documents)))
 
-(defn- reconcile-file!
+(defn- reconciliation-plan
+  [lateon provider file-id desired current pending now]
+  (reduce
+   (fn [result symbol-id]
+     (let [wanted (get desired symbol-id)
+           indexed-record (get current symbol-id)
+           pending-record (get pending symbol-id)
+           enqueue (fn [operation document-hash]
+                     {:action :enqueue
+                      :existing pending-record
+                      :job (cond-> {:provider provider
+                                    :symbol-id symbol-id
+                                    :file-id file-id
+                                    :operation operation
+                                    :available-at now
+                                    :updated-at now}
+                             document-hash
+                             (assoc :document-hash document-hash))})]
+       (cond
+         (and wanted (same-indexed? lateon indexed-record wanted))
+         (if pending-record
+           (-> result
+               (update :unchanged inc)
+               (update :cancelled inc)
+               (update :actions conj {:action :cancel
+                                      :existing pending-record}))
+           (update result :unchanged inc))
+
+         (and wanted (= :failed (:semantic.job/status pending-record)))
+         ;; Terminal work remains inspectable until explicit semantic retry.
+         (update result :unchanged inc)
+
+         wanted
+         (-> result
+             (update :queued-upserts inc)
+             (update :actions conj
+                     (enqueue :upsert (:document-hash wanted))))
+
+         indexed-record
+         (-> result
+             (update :queued-deletes inc)
+             (update :actions conj (enqueue :delete nil)))
+
+         pending-record
+         (-> result
+             (update :cancelled inc)
+             (update :actions conj {:action :cancel
+                                    :existing pending-record}))
+
+         :else result)))
+   {:queued-upserts 0 :queued-deletes 0
+    :cancelled 0 :unchanged 0 :actions []}
+   (sort (set (concat (keys desired) (keys current) (keys pending))))))
+
+(defn- reconcile-file-once!
   [graph project lateon marker now]
   (let [file-id (:semantic.dirty/file-id marker)
         operation (:semantic.dirty/operation marker)
@@ -79,69 +133,52 @@
                      db provider file-id)
             pending (graph-read/semantic-jobs-for-file
                      db provider file-id)
-            all-symbols (sort (set (concat (keys desired)
-                                           (keys current)
-                                           (keys pending))))
-            counts
-            (reduce
-             (fn [result symbol-id]
-               (let [wanted (get desired symbol-id)
-                     indexed-record (get current symbol-id)
-                     pending-record (get pending symbol-id)]
-                 (cond
-                   (and wanted
-                        (same-indexed? lateon indexed-record wanted))
-                   (do
-                     (when pending-record
-                       (state/cancel-job! graph provider symbol-id))
-                     (-> result
-                         (update :unchanged inc)
-                         (update :cancelled +
-                                 (if pending-record 1 0))))
+            plan (reconciliation-plan lateon provider file-id desired
+                                      current pending now)
+            applied
+            (locking graph
+              (state/apply-reconciliation!
+               graph {:provider provider
+                      :file-id file-id
+                      :file-hash (:semantic.dirty/file-hash marker)
+                      :operation operation
+                      :marker marker
+                      :pending pending
+                      :indexed current
+                      :actions (:actions plan)}))]
+        (if (:applied? applied)
+          (-> plan
+              (dissoc :actions)
+              (assoc :status :reconciled
+                     :file-id file-id
+                     :diagnostics (:diagnostics built)))
+          {:status :stale :file-id file-id :diagnostics []
+           :queued-upserts 0 :queued-deletes 0
+           :cancelled 0 :unchanged 0})))))
 
-                   (and wanted
-                        (= :failed (:semantic.job/status pending-record)))
-                   ;; Terminal work is inspectable and remains terminal until
-                   ;; the operator explicitly requests semantic retry.
-                   (update result :unchanged inc)
-
-                   wanted
-                   (do
-                     (state/enqueue-job!
-                      graph {:provider provider
-                             :symbol-id symbol-id
-                             :file-id file-id
-                             :operation :upsert
-                             :document-hash (:document-hash wanted)
-                             :available-at now
-                             :updated-at now})
-                     (update result :queued-upserts inc))
-
-                   indexed-record
-                   (do
-                     (state/enqueue-job!
-                      graph {:provider provider
-                             :symbol-id symbol-id
-                             :file-id file-id
-                             :operation :delete
-                             :available-at now
-                             :updated-at now})
-                     (update result :queued-deletes inc))
-
-                   pending-record
-                   (do
-                     (state/cancel-job! graph provider symbol-id)
-                     (update result :cancelled inc))
-
-                   :else result)))
-             {:queued-upserts 0 :queued-deletes 0
-              :cancelled 0 :unchanged 0}
-             all-symbols)]
-        (state/clear-dirty! graph provider file-id)
-        (assoc counts
-               :status :reconciled
-               :file-id file-id
-               :diagnostics (:diagnostics built))))))
+(defn- reconcile-file!
+  [graph project lateon marker now]
+  (loop [attempt 0 marker marker]
+    (let [result (reconcile-file-once! graph project lateon marker now)]
+      (if (and (= :stale (:status result)) (< attempt 2))
+        (let [fresh-marker
+              (if (:db/id marker)
+                (some #(when (= (:semantic.dirty/file-id marker)
+                                (:semantic.dirty/file-id %))
+                         %)
+                      (state/dirty-records graph provider))
+                marker)]
+          (if fresh-marker
+            (recur (inc attempt) fresh-marker)
+            (assoc result :status :superseded)))
+        (if (= :stale (:status result))
+          (assoc result
+                 :status :deferred
+                 :diagnostics
+                 [{:level :warning :kind :semantic-reconciliation-stale
+                   :file-id (:semantic.dirty/file-id marker)
+                   :message "Graph state changed repeatedly during semantic reconciliation"}])
+          result)))))
 
 (defn- reconcile-file-safely!
   [graph project lateon marker now]

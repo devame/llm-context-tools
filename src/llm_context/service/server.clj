@@ -181,15 +181,15 @@
          (semantic-reconcile/retry-failed! graph project settings)
          (semantic-status graph runtime)))
     :semantic-sync
-    (with-graph-write
-      graph generation
-      #(do
-         ;; An explicit sync is also the operator's repair action for exhausted
-         ;; jobs. A full desired-state pass safely resets failed jobs while
-         ;; leaving already-current indexed symbols unchanged.
-         (semantic-reconcile/mark-full! graph)
-         (semantic-reconcile/reconcile! graph project settings)
-         (semantic-status graph runtime)))
+    (do
+      ;; An explicit sync is also the operator's repair action for exhausted
+      ;; jobs. Marking is a short mutation; document planning and source reads
+      ;; remain outside the project graph monitor.
+      (with-graph-write graph generation
+                        #(semantic-reconcile/mark-full! graph))
+      (semantic-reconcile/reconcile! graph project settings)
+      (read-consistently graph generation false
+                         #(semantic-status % runtime)))
     :stop :stopping
     (throw (ex-info (str "Unknown service operation: " (:op request))
                     {:exit-code 2})))))
