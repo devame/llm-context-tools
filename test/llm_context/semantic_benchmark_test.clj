@@ -2,7 +2,8 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
-            [llm-context.semantic-benchmark :as benchmark]))
+            [llm-context.semantic-benchmark :as benchmark]
+            [llm-context.service.client :as client]))
 
 (def private-result
   {:benchmark/version 4
@@ -50,3 +51,37 @@
       (finally
         (doseq [file (reverse (file-seq directory))]
           (io/delete-file file true))))))
+
+(deftest context-seed-matching-restores-canonical-selector-qualifiers
+  (let [calls (atom 0)
+        symbol {:id "symbol:synthetic-target"
+                :name "target"
+                :qualified-name "synthetic.core/target"
+                :platform :cljs
+                :file "src/synthetic/core.cljc"
+                :kind :symbol.kind/function}
+        judgment
+        {:id :synthetic/platform-seed
+         :query "find the synthetic target behavior"
+         :language :clojurescript
+         :query-type :behavior
+         :domain :synthetic
+         :relevance [(assoc (select-keys symbol
+                                         [:qualified-name :platform :file :kind])
+                            :grade 3)]}]
+    (with-redefs [client/request
+                  (fn [_ request]
+                    (swap! calls inc)
+                    (case (:op request)
+                      :query {:ok true :value {:results [symbol]}}
+                      :context
+                      {:ok true
+                       :value
+                       {:focus-resolution
+                        {:selected
+                         [(select-keys symbol [:id :name :qualified-name])]}
+                        :symbols [symbol]}}))]
+      (let [result (#'benchmark/run-query :synthetic-project judgment)]
+        (is (= 2 @calls))
+        (is (true? (:seed-hit? result)))
+        (is (true? (:packet-hit? result)))))))

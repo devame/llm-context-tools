@@ -21,6 +21,15 @@
 (defn- elapsed-ms [started]
   (/ (- (System/nanoTime) started) 1000000.0))
 
+(defn- qualified-seeds [selected packet-symbols]
+  (let [symbols-by-id (into {} (map (juxt :id identity)) packet-symbols)]
+    (mapv (fn [seed]
+            ;; Focus-resolution records intentionally stay compact. Restore
+            ;; canonical platform/file/kind qualifiers from the packet before
+            ;; applying maintained format-2 selectors.
+            (merge (get symbols-by-id (:id seed)) seed))
+          selected)))
+
 (defn- run-query
   [project {:keys [id query language query-type domain relevance]
             :as judgment}]
@@ -51,6 +60,7 @@
           packet (when (:ok context-response) (:value context-response))
           selected (get-in packet [:focus-resolution :selected])
           packet-symbols (:symbols packet)
+          qualified-selected (qualified-seeds selected packet-symbols)
           ranking (evaluation/ranked-metrics results judgment)]
       {:id id
        :query query
@@ -65,7 +75,9 @@
        :ndcg (:ndcg ranking)
        :hard-negative-before-relevant?
        (:hard-negative-before-relevant? ranking)
-       :seed-hit? (boolean (some #(evaluation/relevant? % relevance) selected))
+       :seed-hit?
+       (boolean (some #(evaluation/relevant? % relevance)
+                      qualified-selected))
        :packet-hit?
        (boolean (some #(evaluation/relevant? % relevance) packet-symbols))
        :lateon? (boolean
