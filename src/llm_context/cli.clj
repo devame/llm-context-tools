@@ -140,13 +140,19 @@
   [{:keys [stage files diagnostics completed total file entities
            exact-edges references external dynamic ambiguous unresolved
            upserts deletes deferred batch-size phase
-           elapsed-seconds]}]
+           elapsed-seconds]
+    :as event}]
   (case stage
     :discover-start "Discovering source files..."
     :discover-complete
     (format "Discovered %d supported files (%d diagnostics)" files diagnostics)
     :parse-progress (format "Parsing %d/%d: %s" completed total file)
     :parse-complete (format "Parsed %d/%d files" completed total)
+    :analyzer-phase-start
+    (format "Analyzer phase started: %s" (name phase))
+    :analyzer-phase-complete
+    (format "Analyzer phase completed: %s (%.1f ms)"
+            (name phase) (double (:elapsed-ms event)))
     :semantic-start "Running configured semantic providers..."
     :semantic-complete "Semantic provider stage complete"
     :analyzer-finalize-start "Finalizing analyzer graph facts..."

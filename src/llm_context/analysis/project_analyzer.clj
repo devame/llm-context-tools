@@ -34,6 +34,36 @@
   (assoc-in output [:file :file/semantic-hash]
             (semantic-fingerprint output)))
 
+(defn- emit! [progress stage data]
+  (when progress
+    (progress (assoc data :stage stage))))
+
+(defn- run-phase [progress phase operation summary]
+  (emit! progress :analyzer-phase-start {:phase phase})
+  (let [started (System/nanoTime)
+        value (operation)
+        elapsed-ms (/ (- (System/nanoTime) started) 1000000.0)
+        details (summary value)]
+    (emit! progress :analyzer-phase-complete
+           (assoc details :phase phase :elapsed-ms elapsed-ms))
+    {:value value :elapsed-ms elapsed-ms :details details}))
+
+(defn- analysis-counts [snapshot]
+  (into (sorted-map)
+        (map (fn [[kind records]] [kind (count records)]))
+        (:analysis snapshot)))
+
+(defn- output-counts [outputs]
+  (let [entities (mapcat :entities outputs)
+        by-type (frequencies (map :entity/type entities))]
+    {:files (count outputs)
+     :entities (reduce + 0 (map #(count (:entities %)) outputs))
+     :symbols (get by-type :entity.type/symbol 0)
+     :exact-edges (get by-type :entity.type/edge 0)
+     :references (get by-type :entity.type/reference 0)
+     :topics (get by-type :entity.type/topic 0)
+     :effects (get by-type :entity.type/effect 0)}))
+
 (defn- outputs-by-path!
   "Require the analyzer boundary to be a bijection with discovery. Silent
   last-write-wins path maps previously hid duplicate adapter outputs."
@@ -123,34 +153,71 @@
     (mapv
      (fn [{:keys [relative-path]}]
        (let [raw (get raw-by-path relative-path)]
-         (-> raw
-             (assoc :file (get canonical-files relative-path)
-                    :entities (vec (get grouped relative-path [])))
-             with-fingerprint)))
+         (assoc raw
+                :file (get canonical-files relative-path)
+                :entities (vec (get grouped relative-path [])))))
      files)))
+
+(defn- fingerprint-outputs [outputs]
+  (mapv with-fingerprint outputs))
 
 (defn analyze
   "Analyze every discovered supported file and return one output per file in
   discovery order. clj-kondo runs once for the full Clojure family."
-  [project files]
+  ([project files]
+   (analyze project files nil))
+  ([project files progress]
   (let [files (vec files)
         clojure-files
         (filterv #(contains? clj-kondo/clojure-languages (:language %)) files)
         janet-files (filterv #(= :language/janet (:language %)) files)
         edn-files (filterv #(= :language/edn-data (:language %)) files)
-        clojure-snapshot (clj-kondo/analyze! project clojure-files)
-        janet-snapshot
-        (if (seq janet-files)
-          (janet/analyze project janet-files)
-          {:outputs [] :diagnostics [] :catalog-version janet/catalog-version})
+        clojure-phase
+        (run-phase progress :clj-kondo
+                   #(clj-kondo/analyze! project clojure-files)
+                   (fn [snapshot]
+                     {:files (count clojure-files)
+                      :records (reduce + 0 (vals (analysis-counts snapshot)))}))
+        clojure-snapshot (:value clojure-phase)
+        janet-phase
+        (run-phase progress :janet-analysis
+                   #(if (seq janet-files)
+                      (janet/analyze project janet-files)
+                      {:outputs [] :diagnostics []
+                       :catalog-version janet/catalog-version})
+                   (fn [snapshot]
+                     {:files (count janet-files)
+                      :entities (reduce + 0
+                                        (map (comp count :entities)
+                                             (:outputs snapshot)))}))
+        janet-snapshot (:value janet-phase)
         janet-outputs (:outputs janet-snapshot)
-        outputs
-        (map ir/normalize-output
-             (concat
-              (clojure-analysis/materialize clojure-files clojure-snapshot)
-              janet-outputs
-              (map edn-output edn-files)))
-        outputs (canonicalize-outputs files outputs)]
+        materialize-phase
+        (run-phase progress :relationship-materialization
+                   #(mapv ir/normalize-output
+                          (concat
+                           (clojure-analysis/materialize
+                            clojure-files clojure-snapshot)
+                           janet-outputs
+                           (map edn-output edn-files)))
+                   output-counts)
+        raw-outputs (:value materialize-phase)
+        canonical-phase
+        (run-phase progress :canonicalization
+                   #(canonicalize-outputs files raw-outputs)
+                   output-counts)
+        canonical-outputs (:value canonical-phase)
+        fingerprint-phase
+        (run-phase progress :fingerprinting
+                   #(fingerprint-outputs canonical-outputs)
+                   output-counts)
+        outputs (:value fingerprint-phase)
+        timings
+        {:clj-kondo-ms (:elapsed-ms clojure-phase)
+         :janet-analysis-ms (:elapsed-ms janet-phase)
+         :relationship-materialization-ms (:elapsed-ms materialize-phase)
+         :canonicalization-ms (:elapsed-ms canonical-phase)
+         :fingerprinting-ms (:elapsed-ms fingerprint-phase)}]
     {:outputs
      outputs
      :analyzers
@@ -158,6 +225,10 @@
                   :configuration-fingerprint
                   (:configuration-fingerprint clojure-snapshot)}
       :janet {:catalog-version (:catalog-version janet-snapshot)}}
+     :analysis-metrics
+     {:timings timings
+      :clojure-records (analysis-counts clojure-snapshot)
+      :output (output-counts outputs)}
      ;; File-scoped clj-kondo integrity diagnostics live on their output so
      ;; preservation decisions and user reporting share one source of truth.
-     :diagnostics (vec (:diagnostics janet-snapshot))}))
+     :diagnostics (vec (:diagnostics janet-snapshot))})))

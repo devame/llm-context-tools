@@ -94,6 +94,7 @@
            :changed (count changed)
            :deleted (count deleted)
            :entities (reduce + (map #(inc (count (:entities %))) changed))
+           :analysis-metrics (:analysis-metrics snapshot)
            :semantic semantic-plan
            :analyzers (:analyzers snapshot)
            :diagnostics (vec (concat diagnostics

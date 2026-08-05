@@ -101,6 +101,11 @@
       (is (= 1 (:files result)))
       (is (pos? (:entities result)))
       (is (= [:discover-start :discover-complete :parse-progress
+              :analyzer-phase-start :analyzer-phase-complete
+              :analyzer-phase-start :analyzer-phase-complete
+              :analyzer-phase-start :analyzer-phase-complete
+              :analyzer-phase-start :analyzer-phase-complete
+              :analyzer-phase-start :analyzer-phase-complete
               :parse-complete :persist-start :persist-progress
               :analyzer-finalize-start :analyzer-finalize-complete
               :semantic-reconcile-start :semantic-reconcile-complete
@@ -109,6 +114,16 @@
       (is (= full/persistence-batch-size
              (:batch-size (first (filter #(= :persist-start (:stage %))
                                         @events)))))
+      (is (= [:clj-kondo :janet-analysis :relationship-materialization
+              :canonicalization :fingerprinting]
+             (mapv :phase
+                   (filter #(= :analyzer-phase-complete (:stage %))
+                           @events))))
+      (is (every? #(and (number? (:elapsed-ms %))
+                        (not (neg? (:elapsed-ms %))))
+                  (filter #(= :analyzer-phase-complete (:stage %))
+                          @events)))
+      (is (pos? (get-in result [:analysis-metrics :output :entities] 0)))
       (is (number?
            (:exact-edges
             (first (filter #(= :analyzer-finalize-complete (:stage %))

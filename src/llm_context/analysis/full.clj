@@ -65,7 +65,7 @@
              _ (emit! progress :parse-progress
                       {:completed 0 :total total
                        :file (some-> files first :relative-path)})
-             project-snapshot (project-analyzer/analyze project files)
+             project-snapshot (project-analyzer/analyze project files progress)
              extracted (:outputs project-snapshot)
              preserved (filterv :preserve? extracted)
              _ (emit! progress :parse-complete
@@ -104,6 +104,7 @@
            {:mode :full
             :files total
             :entities (count all-entities)
+            :analysis-metrics (:analysis-metrics project-snapshot)
             :graph-quality quality
             :semantic semantic-plan
             :diagnostics (vec (concat diagnostics

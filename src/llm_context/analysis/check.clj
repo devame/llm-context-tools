@@ -38,6 +38,7 @@
      :topics (get by-type :entity.type/topic 0)
      :effects (get by-type :entity.type/effect 0)
      :analyzers (:analyzers snapshot)
+     :analysis-metrics (:analysis-metrics snapshot)
      :diagnostics
      (vec (concat diagnostics
                   (:diagnostics snapshot)
