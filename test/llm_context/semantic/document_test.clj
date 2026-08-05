@@ -166,6 +166,8 @@
         second (document/build lateon symbol file-entity source
                                (reverse relationships))
         texts (mapv :text (:chunks first))
+        moderate (document/build lateon symbol file-entity source
+                                 (subvec relationships 0 100))
         large-source (str "(defn hub []\n"
                           (apply str (map #(str "  (println " % ")\n")
                                           (range 250)))
@@ -183,6 +185,10 @@
                               large-source relationships)]
     (is (= first second))
     (is (some #(str/includes? % "Metadata: [truncated]") texts))
+    (is (not (str/includes? (get-in moderate [:chunks 0 :text])
+                            "Metadata: [truncated]")))
+    (is (str/includes? (get-in moderate [:chunks 0 :text])
+                       "sample.target/operation-99"))
     (is (some #(str/includes? % source) texts))
     (is (every? #(<= (count (.getBytes ^String %
                                       java.nio.charset.StandardCharsets/UTF_8))

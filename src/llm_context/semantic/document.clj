@@ -166,13 +166,16 @@
 (defn- render-chunks [header source {:keys [max-document-bytes
                                              chunk-overlap-lines]}]
   (let [separator "\n\nSource:\n"
-        ;; Reserve a useful source window in addition to the stable chunk
-        ;; annotation. High-connectivity symbols can otherwise spend the
-        ;; entire document budget on relationship metadata.
+        ;; Preserve every header that already fit document version 3. Only
+        ;; previously unindexable metadata is capped, reserving a useful source
+        ;; window without rehashing existing valid documents.
         source-reserve (min 512 (max 1 (quot max-document-bytes 4)))
-        header-limit (min 2048
-                          (- max-document-bytes (utf8-size separator) 64
-                             source-reserve))
+        existing-header-limit (- max-document-bytes (utf8-size separator) 65)
+        header-limit (if (<= (utf8-size header) existing-header-limit)
+                       existing-header-limit
+                       (min 2048
+                            (- max-document-bytes (utf8-size separator) 64
+                               source-reserve)))
         _ (when-not (pos? header-limit)
             (throw (ex-info "Semantic document byte limit is too small"
                             {:max-document-bytes max-document-bytes})))
