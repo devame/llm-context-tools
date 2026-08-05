@@ -6,20 +6,32 @@
   below each checkout's ignored .llm-context directory."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.java.shell :as shell]
             [clojure.string :as str]
+            [llm-context.config :as config]
+            [llm-context.project :as project]
             [llm-context.retrieval-corpus :as corpus]
             [llm-context.semantic.mode :as retrieval-mode]
             [llm-context.version :as version])
-  (:import [java.nio.file Files LinkOption Path Paths]
+  (:import [java.lang ProcessHandle]
+           [java.nio.file Files LinkOption Path Paths]
            [java.security MessageDigest]
            [java.time Instant]
-           [java.util Random]))
+           [java.util Random]
+           [java.util.concurrent TimeUnit]))
 
 (def default-manifest "bench/public-semantic-evaluation/manifest.edn")
 (def default-repetitions 3)
 (def modes [:fts-only :lateon-only :hybrid])
 (def splits [:development :held-out])
+(def default-stage-timeouts-ms
+  {:doctor (* 5 60 1000)
+   :analysis (* 30 60 1000)
+   :service-start (* 5 60 1000)
+   :semantic-sync (* 30 60 1000)
+   :status (* 5 60 1000)
+   :benchmark (* 15 60 1000)
+   :service-stop (* 5 60 1000)})
+(def ^:dynamic *heartbeat-ms* 30000)
 (def ^:private retrieval-metric-keys
   [:search-recall-at-10?
    :search-recall-at-20?
@@ -100,23 +112,12 @@
            (map #(format "%02x" (bit-and % 0xff))
                 (.digest digest (Files/readAllBytes ^Path path))))))
 
-(defn- command
-  [repo-root args]
-  (apply shell/sh
-         (concat ["clojure" "-M" "-m" "llm-context.main" "-q"
-                  "-C" (str repo-root)]
-                 args
-                 [{:dir (str (root-path "."))}])))
-
-(defn- semantic-benchmark-command [args]
-  (apply shell/sh
-         (concat ["clojure" "-M:semantic-bench"]
-                 args
-                 [{:dir (str (root-path "."))}])))
-
-(defn- git-command [checkout args]
-  (apply shell/sh
-         (concat ["git" "-C" (str checkout)] args)))
+(defn- sha256-text [value]
+  (let [digest (MessageDigest/getInstance "SHA-256")]
+    (apply str
+           (map #(format "%02x" (bit-and % 0xff))
+                (.digest digest (.getBytes (str value)
+                                          java.nio.charset.StandardCharsets/UTF_8))))))
 
 (defn- write-log! [checkout relative content]
   (let [path (.normalize (.resolve ^Path checkout relative))]
@@ -127,25 +128,107 @@
     (spit (str path) content)
     path))
 
-(defn- run-and-log! [checkout log-name args]
-  (let [result (command checkout args)]
-    (write-log! checkout log-name
-                (pr-str {:args args :exit (:exit result)
-                         :out (:out result) :err (:err result)}))
-    (when-not (zero? (:exit result))
-      (fail! "Public evaluation command failed; inspect the external checkout log"
-             {:command args :exit (:exit result)}))
-    result))
+(defn- terminate-tree! [^Process process]
+  (let [handle (.toHandle process)
+        descendants (with-open [stream (.descendants handle)]
+                      (vec (iterator-seq (.iterator stream))))]
+    (doseq [^ProcessHandle descendant (reverse descendants)]
+      (.destroy descendant))
+    (.destroy process)
+    (when-not (.waitFor process 5 TimeUnit/SECONDS)
+      (doseq [^ProcessHandle descendant (reverse descendants)]
+        (when (.isAlive descendant)
+          (.destroyForcibly descendant)))
+      (.destroyForcibly process)
+      (.waitFor process 5 TimeUnit/SECONDS))))
 
-(defn- run-benchmark-and-log! [checkout log-name args]
-  (let [result (semantic-benchmark-command args)]
-    (write-log! checkout log-name
-                (pr-str {:args args :exit (:exit result)
-                         :out (:out result) :err (:err result)}))
-    (when-not (zero? (:exit result))
-      (fail! "Public benchmark command failed; inspect the external checkout log"
-             {:command args :exit (:exit result)}))
-    result))
+(defn- latest-progress [^Path stdout ^Path stderr]
+  (try
+    (->> [stdout stderr]
+         (mapcat (fn [path]
+                   (when (Files/exists path (make-array LinkOption 0))
+                     (Files/readAllLines path))))
+         (filter #(or (str/includes? % "analyzer")
+                      (str/includes? % "Analyz")
+                      (str/includes? % "persist")))
+         last)
+    (catch Throwable _ nil)))
+
+(defn run-process!
+  "Run one bounded stage with output redirected before process start."
+  [checkout log-name stage command timeout-ms]
+  (let [stdout (write-log! checkout log-name "")
+        stderr (write-log! checkout (str log-name ".stderr.log") "")
+        result-log (str log-name ".result.edn")
+        builder (doto (ProcessBuilder. ^java.util.List (vec command))
+                  (.directory (.toFile (root-path ".")))
+                  (.redirectOutput (.toFile stdout))
+                  (.redirectError (.toFile stderr)))
+        started (System/currentTimeMillis)
+        process (.start builder)
+        running (atom true)
+        heartbeat
+        (future
+          (while @running
+            (Thread/sleep (long *heartbeat-ms*))
+            (when (and @running (.isAlive process))
+              (let [latest (latest-progress stdout stderr)]
+                (println
+                 (pr-str
+                  (cond-> {:event :public-stage-heartbeat
+                           :stage stage
+                           :elapsed-ms (- (System/currentTimeMillis) started)}
+                    latest (assoc :latest-progress latest))))
+                (flush)))))
+        completed? (.waitFor process (long timeout-ms) TimeUnit/MILLISECONDS)
+        _ (when-not completed? (terminate-tree! process))
+        _ (reset! running false)
+        _ (future-cancel heartbeat)
+        exit (if completed? (.exitValue process) :timeout)
+        result {:stage stage :command (vec command) :exit exit
+                :timed-out? (not completed?)
+                :elapsed-ms (- (System/currentTimeMillis) started)
+                :stdout-log (str stdout) :stderr-log (str stderr)}]
+    (write-log! checkout result-log (str (pr-str result) "\n"))
+    (when-not (and completed? (zero? exit))
+      (fail! (if completed?
+               "Public evaluation stage failed; inspect the external checkout logs"
+               "Public evaluation stage timed out; inspect the external checkout logs")
+             result))
+    (assoc result :out (Files/readString stdout) :err "")))
+
+(defn- llm-command [checkout args quiet?]
+  (vec (concat ["clojure" "-M" "-m" "llm-context.main"]
+               (when quiet? ["-q"])
+               ["-C" (str checkout)] args)))
+
+(defn- run-and-log! [checkout log-name stage args timeouts]
+  (run-process! checkout log-name stage
+                (llm-command checkout args (not= :analysis stage))
+                (get timeouts stage)))
+
+(defn- run-benchmark-and-log! [checkout log-name args timeouts]
+  (run-process! checkout log-name :benchmark
+                (into ["clojure" "-M:semantic-bench"] args)
+                (:benchmark timeouts)))
+
+(defn- git-command [checkout args]
+  (let [temporary (Files/createTempFile
+                   "llm-context-public-git-" ".log"
+                   (make-array java.nio.file.attribute.FileAttribute 0))]
+    (try
+      (let [process (-> (ProcessBuilder.
+                         ^java.util.List
+                         (vec (concat ["git" "-C" (str checkout)] args)))
+                        (.redirectErrorStream true)
+                        (.redirectOutput (.toFile temporary))
+                        .start)
+            completed? (.waitFor process 60 TimeUnit/SECONDS)]
+        (when-not completed? (terminate-tree! process))
+        {:exit (if completed? (.exitValue process) 124)
+         :out (Files/readString temporary) :err ""})
+      (finally
+        (Files/deleteIfExists temporary)))))
 
 (defn- clean-and-pinned! [checkout {:keys [commit]}]
   (when-not (Files/isDirectory checkout (make-array LinkOption 0))
@@ -194,30 +277,31 @@
        (zero? (:dirty status 0))
        (loopback-endpoint? (get-in status [:runtime :endpoint]))))
 
-(defn- start-and-synchronize! [checkout]
+(defn- start-and-synchronize! [checkout timeouts]
   (run-and-log! checkout ".llm-context/public-semantic-evaluation/preflight/doctor.edn"
-                ["doctor"])
+                :doctor ["doctor"] timeouts)
   (run-and-log! checkout ".llm-context/public-semantic-evaluation/preflight/analyze.edn"
-                ["analyze" "--full"])
+                :analysis ["analyze" "--full"] timeouts)
   (run-and-log! checkout ".llm-context/public-semantic-evaluation/preflight/service-start.edn"
-                ["service" "start"])
+                :service-start ["service" "start"] timeouts)
   (run-and-log! checkout ".llm-context/public-semantic-evaluation/preflight/sync.edn"
-                ["semantic" "sync" "--wait"])
+                :semantic-sync ["semantic" "sync" "--wait"] timeouts)
   (let [status-result
         (run-and-log! checkout
                       ".llm-context/public-semantic-evaluation/preflight/status.edn"
-                      ["semantic" "status"])
+                      :status ["semantic" "status"] timeouts)
         status (parse-edn-output status-result)]
     (when-not (synchronized-status? status)
       (fail! "Public checkout did not reach complete semantic coverage" {}))
     status))
 
-(defn- stop-service! [checkout]
-  (let [result (command checkout ["service" "stop"])]
-    (write-log! checkout ".llm-context/public-semantic-evaluation/preflight/service-stop.edn"
-                (pr-str {:args ["service" "stop"] :exit (:exit result)
-                         :out (:out result) :err (:err result)}))
-    result))
+(defn- stop-service! [checkout timeouts]
+  (try
+    (run-and-log!
+     checkout ".llm-context/public-semantic-evaluation/preflight/service-stop.edn"
+     :service-stop ["service" "stop"] timeouts)
+    (catch clojure.lang.ExceptionInfo error
+      (ex-data error))))
 
 (defn- validate-corpora! [checkout repository]
   (into {}
@@ -243,7 +327,7 @@
                                  metric-keys))
          (:query-results result))})
 
-(defn- benchmark-split! [checkout repository split repetitions]
+(defn- benchmark-split! [checkout repository split repetitions timeouts]
   (let [corpus-path (get-in repository [:corpus split])]
     (into {}
           (for [mode modes]
@@ -262,7 +346,8 @@
                             [(str checkout) corpus-path
                              "--mode" (retrieval-mode/name-of mode)
                              "--output"
-                             (str output-path)])]
+                             (str output-path)]
+                            timeouts)]
                        ;; Standard output is the privacy-safe summary. Read
                        ;; the complete query-level result only from ignored
                        ;; external state for determinism and aggregation.
@@ -425,38 +510,82 @@
               :corpus corpus})
            corpus-results)}))
 
+(def ^:private resume-relative
+  ".llm-context/public-semantic-evaluation/resume.edn")
+
+(defn- repository-resume-key
+  [checkout repository corpus-results repetitions]
+  (let [settings (config/load-config (project/context (str checkout)))
+        lateon (get-in settings [:semantic :lateon-code])
+        scorer (git-command (root-path ".") ["rev-parse" "HEAD"])]
+    {:repository (:id repository)
+     :commit (:commit repository)
+     :corpus-hashes
+     (into (sorted-map)
+           (map (fn [[split value]] [split (:hash value)]))
+           corpus-results)
+     :retrieval-runtime version/value
+     :scorer-commit (str/trim (:out scorer))
+     :model-revision (:model-revision lateon)
+     :configuration-hash
+     (sha256-text (pr-str {:lateon lateon :modes modes
+                           :repetitions repetitions}))}))
+
+(defn- resumed-result [checkout key]
+  (try
+    (let [path (.resolve ^Path checkout resume-relative)
+          record (edn/read-string (Files/readString path))]
+      (when (= key (:key record)) (:result record)))
+    (catch Throwable _ nil)))
+
+(defn- write-resume! [checkout key result]
+  (write-log! checkout resume-relative
+              (str (pr-str {:key key :completed-at (str (Instant/now))
+                            :result result})
+                   "\n")))
+
 (defn run-suite!
   "Run every manifest repository and return aggregate-only public metadata."
   ([root manifest]
    (run-suite! root manifest {}))
-  ([root manifest {:keys [repetitions]
+  ([root manifest {:keys [repetitions timeouts resume?]
                    :or {repetitions (or (:repetitions manifest)
-                                        default-repetitions)}}]
+                                        default-repetitions)
+                        resume? true}}]
    (validate-manifest! manifest)
    (let [source-root (root-path ".")
+         timeouts (merge default-stage-timeouts-ms timeouts)
          repository-results
          (mapv
           (fn [repository]
             (let [checkout (checkout-path root (:checkout repository))]
               (clean-and-pinned! checkout repository)
-              (try
-                (let [status (start-and-synchronize! checkout)
-                      corpus-results (validate-corpora! checkout repository)
-                        runs
-                        (vec
-                         (for [split splits
-                               [mode result]
-                               (benchmark-split! checkout repository split repetitions)]
-                           {:repository (:id repository)
-                            :split split
-                            :mode mode
-                            :result result}))]
-                    {:repository repository
-                     :status (select-keys status [:completeness :indexed])
-                     :corpus corpus-results
-                     :runs runs})
-                (finally
-                  (stop-service! checkout)))))
+              (let [corpus-results (validate-corpora! checkout repository)
+                    resume-key (repository-resume-key
+                                checkout repository corpus-results repetitions)]
+                (or
+                 (when resume? (resumed-result checkout resume-key))
+                 (try
+                   (let [status (start-and-synchronize! checkout timeouts)
+                         runs
+                         (vec
+                          (for [split splits
+                                [mode result]
+                                (benchmark-split!
+                                 checkout repository split repetitions timeouts)]
+                            {:repository (:id repository)
+                             :split split
+                             :mode mode
+                             :result result}))
+                         result
+                         {:repository repository
+                          :status (select-keys status [:completeness :indexed])
+                          :corpus corpus-results
+                          :runs runs}]
+                     (write-resume! checkout resume-key result)
+                     result)
+                   (finally
+                     (stop-service! checkout timeouts)))))))
           (:repositories manifest))
          run-records
          (vec
@@ -472,7 +601,9 @@
                           [mode (aggregate-mode run-records mode)]))})))
 
 (defn- parse-args [args]
-  (loop [remaining args result {:root nil :manifest default-manifest :output nil}]
+  (loop [remaining args
+         result {:root nil :manifest default-manifest :output nil
+                 :resume? true :timeouts {}}]
     (if-let [argument (first remaining)]
       (case argument
         "--manifest"
@@ -483,18 +614,33 @@
         (if-let [path (second remaining)]
           (recur (nnext remaining) (assoc result :output path))
           (fail! "--output requires a path" {}))
+        "--no-resume"
+        (recur (next remaining) (assoc result :resume? false))
+        "--stage-timeout"
+        (if-let [value (second remaining)]
+          (let [[stage seconds] (str/split value #"=" 2)
+                stage (keyword stage)
+                seconds (parse-long (or seconds ""))]
+            (when-not (and (contains? default-stage-timeouts-ms stage)
+                           (pos-int? seconds))
+              (fail! "--stage-timeout requires STAGE=positive-seconds"
+                     {:value value}))
+            (recur (nnext remaining)
+                   (assoc-in result [:timeouts stage] (* seconds 1000))))
+          (fail! "--stage-timeout requires STAGE=positive-seconds" {}))
         (if (:root result)
           (fail! "Only one external checkout root may be supplied" {})
           (recur (next remaining) (assoc result :root argument))))
       (if (:root result)
         result
-        (fail! "Usage: clojure -M:public-semantic-evaluation CHECKOUT_ROOT [--manifest PATH] [--output PATH]"
+        (fail! "Usage: clojure -M:public-semantic-evaluation CHECKOUT_ROOT [--manifest PATH] [--output PATH] [--no-resume] [--stage-timeout STAGE=SECONDS]"
                {})))))
 
 (defn -main [& args]
   (try
-    (let [{:keys [root manifest output]} (parse-args args)
-          suite (run-suite! root (validate-manifest! (read-manifest manifest)))
+    (let [{:keys [root manifest output resume? timeouts]} (parse-args args)
+          suite (run-suite! root (validate-manifest! (read-manifest manifest))
+                            {:resume? resume? :timeouts timeouts})
           rendered (str (pr-str suite) "\n")]
       (if output
         (do

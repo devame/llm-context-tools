@@ -1,6 +1,12 @@
 (ns llm-context.public-semantic-evaluation-test
   (:require [clojure.test :refer [deftest is testing]]
-            [llm-context.public-semantic-evaluation :as suite]))
+            [llm-context.public-semantic-evaluation :as suite])
+  (:import [java.nio.file Files LinkOption]))
+
+(defn- temp-checkout []
+  (Files/createTempDirectory
+   "llm-context-public-process-"
+   (make-array java.nio.file.attribute.FileAttribute 0)))
 
 (deftest checked-in-manifest-has-the-three-public-repositories
   (let [manifest (suite/read-manifest "bench/public-semantic-evaluation/manifest.edn")]
@@ -54,3 +60,80 @@
     (is (= 0.5 (get-in report [:query-weighted :search-hit? :mean])))
     (is (= 20.0 (get-in report [:latency-ms :search :mean])))
     (is (not (re-find #"query/one|query/two" rendered)))))
+
+(deftest process-stages-stream-separate-logs-and-heartbeats
+  (let [checkout (temp-checkout)
+        output
+        (binding [suite/*heartbeat-ms* 10]
+          (with-out-str
+            (suite/run-process!
+             checkout ".llm-context/public-semantic-evaluation/test.log"
+             :benchmark
+             ["bash" "-c"
+              "printf streamed-out; printf streamed-err >&2; sleep 0.08"]
+             2000)))
+        base (.resolve checkout
+                       ".llm-context/public-semantic-evaluation/test.log")]
+    (is (= "streamed-out" (Files/readString base)))
+    (is (= "streamed-err"
+           (Files/readString
+            (.resolve checkout
+                      ".llm-context/public-semantic-evaluation/test.log.stderr.log"))))
+    (is (re-find #":public-stage-heartbeat" output))))
+
+(deftest timed-out-stage-terminates-descendants-and-records-failure
+  (when-not (.startsWith (.toLowerCase (System/getProperty "os.name")) "windows")
+    (let [checkout (temp-checkout)
+          error
+          (try
+            (suite/run-process!
+             checkout ".llm-context/public-semantic-evaluation/timeout.log"
+             :benchmark
+             ["bash" "-c" "sleep 30 & child=$!; echo $child; wait"]
+             100)
+            nil
+            (catch clojure.lang.ExceptionInfo error error))
+          stdout (.resolve checkout
+                           ".llm-context/public-semantic-evaluation/timeout.log")
+          child-pid (parse-long (.trim (Files/readString stdout)))]
+      (is (true? (:timed-out? (ex-data error))))
+      (is (= :timeout (:exit (ex-data error))))
+      (loop [attempt 0]
+        (let [alive? (when-let [handle (some-> child-pid
+                                               java.lang.ProcessHandle/of
+                                               (.orElse nil))]
+                       (.isAlive handle))]
+          (if (or (not alive?) (= attempt 50))
+            (is (not alive?))
+            (do (Thread/sleep 20) (recur (inc attempt))))))
+      (is (Files/exists
+           (.resolve checkout
+                     ".llm-context/public-semantic-evaluation/timeout.log.result.edn")
+           (make-array LinkOption 0))))))
+
+(deftest resume-records-require-an-exact-compatibility-key
+  (let [checkout (temp-checkout)
+        key {:commit "a" :runtime "1"}
+        result {:repository {:id :fixture} :runs []}]
+    (#'suite/write-resume! checkout key result)
+    (is (= result (#'suite/resumed-result checkout key)))
+    (is (nil? (#'suite/resumed-result checkout (assoc key :runtime "2"))))))
+
+(deftest repository-failure-still-attempts-service-shutdown
+  (let [checkout (temp-checkout)
+        stopped? (atom false)
+        manifest {:repositories [{:id :fixture}] :repetitions 1}]
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo #"preflight failed"
+         (with-redefs-fn
+           {#'suite/validate-manifest! identity
+            #'suite/checkout-path (fn [& _] checkout)
+            #'suite/clean-and-pinned! (fn [& _] true)
+            #'suite/validate-corpora! (fn [& _] {})
+            #'suite/repository-resume-key (fn [& _] {:key true})
+            #'suite/resumed-result (fn [& _] nil)
+            #'suite/start-and-synchronize!
+            (fn [& _] (throw (ex-info "preflight failed" {})))
+            #'suite/stop-service! (fn [& _] (reset! stopped? true))}
+           #(suite/run-suite! (str checkout) manifest {:resume? false}))))
+    (is (true? @stopped?))))
