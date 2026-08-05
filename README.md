@@ -115,7 +115,7 @@ llm-context doctor
 llm-context analyze [--full|--check]
 llm-context query stats
 llm-context query find-symbol <name-or-id>
-llm-context query search <natural-language-query> [--explain]
+llm-context query search <natural-language-query> [--mode fts-only|lateon-only|hybrid] [--explain]
 llm-context query callers <symbol-id>
 llm-context query callees <symbol-id> [--include-external]
 llm-context query trace <symbol-id> [--depth N] [--limit N]
@@ -137,10 +137,12 @@ llm-context semantic retry --failed [--wait]
 llm-context service start|status|stop
 ```
 
-`find-symbol` and `context` use Datalevin's embedded full-text index across
-symbol names, qualified names, signatures, and documentation. This search is
-local and model-free. `query search` fuses those lexical results with the local
-LateOn multi-vector index. It preserves exact identifiers, rejects semantic
+`find-symbol` and the `fts-only` search mode use Datalevin's embedded full-text
+index across symbol names, qualified names, signatures, and documentation.
+This search is local and model-free. `lateon-only` uses only
+freshness-validated local LateOn candidates and does not fall back to lexical
+results. The default `hybrid` mode fuses lexical results with the local LateOn
+multi-vector index. It preserves exact identifiers, rejects semantic
 candidates whose content hash or model revision is stale, and falls back to
 Datalevin whenever the sidecar is unavailable.
 

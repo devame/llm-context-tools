@@ -1,0 +1,108 @@
+{:corpus/version 2
+ :name "re-frame public held-out retrieval judgments"
+ :queries
+ [{:id :re-frame/handler-error
+   :language :clojurescript :query-type :registration :domain :events
+   :query "where can applications install a handler for failures during event processing?"
+   :relevance [{:qualified-name "re-frame.core/reg-event-error-handler"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/reg-event-ctx"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/context-handler
+   :language :clojurescript :query-type :registration :domain :events
+   :query "which registration helper exposes the complete event context to a handler?"
+   :relevance [{:qualified-name "re-frame.core/reg-event-ctx"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/reg-event-db"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/raw-subscription
+   :language :clojurescript :query-type :registration :domain :subscriptions
+   :query "where can a subscription implementation be registered without the normal wrapper?"
+   :relevance [{:qualified-name "re-frame.core/reg-sub-raw"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/reg-sub"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/raw-subscription-query
+   :language :clojurescript :query-type :behavior :domain :subscriptions
+   :query "which operation resolves a query vector against a reaction?"
+   :relevance [{:qualified-name "re-frame.core/query-v-for-reaction"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/live-query-vs"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/live-query-values
+   :language :clojurescript :query-type :behavior :domain :subscriptions
+   :query "where are multiple subscription values combined for a live query?"
+   :relevance [{:qualified-name "re-frame.core/live-query-vs"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/query-v-for-reaction"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/clear-event-handler
+   :language :clojurescript :query-type :state-flow :domain :events
+   :query "which API removes a registered event handler by identifier?"
+   :relevance [{:qualified-name "re-frame.core/clear-event"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/clear-fx"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/clear-effect-handler
+   :language :clojurescript :query-type :state-flow :domain :effects
+   :query "where is a previously registered effect implementation removed?"
+   :relevance [{:qualified-name "re-frame.core/clear-fx"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/clear-cofx"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/clear-coeffect-handler
+   :language :clojurescript :query-type :state-flow :domain :effects
+   :query "which helper removes a coeffect provider from the registry?"
+   :relevance [{:qualified-name "re-frame.core/clear-cofx"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/clear-fx"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/event-queue
+   :language :clojurescript :query-type :state-flow :domain :events
+   :query "where is a child event put onto the current dispatch queue?"
+   :relevance [{:qualified-name "re-frame.core/enqueue"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/dispatch"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/post-event-callbacks
+   :language :clojurescript :query-type :registration :domain :events
+   :query "which API registers work to run after an event queue has finished?"
+   :relevance [{:qualified-name "re-frame.core/add-post-event-callback"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/remove-post-event-callback"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/remove-post-event-callback
+   :language :clojurescript :query-type :state-flow :domain :events
+   :query "where is a previously registered completion callback detached?"
+   :relevance [{:qualified-name "re-frame.core/remove-post-event-callback"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/add-post-event-callback"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/trace-callback
+   :language :clojurescript :query-type :registration :domain :tracing
+   :query "which tracing API attaches a callback for completed trace spans?"
+   :relevance [{:qualified-name "re-frame.trace/register-trace-cb"
+                :platform :cljs :file "src/re_frame/trace.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.trace/register-epoch-cb"
+                     :platform :cljs :file "src/re_frame/trace.cljc"}]}
+  {:id :re-frame/epoch-callback
+   :language :clojurescript :query-type :registration :domain :tracing
+   :query "where is a callback registered for the end of a trace epoch?"
+   :relevance [{:qualified-name "re-frame.trace/register-epoch-cb"
+                :platform :cljs :file "src/re_frame/trace.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.trace/register-trace-cb"
+                     :platform :cljs :file "src/re_frame/trace.cljc"}]}
+  {:id :re-frame/global-interceptor-removal
+   :language :clojurescript :query-type :state-flow :domain :interceptors
+   :query "which setting API removes an interceptor from the global chain?"
+   :relevance [{:qualified-name "re-frame.core/clear-global-interceptor"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/reg-global-interceptor"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/reset-tracing
+   :language :clojurescript :query-type :state-flow :domain :tracing
+   :query "where is all accumulated trace state discarded before another run?"
+   :relevance [{:qualified-name "re-frame.trace/reset-tracing!"
+                :platform :cljs :file "src/re_frame/trace.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.trace/next-id"
+                     :platform :cljs :file "src/re_frame/trace.cljc"}]}]}

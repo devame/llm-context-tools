@@ -1,0 +1,128 @@
+{:corpus/version 2
+ :name "metabase public held-out retrieval judgments"
+ :queries
+ [{:id :metabase/rename-tables
+   :language :clojure :query-type :transformation :domain :drivers
+   :query "which driver operation renames tables as part of a schema change?"
+   :relevance [{:qualified-name "metabase.driver/rename-tables!" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.driver/add-parent!"}]}
+  {:id :metabase/run-shutdown-logic
+   :language :clojure :query-type :lifecycle :domain :startup
+   :query "where is the ordered shutdown logic executed?"
+   :relevance [{:qualified-name "metabase.startup.core/run-shutdown-logic!" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.startup.core/run-startup-logic!"}]}
+  {:id :metabase/check-not-archived
+   :language :clojure :query-type :behavior :domain :authorization
+   :query "which helper rejects access to an archived resource?"
+   :relevance [{:qualified-name "metabase.api.common/check-not-archived" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/present-in-trash-if-archived-directly"}]}
+  {:id :metabase/check-valid-page-params
+   :language :clojure :query-type :validation :domain :api
+   :query "where are pagination parameters validated for an API request?"
+   :relevance [{:qualified-name "metabase.api.common/check-valid-page-params" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/parse-multi-values-param"}]}
+  {:id :metabase/bit-to-boolean
+   :language :clojure :query-type :transformation :domain :api
+   :query "which API helper converts a database bit value to a boolean?"
+   :relevance [{:qualified-name "metabase.api.common/bit->boolean" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/parse-multi-values-param"}]}
+  {:id :metabase/parse-multi-values
+   :language :clojure :query-type :transformation :domain :api
+   :query "where are repeated query parameter values parsed into a collection?"
+   :relevance [{:qualified-name "metabase.api.common/parse-multi-values-param" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/bit->boolean"}]}
+  {:id :metabase/updates-with-archived
+   :language :clojure :query-type :data-flow :domain :api
+   :query "which helper adds archived-state filtering to update parameters?"
+   :relevance [{:qualified-name "metabase.api.common/updates-with-archived-directly" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/present-in-trash-if-archived-directly"}]}
+  {:id :metabase/present-in-trash
+   :language :clojure :query-type :data-flow :domain :api
+   :query "where is a resource made visible in the trash when directly archived?"
+   :relevance [{:qualified-name "metabase.api.common/present-in-trash-if-archived-directly" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/updates-with-archived-directly"}]}
+  {:id :metabase/invalid-param
+   :language :clojure :query-type :behavior :domain :errors
+   :query "which API helper raises an invalid-parameter exception?"
+   :relevance [{:qualified-name "metabase.api.common/throw-invalid-param-exception" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/throw-403"}]}
+  {:id :metabase/checkp
+   :language :clojure :query-type :behavior :domain :authorization
+   :query "where is a parameterized API condition checked?"
+   :relevance [{:qualified-name "metabase.api.common/checkp" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/check"}]}
+  {:id :metabase/do-api-let
+   :language :clojure :query-type :behavior :domain :api
+   :query "which API macro binds request values while preserving API error handling?"
+   :relevance [{:qualified-name "metabase.api.common/do-api-let" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/let-404"}]}
+  {:id :metabase/let-404
+   :language :clojure :query-type :behavior :domain :errors
+   :query "where is a missing-resource binding expressed as an API macro?"
+   :relevance [{:qualified-name "metabase.api.common/let-404" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/do-api-let"}]}
+  {:id :metabase/throw-403
+   :language :clojure :query-type :behavior :domain :errors
+   :query "which helper directly raises a forbidden error?"
+   :relevance [{:qualified-name "metabase.api.common/throw-403" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/check-403"}]}
+  {:id :metabase/plus-check-superuser
+   :language :clojure :query-type :behavior :domain :authorization
+   :query "where is a superuser check composed with an existing permission check?"
+   :relevance [{:qualified-name "metabase.api.common/+check-superuser" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/check-superuser"}]}
+  {:id :metabase/docs-openapi
+   :language :clojure :query-type :behavior :domain :api
+   :query "which function writes the generated OpenAPI specification to a file?"
+   :relevance [{:qualified-name "metabase.api.docs/write-openapi-spec-to-file!" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.docs/request-spec-regeneration!"}]}
+  {:id :metabase/docs-regenerate
+   :language :clojure :query-type :behavior :domain :api
+   :query "where is OpenAPI specification regeneration requested?"
+   :relevance [{:qualified-name "metabase.api.docs/request-spec-regeneration!" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.docs/write-openapi-spec-to-file!"}]}
+  {:id :metabase/docs-routes
+   :language :clojure :query-type :behavior :domain :api
+   :query "which docs helper builds the API documentation routes?"
+   :relevance [{:qualified-name "metabase.api.docs/make-routes" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.docs/request-spec-regeneration!"}]}
+  {:id :metabase/route-arg-keywords
+   :language :clojure :query-type :transformation :domain :routing
+   :query "where are route argument names extracted as keywords?"
+   :relevance [{:qualified-name "metabase.api.common.internal/route-arg-keywords" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common.internal/->matching-regex"}]}
+  {:id :metabase/matching-route-regex
+   :language :clojure :query-type :transformation :domain :routing
+   :query "which route helper builds a matching regular expression?"
+   :relevance [{:qualified-name "metabase.api.common.internal/->matching-regex" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common.internal/route-arg-keywords"}]}
+  {:id :metabase/parse-scopes
+   :language :clojure :query-type :transformation :domain :authorization
+   :query "where are endpoint scope declarations parsed?"
+   :relevance [{:qualified-name "metabase.api.macros.scope/parse-scopes" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.macros.scope/scope-satisfied?"}]}
+  {:id :metabase/scope-satisfied
+   :language :clojure :query-type :behavior :domain :authorization
+   :query "which predicate determines whether requested scopes are satisfied?"
+   :relevance [{:qualified-name "metabase.api.macros.scope/scope-satisfied?" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.macros.scope/enforce-scope"}]}
+  {:id :metabase/enforce-scope
+   :language :clojure :query-type :behavior :domain :authorization
+   :query "where are endpoint scopes enforced against a request?"
+   :relevance [{:qualified-name "metabase.api.macros.scope/enforce-scope" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.macros.scope/ensure-scopes-checked"}]}
+  {:id :metabase/ensure-scopes-checked
+   :language :clojure :query-type :behavior :domain :authorization
+   :query "which macro ensures endpoint scope checks were installed?"
+   :relevance [{:qualified-name "metabase.api.macros.scope/ensure-scopes-checked" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.macros.scope/enforce-scope"}]}
+  {:id :metabase/handler-with-openapi
+   :language :clojure :query-type :behavior :domain :api
+   :query "where is an API handler wrapped with its OpenAPI specification?"
+   :relevance [{:qualified-name "metabase.api.open-api/handler-with-open-api-spec" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.docs/make-routes"}]}
+  {:id :metabase/routes
+   :language :clojure :query-type :behavior :domain :routing
+   :query "which API utility returns the assembled route set?"
+   :relevance [{:qualified-name "metabase.api.util.handlers/routes" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.util.handlers/route-map-handler"}]}]}

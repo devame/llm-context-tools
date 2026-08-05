@@ -66,6 +66,19 @@ For a repository-specific semantic query set, use:
 clojure -M:semantic-bench /path/to/project query-set.edn
 ```
 
+For the pinned public cross-repository suite, prepare clean detached checkouts
+outside this repository and run:
+
+```bash
+clojure -M:public-semantic-evaluation /path/to/checkouts
+```
+
+The runner validates commits, corpus selectors, full semantic coverage,
+loopback runtime ownership, and ignored output state before evaluating
+clojure-lsp, re-frame, and Metabase. It reports descriptive aggregate and
+slice metrics across FTS-only, LateOn-only, and hybrid modes; it is not a
+release gate.
+
 Corpus format 2 uses structured selectors so judgments can distinguish symbols
 that share a qualified name across platforms or files. Every selector must
 contain `:id` or `:qualified-name`; optional `:platform`, `:file`, and `:kind`
@@ -97,14 +110,16 @@ relevance judgment can contribute gain only once, even when duplicate
 candidates match it. Format 1 string judgments and the legacy vector of
 `{:query string :expected [...]}` entries remain accepted unchanged.
 
-The harness requires a running, synchronized project service. For every query
-it evaluates both hybrid search and `context --intent`, reporting search
-recall-at-k, MRR, nDCG-at-k, hard-negative-before-relevant rate, context seed
-recall-at-1, final packet recall, per-language and per-query-type quality slices,
-LateOn query/seed rates, separate search and end-to-end context latency
-distributions, misses, and context errors. Here `k` is the returned hybrid
-candidate count. Keep the same graph, model revision, query set, candidate
-count, context budget, and hardware when comparing changes.
+The harness requires a running, synchronized project service. Pass
+`--mode fts-only`, `--mode lateon-only`, or `--mode hybrid` to evaluate one
+retrieval ablation; hybrid remains the default. Every mode reports recall@10,
+recall@20, recall@50, MRR, nDCG-at-k, hard-negative-before-relevant rate,
+per-language and per-query-type quality slices, LateOn participation, and
+search latency. Hybrid additionally evaluates `context --intent`, reporting
+context seed recall-at-1, final packet recall, end-to-end latency, misses, and
+context errors. Here `k` is the configured candidate count. Keep the same
+graph, model revision, query set, candidate count, context budget, and
+hardware when comparing changes.
 
 When query-level details must remain in a local result file, pass `--output`:
 

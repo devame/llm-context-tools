@@ -4,6 +4,7 @@
             [llm-context.config :as config]
             [llm-context.project :as project]
             [llm-context.semantic.evaluation :as evaluation]
+            [llm-context.semantic.mode :as retrieval-mode]
             [llm-context.service.client :as client]
             [llm-context.version :as version])
   (:import [java.nio.file Files OpenOption]))
@@ -31,14 +32,18 @@
           selected)))
 
 (defn- run-query
-  [project {:keys [id query language query-type domain relevance]
-            :as judgment}]
-  (let [search-started (System/nanoTime)
-        search-response
-        (client/request project
-                        {:op :query :subcommand "search"
-                         :args [query]})
-        search-ms (elapsed-ms search-started)]
+  ([project judgment]
+   (run-query project judgment retrieval-mode/default))
+  ([project {:keys [id query language query-type domain relevance]
+             :as judgment}
+   mode]
+   (let [mode (retrieval-mode/normalize mode)
+         search-started (System/nanoTime)
+         search-response
+         (client/request project
+                         {:op :query :subcommand "search"
+                          :args [query "--mode" (retrieval-mode/name-of mode)]})
+         search-ms (elapsed-ms search-started)]
     (when-not (:ok search-response)
       (throw (ex-info (or (:error search-response)
                           "Project service is not reachable")
@@ -47,16 +52,17 @@
           results (if (map? search-value)
                     (:results search-value)
                     search-value)
-          context-started (System/nanoTime)
+          context-started (when (= :hybrid mode) (System/nanoTime))
           context-response
-          (client/request project
-                          {:op :context
-                           :options {:focus query
-                                     :intent? true
-                                     :format :edn
-                                     :depth context-depth
-                                     :max-tokens context-max-tokens}})
-          context-ms (elapsed-ms context-started)
+          (when (= :hybrid mode)
+            (client/request project
+                            {:op :context
+                             :options {:focus query
+                                       :intent? true
+                                       :format :edn
+                                       :depth context-depth
+                                       :max-tokens context-max-tokens}}))
+          context-ms (when context-started (elapsed-ms context-started))
           packet (when (:ok context-response) (:value context-response))
           selected (get-in packet [:focus-resolution :selected])
           packet-symbols (:symbols packet)
@@ -64,30 +70,42 @@
           ranking (evaluation/ranked-metrics results judgment)]
       {:id id
        :query query
+       :retrieval-mode mode
        :language language
        :query-type query-type
        :domain domain
        :search-ms search-ms
        :context-ms context-ms
        :search-hit? (:hit? ranking)
+       :search-recall-at-10?
+       (evaluation/recall-at-k? results relevance 10)
+       :search-recall-at-20?
+       (evaluation/recall-at-k? results relevance 20)
+       :search-recall-at-50?
+       (evaluation/recall-at-k? results relevance 50)
        :first-relevant-rank (:first-relevant-rank ranking)
        :reciprocal-rank (:reciprocal-rank ranking)
        :ndcg (:ndcg ranking)
        :hard-negative-before-relevant?
        (:hard-negative-before-relevant? ranking)
        :seed-hit?
-       (boolean (some #(evaluation/relevant? % relevance)
-                      qualified-selected))
+       (when (= :hybrid mode)
+         (boolean (some #(evaluation/relevant? % relevance)
+                        qualified-selected)))
        :packet-hit?
-       (boolean (some #(evaluation/relevant? % relevance) packet-symbols))
+       (when (= :hybrid mode)
+         (boolean (some #(evaluation/relevant? % relevance) packet-symbols)))
+       :context-error? (boolean (and context-response
+                                     (not (:ok context-response))))
        :lateon? (boolean
                  (some #(contains? (:matched-by %) :lateon) results))
        :seed-lateon?
-       (boolean
-        (some #(contains? (:matched-by %) :lateon) selected))
+       (when (= :hybrid mode)
+         (boolean
+          (some #(contains? (:matched-by %) :lateon) selected)))
        :result-count (count results)
-       :context-error (when-not (:ok context-response)
-                        (:error context-response))})))
+       :context-error (when (and context-response (not (:ok context-response)))
+                        (:error context-response))}))))
 
 (defn- mean [values]
   (if (seq values)
@@ -95,16 +113,27 @@
     0.0))
 
 (defn- quality-summary [results]
-  {:queries (count results)
-   :search-recall-at-k (mean (map #(if (:search-hit? %) 1.0 0.0) results))
-   :search-mrr (mean (map :reciprocal-rank results))
-   :search-ndcg-at-k (mean (map :ndcg results))
-   :hard-negative-before-relevant-rate
-   (mean (map #(if (:hard-negative-before-relevant? %) 1.0 0.0) results))
-   :context-seed-recall-at-1
-   (mean (map #(if (:seed-hit? %) 1.0 0.0) results))
-   :context-packet-recall
-   (mean (map #(if (:packet-hit? %) 1.0 0.0) results))})
+  (let [mode (:retrieval-mode (first results))]
+    (cond-> {:queries (count results)
+             :retrieval-mode mode
+             :search-recall-at-10
+             (mean (map #(if (:search-recall-at-10? %) 1.0 0.0) results))
+             :search-recall-at-20
+             (mean (map #(if (:search-recall-at-20? %) 1.0 0.0) results))
+             :search-recall-at-50
+             (mean (map #(if (:search-recall-at-50? %) 1.0 0.0) results))
+             :search-recall-at-k
+             (mean (map #(if (:search-hit? %) 1.0 0.0) results))
+             :search-mrr (mean (map :reciprocal-rank results))
+             :search-ndcg-at-k (mean (map :ndcg results))
+             :hard-negative-before-relevant-rate
+             (mean (map #(if (:hard-negative-before-relevant? %) 1.0 0.0)
+                        results))}
+      (= :hybrid mode)
+      (assoc :context-seed-recall-at-1
+             (mean (map #(if (:seed-hit? %) 1.0 0.0) results))
+             :context-packet-recall
+             (mean (map #(if (:packet-hit? %) 1.0 0.0) results))))))
 
 (defn- slices [results dimension]
   (->> results
@@ -129,22 +158,29 @@
      :context-depth context-depth
      :context-max-tokens context-max-tokens}))
 
-(defn- benchmark-result [project corpus settings]
-  (let [queries (:queries corpus)
-        results (mapv #(run-query project %) queries)
+(defn- benchmark-result
+  ([project corpus settings]
+   (benchmark-result project corpus settings retrieval-mode/default))
+  ([project corpus settings mode]
+   (let [mode (retrieval-mode/normalize mode)
+         queries (:queries corpus)
+         results (mapv #(run-query project % mode) queries)
         search-times (mapv :search-ms results)
-        context-times (mapv :context-ms results)
+        context-times (vec (keep :context-ms results))
         query-count (count results)]
-    {:benchmark/version 4
+    {:benchmark/version 5
      :benchmark/config (benchmark-config settings)
+     :retrieval-mode mode
      :corpus/version (:corpus/version corpus)
      :queries query-count
+     :search-recall-at-10
+     (/ (count (filter :search-recall-at-10? results)) (double query-count))
+     :search-recall-at-20
+     (/ (count (filter :search-recall-at-20? results)) (double query-count))
+     :search-recall-at-50
+     (/ (count (filter :search-recall-at-50? results)) (double query-count))
      :search-recall-at-k
      (/ (count (filter :search-hit? results)) (double query-count))
-     :context-seed-recall-at-1
-     (/ (count (filter :seed-hit? results)) (double query-count))
-     :context-packet-recall
-     (/ (count (filter :packet-hit? results)) (double query-count))
      :search-mrr (mean (map :reciprocal-rank results))
      :search-ndcg-at-k (mean (map :ndcg results))
      :hard-negative-before-relevant-rate
@@ -156,30 +192,48 @@
      :lateon-query-rate
      (/ (count (filter :lateon? results)) (double query-count))
      :lateon-seed-rate
-     (/ (count (filter :seed-lateon? results)) (double query-count))
+     (when (= :hybrid mode)
+       (/ (count (filter :seed-lateon? results)) (double query-count)))
      :search-latency-ms (latency-summary search-times)
-     :context-latency-ms (latency-summary context-times)
+     :context-latency-ms (when (= :hybrid mode)
+                           (latency-summary context-times))
      :search-misses
      (mapv #(select-keys % [:id :query :first-relevant-rank])
            (remove :search-hit? results))
      :hard-negative-errors
      (mapv #(select-keys % [:id :query :first-relevant-rank])
            (filter :hard-negative-before-relevant? results))
-     :seed-misses (mapv #(select-keys % [:id :query])
-                        (remove :seed-hit? results))
-     :packet-misses (mapv #(select-keys % [:id :query])
-                          (remove :packet-hit? results))
+     :seed-misses (if (= :hybrid mode)
+                    (mapv #(select-keys % [:id :query])
+                          (remove :seed-hit? results))
+                    [])
+     :packet-misses (if (= :hybrid mode)
+                      (mapv #(select-keys % [:id :query])
+                            (remove :packet-hit? results))
+                      [])
      :context-errors
-     (mapv #(select-keys % [:id :query :context-error])
-           (filter :context-error results))}))
+     (if (= :hybrid mode)
+       (mapv #(select-keys % [:id :query :context-error])
+             (filter :context-error results))
+       [])
+     :context-seed-recall-at-1
+     (when (= :hybrid mode)
+       (/ (count (filter :seed-hit? results)) (double query-count)))
+     :context-packet-recall
+     (when (= :hybrid mode)
+       (/ (count (filter :packet-hit? results)) (double query-count)))
+     ;; Query-level diagnostics stay in the caller-selected output file. The
+     ;; safe summary intentionally omits this field and all query text.
+     :query-results results})))
 
 (defn safe-summary
   "Remove query-level identifiers and text for privacy-safe console output."
   [result]
   (-> (select-keys
        result
-       [:benchmark/version :benchmark/config :corpus/version :queries
-        :search-recall-at-k :search-mrr :search-ndcg-at-k
+       [:benchmark/version :benchmark/config :retrieval-mode :corpus/version
+        :queries :search-recall-at-10 :search-recall-at-20
+        :search-recall-at-50 :search-recall-at-k :search-mrr :search-ndcg-at-k
         :hard-negative-before-relevant-rate :context-seed-recall-at-1
         :context-packet-recall :slices :lateon-query-rate :lateon-seed-rate
         :search-latency-ms :context-latency-ms])
@@ -205,10 +259,11 @@
       (throw
        (ex-info
         (str "Usage: clojure -M:semantic-bench PROJECT QUERY_SET.edn "
-             "[--output RESULT.edn]")
+             "[--mode fts-only|lateon-only|hybrid] [--output RESULT.edn]")
         {:exit-code 2})))
     (loop [remaining options result {:project-path project-path
-                                     :query-path query-path}]
+                                     :query-path query-path
+                                     :mode retrieval-mode/default}]
       (if (empty? remaining)
         result
         (case (first remaining)
@@ -216,13 +271,19 @@
           (if-let [path (second remaining)]
             (recur (nnext remaining) (assoc result :output path))
             (throw (ex-info "--output requires a path" {:exit-code 2})))
+          "--mode"
+          (if-let [value (second remaining)]
+            (recur (nnext remaining)
+                   (assoc result :mode (retrieval-mode/normalize value)))
+            (throw (ex-info "--mode requires fts-only, lateon-only, or hybrid"
+                            {:exit-code 2})))
           (throw (ex-info (str "Unknown semantic benchmark option: "
                                (first remaining))
                           {:exit-code 2})))))))
 
 (defn -main [& args]
   (try
-    (let [{:keys [project-path query-path output]} (parse-args args)
+    (let [{:keys [project-path query-path output mode]} (parse-args args)
           project (project/context project-path)
           corpus (evaluation/read-corpus-data query-path)
           settings (config/load-config project)]
@@ -230,7 +291,7 @@
         (throw
          (ex-info "Start the project service before semantic benchmarking"
                   {:exit-code 2})))
-      (let [result (benchmark-result project corpus settings)]
+      (let [result (benchmark-result project corpus settings mode)]
         (if output
           (do
             (write-result! output result)

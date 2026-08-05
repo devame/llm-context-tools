@@ -1,0 +1,28 @@
+{:suite/version 1
+ :name "public-clojure-semantic-evaluation"
+ :description
+ "Pinned, privacy-safe cross-repository retrieval evaluation. Checkouts are prepared outside this repository."
+ :corpus/version 2
+ :repetitions 3
+ :repositories
+ [{:id :clojure-lsp
+   :checkout "clojure-lsp"
+   :url "https://github.com/clojure-lsp/clojure-lsp"
+   :commit "e8e9090eb717e135e77b25b4c35122e00e84fb66"
+   :expected-queries {:development 20 :held-out 20}
+   :corpus {:development "clojure-lsp/development.edn"
+            :held-out "clojure-lsp/held-out.edn"}}
+  {:id :re-frame
+   :checkout "re-frame"
+   :url "https://github.com/day8/re-frame"
+   :commit "1a1bf1df6570b17a148ebce70d500ec2da393cdc"
+   :expected-queries {:development 15 :held-out 15}
+   :corpus {:development "re-frame/development.edn"
+            :held-out "re-frame/held-out.edn"}}
+  {:id :metabase
+   :checkout "metabase"
+   :url "https://github.com/metabase/metabase"
+   :commit "f6e0e1653e53f2753c60606ca86de471917ac07e"
+   :expected-queries {:development 25 :held-out 25}
+   :corpus {:development "metabase/development.edn"
+            :held-out "metabase/held-out.edn"}}]}

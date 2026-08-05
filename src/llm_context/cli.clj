@@ -255,13 +255,10 @@
     "find-symbol" ((resolve-fn 'llm-context.query/find-symbol)
                    graph (require-argument subcommand args))
     "search"
-    (let [term (require-argument subcommand args)
-          options (set (next args))]
-      (when-let [unknown (first (remove #{"--explain"} options))]
-        (throw (ex-info (str "Unknown query search option: " unknown)
-                        {:exit-code 2})))
+    (let [{:keys [term mode]}
+          ((resolve-fn 'llm-context.query/parse-search-args) args)]
       ((resolve-fn 'llm-context.query/search-explain)
-       graph semantic-client settings term))
+       graph semantic-client settings term {:mode mode}))
     "callers" ((resolve-fn 'llm-context.query/callers)
                graph (require-argument subcommand args))
     "callees" ((resolve-fn 'llm-context.query/callees-command) graph args)

@@ -24,14 +24,10 @@
             ThreadPoolExecutor ThreadPoolExecutor$AbortPolicy TimeUnit]))
 
 (defn- query-search-term [args]
-  (let [term
-        (or (first args)
-            (throw (ex-info "query search requires an argument"
-                            {:exit-code 2})))]
-    (when-let [unknown (first (remove #{"--explain"} (next args)))]
-      (throw (ex-info (str "Unknown query search option: " unknown)
-                      {:exit-code 2})))
-    term))
+  (:term (query/parse-search-args args)))
+
+(defn- query-search-options [args]
+  (query/parse-search-args args))
 
 (defn- query-value [graph semantic-client settings subcommand args]
   (let [argument (fn []
@@ -41,8 +37,9 @@
    (case subcommand
     "stats" (query/stats graph)
     "find-symbol" (query/find-symbol graph (argument))
-    "search" (query/search-explain graph semantic-client settings
-                                   (query-search-term args))
+    "search"
+    (let [{:keys [term mode]} (query-search-options args)]
+      (query/search-explain graph semantic-client settings term {:mode mode}))
     "callers" (query/callers graph (argument))
     "callees" (query/callees-command graph args)
     "trace" (query/trace-command graph settings args)
@@ -127,13 +124,20 @@
     :analyze (analyze! graph generation project settings (:full? request))
     :query
     (if (= "search" (:subcommand request))
-      (let [term (query-search-term (:args request))
+      (let [{:keys [term mode]} (query-search-options (:args request))
             semantic-attempt
-            (query/semantic-search-attempt (:client runtime) settings term)]
+            (if (= :hybrid mode)
+              ;; Keep the historical arity on the default path for callers
+              ;; that instrument the resident service.
+              (query/semantic-search-attempt (:client runtime) settings term)
+              (query/semantic-search-attempt (:client runtime) settings term mode))]
         (read-consistently
          graph generation true
-         #(query/search-explain-with-attempt
-           % settings term semantic-attempt)))
+         #(if (= :hybrid mode)
+            (query/search-explain-with-attempt
+             % settings term semantic-attempt)
+            (query/search-explain-with-attempt
+             % settings term semantic-attempt mode))))
       (read-consistently
        graph generation true
        #(query-value % (:client runtime) settings

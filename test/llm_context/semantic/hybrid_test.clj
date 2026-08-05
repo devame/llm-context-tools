@@ -65,6 +65,55 @@
         (is (= #{:lateon} (:matched-by (first result))))
         (is (= "src/a.clj" (:file (first result))))))))
 
+(deftest fts-only-does-not-contact-semantic-sidecar
+  (let [{:keys [project file entities]} (graph-fixture)
+        failing
+        (reify index/SemanticIndex
+          (index-health [_] {:ready? true})
+          (ensure-index! [_] nil)
+          (add-documents! [_ _] nil)
+          (delete-symbols! [_ _] nil)
+          (indexed-chunk-count [_ _ _] 0)
+          (search-text [_ _ _]
+            (throw (ex-info "FTS-only contacted LateOn" {})))
+          (close-index! [_] nil))]
+    (store/with-store [graph project settings]
+      (store/replace-file! graph file entities)
+      (let [response
+            (query/search-explain graph failing settings "persistent database"
+                                  {:mode :fts-only})]
+        (is (= :fts-only (get-in response [:retrieval :mode])))
+        (is (= :not-requested (get-in response [:retrieval :status])))
+        (is (= #{:fts} (:matched-by (first (:results response)))))))))
+
+(deftest lateon-only-excludes-lexical-candidates
+  (let [{:keys [project file entities]} (graph-fixture)
+        client (fake/create)]
+    (store/with-store [graph project settings]
+      (store/replace-file! graph file entities)
+      (state/put-indexed!
+       graph (indexed "symbol:callee" (:file/id file) "sha256:callee"))
+      (fake/set-search-results!
+       client [(candidate "symbol:callee" (:file/id file)
+                          "sha256:callee" 0 10.0)])
+      (let [response
+            (query/search-explain graph client settings "caller"
+                                  {:mode :lateon-only})]
+        (is (= :lateon-only (get-in response [:retrieval :mode])))
+        (is (= ["symbol:callee"] (mapv :id (:results response))))
+        (is (= #{:lateon} (:matched-by (first (:results response)))))))))
+
+(deftest search-mode-arguments-are-normalized
+  (is (= {:term "where is auth handled?"
+          :mode :lateon-only
+          :explain? true}
+         (query/parse-search-args
+          ["where is auth handled?" "--mode" "lateon-only" "--explain"])))
+  (is (thrown-with-msg?
+       clojure.lang.ExceptionInfo
+       #"Retrieval mode must be one of"
+       (query/parse-search-args ["auth" "--mode" "unknown"]))))
+
 (deftest multiple-chunks-collapse-to-the-best-symbol-score
   (let [{:keys [project file entities]} (graph-fixture)
         client (fake/create)]

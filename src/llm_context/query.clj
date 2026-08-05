@@ -4,6 +4,7 @@
             [llm-context.graph.read :as graph-read]
             [llm-context.model.schema :as schema]
             [llm-context.semantic.hybrid :as hybrid]
+            [llm-context.semantic.mode :as retrieval-mode]
             [llm-context.store :as store]))
 
 (defn stats [graph]
@@ -190,33 +191,93 @@
       matches
       {:matches [] :suggestions (symbol-suggestions graph term)})))
 
+(defn parse-search-args
+  "Parse query-search arguments shared by the CLI and resident service."
+  [args]
+  (let [term (or (first args)
+                 (throw (ex-info "query search requires an argument"
+                                 {:exit-code 2})))]
+    (loop [remaining (next args)
+           result {:term term
+                   :mode retrieval-mode/default
+                   :explain? false}]
+      (if-let [argument (first remaining)]
+        (case argument
+          "--explain" (recur (next remaining) (assoc result :explain? true))
+          ("--mode" "--retrieval-mode")
+          (if-let [value (second remaining)]
+            (recur (nnext remaining)
+                   (assoc result :mode (retrieval-mode/normalize value)))
+            (throw (ex-info (str argument " requires fts-only, lateon-only, or hybrid")
+                            {:exit-code 2})))
+          (throw (ex-info (str "Unknown query search option: " argument)
+                          {:exit-code 2})))
+        result))))
+
+(declare search-explain)
+
 (defn search
-  "Hybrid lexical and semantic code search. Pass nil as semantic-client for a
-  deterministic Datalevin-only fallback."
-  [graph semantic-client config term]
-  (let [candidate-limit (or (get-in config
-                                    [:semantic :lateon-code :candidate-count])
-                            50)]
-    (hybrid/search graph semantic-client config term
-                   (symbols graph term candidate-limit))))
+  "Search using FTS-only, LateOn-only, or hybrid retrieval.
+
+  The four-argument form remains the hybrid default. Pass {:mode ...} as the
+  optional fifth argument for an explicit ablation."
+  ([graph semantic-client config term]
+   (search graph semantic-client config term {}))
+  ([graph semantic-client config term {:keys [mode] :or {mode retrieval-mode/default}}]
+   (let [mode (retrieval-mode/normalize mode)
+         candidate-limit (or (get-in config
+                                     [:semantic :lateon-code :candidate-count])
+                             50)
+         lexical-results (symbols graph term candidate-limit)]
+     (case mode
+       :fts-only
+       (:results (hybrid/fts-explain lexical-results))
+
+       (:lateon-only :hybrid)
+       (:results
+        (search-explain graph semantic-client config term {:mode mode}))))))
 
 (defn semantic-search-attempt
-  "Run only the external semantic phase of search."
-  [semantic-client config term]
-  (hybrid/retrieve semantic-client config term))
+  "Run only the external semantic phase of search.
+
+  FTS-only deliberately does not contact the semantic sidecar."
+  ([semantic-client config term]
+   (semantic-search-attempt semantic-client config term retrieval-mode/default))
+  ([semantic-client config term mode]
+   (let [mode (retrieval-mode/normalize mode)]
+     (if (= :fts-only mode)
+       {:mode mode :status :not-requested :candidates [] :latency-ms 0}
+       (hybrid/retrieve semantic-client config term mode)))))
 
 (defn search-explain-with-attempt
   "Fuse a completed semantic attempt with current lexical and graph state."
-  [graph config term semantic-attempt]
-  (let [candidate-limit (or (get-in config
-                                    [:semantic :lateon-code :candidate-count])
-                            50)]
-    (hybrid/fuse-with-metadata
-     graph config term (symbols graph term candidate-limit) semantic-attempt)))
+  ([graph config term semantic-attempt]
+   (search-explain-with-attempt
+    graph config term semantic-attempt
+    (or (:mode semantic-attempt) retrieval-mode/default)))
+  ([graph config term semantic-attempt mode]
+   (let [mode (retrieval-mode/normalize mode)
+         candidate-limit (or (get-in config
+                                     [:semantic :lateon-code :candidate-count])
+                             50)
+         lexical-results (symbols graph term candidate-limit)]
+     (case mode
+       :fts-only (hybrid/fts-explain lexical-results)
+       :lateon-only (hybrid/fuse-with-metadata
+                     graph config term [] semantic-attempt mode)
+       :hybrid (hybrid/fuse-with-metadata
+                graph config term lexical-results semantic-attempt mode)))))
 
-(defn search-explain [graph semantic-client config term]
-  (search-explain-with-attempt
-   graph config term (semantic-search-attempt semantic-client config term)))
+(defn search-explain
+  ([graph semantic-client config term]
+   (search-explain graph semantic-client config term {}))
+  ([graph semantic-client config term {:keys [mode]
+                                      :or {mode retrieval-mode/default}}]
+   (let [mode (retrieval-mode/normalize mode)]
+     (search-explain-with-attempt
+      graph config term
+      (semantic-search-attempt semantic-client config term mode)
+      mode))))
 
 (defn callers [graph target]
   (->> (store/query

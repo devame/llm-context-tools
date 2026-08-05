@@ -1,0 +1,128 @@
+{:corpus/version 2
+ :name "metabase public development retrieval judgments"
+ :queries
+ [{:id :metabase/with-driver
+   :language :clojure :query-type :behavior :domain :drivers
+   :query "which driver helper binds execution to a selected database driver?"
+   :relevance [{:qualified-name "metabase.driver/do-with-driver" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.driver/the-driver"}]}
+  {:id :metabase/with-driver-macro
+   :language :clojure :query-type :behavior :domain :drivers
+   :query "which macro provides scoped driver binding around a body of code?"
+   :relevance [{:qualified-name "metabase.driver/with-driver" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.driver/do-with-driver"}]}
+  {:id :metabase/driver-available
+   :language :clojure :query-type :behavior :domain :drivers
+   :query "where is driver availability checked without retrieving the driver object?"
+   :relevance [{:qualified-name "metabase.driver/available?" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.driver/the-driver"}]}
+  {:id :metabase/the-driver
+   :language :clojure :query-type :data-flow :domain :drivers
+   :query "which operation returns the initialized driver implementation?"
+   :relevance [{:qualified-name "metabase.driver/the-driver" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.driver/available?"}]}
+  {:id :metabase/add-parent-driver
+   :language :clojure :query-type :registration :domain :drivers
+   :query "where is a parent driver added to the driver hierarchy?"
+   :relevance [{:qualified-name "metabase.driver/add-parent!" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.driver/rename-tables!"}]}
+  {:id :metabase/dispatch-driver
+   :language :clojure :query-type :behavior :domain :drivers
+   :query "which driver function dispatches an operation after driver initialization?"
+   :relevance [{:qualified-name "metabase.driver/dispatch-on-initialized-driver" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.driver/dispatch-on-initialized-driver-safe-keys"}]}
+  {:id :metabase/sanitize-db-details
+   :language :clojure :query-type :transformation :domain :drivers
+   :query "where are database details sanitized before they are exposed?"
+   :relevance [{:qualified-name "metabase.driver/sanitize-db-details" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.driver/dispatch-on-initialized-driver-safe-keys"}]}
+  {:id :metabase/safe-driver-dispatch
+   :language :clojure :query-type :behavior :domain :drivers
+   :query "which driver dispatch path restricts the returned keys?"
+   :relevance [{:qualified-name "metabase.driver/dispatch-on-initialized-driver-safe-keys" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.driver/dispatch-on-initialized-driver"}]}
+  {:id :metabase/current-user-attributes
+   :language :clojure :query-type :data-flow :domain :authorization
+   :query "where are the current user's custom attributes read from the request context?"
+   :relevance [{:qualified-name "metabase.api.common/current-user-attributes" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/is-data-analyst?"}]}
+  {:id :metabase/check
+   :language :clojure :query-type :behavior :domain :authorization
+   :query "which API helper enforces a condition and raises a typed API error?"
+   :relevance [{:qualified-name "metabase.api.common/check" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/check-exists?"}]}
+  {:id :metabase/check-exists
+   :language :clojure :query-type :behavior :domain :authorization
+   :query "where is an existence condition checked for an API resource?"
+   :relevance [{:qualified-name "metabase.api.common/check-exists?" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/check"}]}
+  {:id :metabase/check-superuser
+   :language :clojure :query-type :behavior :domain :authorization
+   :query "which helper rejects a request unless the user is a superuser?"
+   :relevance [{:qualified-name "metabase.api.common/check-superuser" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/check-data-analyst"}]}
+  {:id :metabase/check-data-analyst
+   :language :clojure :query-type :behavior :domain :authorization
+   :query "where is data-analyst access enforced for an API operation?"
+   :relevance [{:qualified-name "metabase.api.common/check-data-analyst" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/check-superuser"}]}
+  {:id :metabase/is-data-analyst
+   :language :clojure :query-type :behavior :domain :authorization
+   :query "which predicate identifies whether a user is a data analyst?"
+   :relevance [{:qualified-name "metabase.api.common/is-data-analyst?" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/check-data-analyst"}]}
+  {:id :metabase/check-400
+   :language :clojure :query-type :behavior :domain :errors
+   :query "where is a bad-request API response generated?"
+   :relevance [{:qualified-name "metabase.api.common/check-400" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/check-404"}]}
+  {:id :metabase/check-404
+   :language :clojure :query-type :behavior :domain :errors
+   :query "which helper turns a missing resource condition into a not-found error?"
+   :relevance [{:qualified-name "metabase.api.common/check-404" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/check-400"}]}
+  {:id :metabase/check-403
+   :language :clojure :query-type :behavior :domain :errors
+   :query "where is a forbidden API response enforced?"
+   :relevance [{:qualified-name "metabase.api.common/check-403" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/check-500"}]}
+  {:id :metabase/check-500
+   :language :clojure :query-type :behavior :domain :errors
+   :query "which helper raises an internal-server-error API response?"
+   :relevance [{:qualified-name "metabase.api.common/check-500" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/check-403"}]}
+  {:id :metabase/read-check
+   :language :clojure :query-type :behavior :domain :authorization
+   :query "where is read permission checked for a model instance?"
+   :relevance [{:qualified-name "metabase.api.common/read-check" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/write-check"}]}
+  {:id :metabase/write-check
+   :language :clojure :query-type :behavior :domain :authorization
+   :query "which API helper checks write permission for a model instance?"
+   :relevance [{:qualified-name "metabase.api.common/write-check" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/read-check"}]}
+  {:id :metabase/query-check
+   :language :clojure :query-type :behavior :domain :authorization
+   :query "where is query permission checked for a model instance?"
+   :relevance [{:qualified-name "metabase.api.common/query-check" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/create-check"}]}
+  {:id :metabase/create-check
+   :language :clojure :query-type :behavior :domain :authorization
+   :query "which helper checks permission to create a model instance?"
+   :relevance [{:qualified-name "metabase.api.common/create-check" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/update-check"}]}
+  {:id :metabase/update-check
+   :language :clojure :query-type :behavior :domain :authorization
+   :query "where is update permission checked before changing a model?"
+   :relevance [{:qualified-name "metabase.api.common/update-check" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.api.common/create-check"}]}
+  {:id :metabase/card-default-run
+   :language :clojure :query-type :behavior :domain :query-processing
+   :query "which query-processor function builds the default run function for a card?"
+   :relevance [{:qualified-name "metabase.query-processor.card/process-query-for-card-default-run-fn" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.query-processor.card/enrich-strategy"}]}
+  {:id :metabase/run-startup-logic
+   :language :clojure :query-type :lifecycle :domain :startup
+   :query "where is the ordered startup logic executed?"
+   :relevance [{:qualified-name "metabase.startup.core/run-startup-logic!" :grade 3}]
+   :hard-negatives [{:qualified-name "metabase.startup.core/run-shutdown-logic!"}]}]}

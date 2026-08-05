@@ -1,0 +1,144 @@
+{:corpus/version 2
+ :name "re-frame public development retrieval judgments"
+ :queries
+ [{:id :re-frame/dispatch-event
+   :language :clojurescript :query-type :behavior :domain :events
+   :query "where is an application event placed onto the event processing pipeline?"
+   :relevance [{:qualified-name "re-frame.core/dispatch"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/dispatch-sync"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/dispatch-sync
+   :language :clojurescript :query-type :behavior :domain :events
+   :query "which entry point processes an event immediately before returning?"
+   :relevance [{:qualified-name "re-frame.core/dispatch-sync"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/dispatch"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/register-db-handler
+   :language :clojurescript :query-type :registration :domain :events
+   :query "which public registration helper installs a handler that transforms application state?"
+   :relevance [{:qualified-name "re-frame.core/reg-event-db"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/reg-event-fx"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/register-fx-handler
+   :language :clojurescript :query-type :registration :domain :effects
+   :query "where is a handler registered for returning effect instructions?"
+   :relevance [{:qualified-name "re-frame.core/reg-event-fx"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/reg-event-db"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/subscribe-query
+   :language :clojurescript :query-type :behavior :domain :subscriptions
+   :query "which API obtains a reactive value for a subscription query?"
+   :relevance [{:qualified-name "re-frame.core/subscribe"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/reg-sub"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/register-subscription
+   :language :clojurescript :query-type :registration :domain :subscriptions
+   :query "where is the computation for a subscription query installed?"
+   :relevance [{:qualified-name "re-frame.core/reg-sub"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/subscribe"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/register-effect
+   :language :clojurescript :query-type :registration :domain :effects
+   :query "which helper associates an effect identifier with its implementation?"
+   :relevance [{:qualified-name "re-frame.core/reg-fx"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/reg-cofx"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/register-coeffect
+   :language :clojurescript :query-type :registration :domain :effects
+   :query "where is a coeffect provider associated with a key?"
+   :relevance [{:qualified-name "re-frame.core/reg-cofx"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/reg-fx"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/inject-coeffect
+   :language :clojurescript :query-type :data-flow :domain :effects
+   :query "which helper adds an external value to event processing context?"
+   :relevance [{:qualified-name "re-frame.core/inject-cofx"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/assoc-coeffect"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/event-path
+   :language :clojurescript :query-type :interceptor :domain :state
+   :query "which interceptor constructor focuses handler state on a nested path?"
+   :relevance [{:qualified-name "re-frame.core/path"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/enrich"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/enrich-event
+   :language :clojurescript :query-type :interceptor :domain :state
+   :query "where is an event handler augmented with a function that derives state?"
+   :relevance [{:qualified-name "re-frame.core/enrich"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/path"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/post-event-callback
+   :language :clojurescript :query-type :interceptor :domain :events
+   :query "which helper schedules a function after an event has completed?"
+   :relevance [{:qualified-name "re-frame.core/after"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/on-changes"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/observe-state-changes
+   :language :clojurescript :query-type :data-flow :domain :state
+   :query "where is a callback configured to react when selected state changes?"
+   :relevance [{:qualified-name "re-frame.core/on-changes"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/after"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/settle-child-events
+   :language :clojurescript :query-type :behavior :domain :events
+   :query "which API waits for an event and all dispatches caused by it to settle?"
+   :relevance [{:qualified-name "re-frame.core/dispatch-and-settle"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/dispatch-sync"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+  {:id :re-frame/router-dispatch
+   :language :clojurescript :query-type :state-flow :domain :events
+   :query "where does the router enqueue an event for asynchronous delivery?"
+   :relevance [{:qualified-name "re-frame.router/dispatch"
+                :platform :cljs :file "src/re_frame/router.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.router/dispatch-sync"
+                     :platform :cljs :file "src/re_frame/router.cljc"}]}
+  {:id :re-frame/router-settle
+   :language :clojurescript :query-type :state-flow :domain :events
+   :query "which router operation reports completion after child work drains?"
+   :relevance [{:qualified-name "re-frame.router/dispatch-and-settle"
+                :platform :cljs :file "src/re_frame/router.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.router/dispatch"
+                     :platform :cljs :file "src/re_frame/router.cljc"}]}
+  {:id :re-frame/execute-interceptors
+   :language :clojurescript :query-type :behavior :domain :interceptors
+   :query "where is the ordered interceptor chain applied in both directions?"
+   :relevance [{:qualified-name "re-frame.interceptor/execute"
+                :platform :cljs :file "src/re_frame/interceptor.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.interceptor/enqueue"
+                     :platform :cljs :file "src/re_frame/interceptor.cljc"}]}
+  {:id :re-frame/start-trace
+   :language :clojurescript :query-type :behavior :domain :tracing
+   :query "which function opens a trace span for an operation and its metadata?"
+   :relevance [{:qualified-name "re-frame.trace/start-trace"
+                :platform :cljs :file "src/re_frame/trace.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.trace/assemble-epochs"
+                     :platform :cljs :file "src/re_frame/trace.cljc"}]}
+  {:id :re-frame/assemble-trace-epochs
+   :language :clojurescript :query-type :data-flow :domain :tracing
+   :query "where are trace callback events assembled into ordered epochs?"
+   :relevance [{:qualified-name "re-frame.trace/assemble-epochs"
+                :platform :cljs :file "src/re_frame/trace.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.trace/start-trace"
+                     :platform :cljs :file "src/re_frame/trace.cljc"}]}
+  {:id :re-frame/global-interceptor
+   :language :clojurescript :query-type :registration :domain :interceptors
+   :query "which setting API adds an interceptor to the application-wide chain?"
+   :relevance [{:qualified-name "re-frame.core/reg-global-interceptor"
+                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
+   :hard-negatives [{:qualified-name "re-frame.core/clear-global-interceptor"
+                     :platform :cljs :file "src/re_frame/core.cljc"}]}
+ ]}

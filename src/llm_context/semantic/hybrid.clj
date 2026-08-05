@@ -3,6 +3,7 @@
   (:require [llm-context.graph.read :as graph-read]
             [llm-context.semantic.document :as document]
             [llm-context.semantic.index :as index]
+            [llm-context.semantic.mode :as retrieval-mode]
             [llm-context.semantic.reconcile :as reconcile]
             [llm-context.semantic.state :as state]
             [llm-context.store :as store]))
@@ -72,6 +73,27 @@
     (contains? lexical-ids id) (conj :fts)
     (contains? semantic-ids id) (conj :lateon)))
 
+(defn fts-results
+  "Annotate bounded Datalevin results for the FTS-only ablation."
+  [lexical-results]
+  (mapv (fn [[rank result]]
+          (assoc result
+                 :matched-by #{:fts}
+                 ;; A mode-local rank score keeps result metadata comparable
+                 ;; without pretending Datalevin and LateOn scores are on the
+                 ;; same scale.
+                 :score (/ 1.0 (inc rank))))
+        (map-indexed vector lexical-results)))
+
+(defn fts-explain [lexical-results]
+  {:results (fts-results lexical-results)
+   :retrieval {:mode :fts-only
+               :status :not-requested
+               :latency-ms 0
+               :raw-candidate-count 0
+               :accepted-fresh-candidate-count 0
+               :rejected-stale-candidate-count 0}})
+
 (defn- failure-status [error]
   (if (or (= :semantic/timeout (:type (ex-data error)))
           (instance? java.util.concurrent.TimeoutException error)
@@ -83,8 +105,11 @@
   "Perform only the external semantic retrieval phase. The returned attempt is
   intentionally graph-independent so callers can keep model and HTTP latency
   outside graph coordination locks."
-  [client config term]
-  (let [lateon (get-in config [:semantic :lateon-code])
+  ([client config term]
+   (retrieve client config term :hybrid))
+  ([client config term retrieval-mode-value]
+   (let [retrieval-mode-value (retrieval-mode/normalize retrieval-mode-value)
+         lateon (get-in config [:semantic :lateon-code])
         started (System/nanoTime)
         attempt
         (if (and client (reconcile/enabled? config))
@@ -98,15 +123,20 @@
                :error (or (.getMessage error) (str (class error)))
                :candidates []}))
           {:status :unavailable :candidates []})]
-    (assoc attempt
-           :latency-ms
-           (long (/ (- (System/nanoTime) started) 1000000)))))
+     (assoc attempt
+            :mode retrieval-mode-value
+            :latency-ms
+            (long (/ (- (System/nanoTime) started) 1000000))))))
 
 (defn fuse-with-metadata
   "Fuse lexical results with a completed LateOn retrieval attempt after
   validating every semantic candidate against current graph state."
-  [graph config term lexical-results semantic-attempt]
-  (let [lateon (get-in config [:semantic :lateon-code])
+  ([graph config term lexical-results semantic-attempt]
+   (fuse-with-metadata graph config term lexical-results semantic-attempt
+                       (or (:mode semantic-attempt) :hybrid)))
+  ([graph config term lexical-results semantic-attempt retrieval-mode-value]
+   (let [retrieval-mode-value (retrieval-mode/normalize retrieval-mode-value)
+         lateon (get-in config [:semantic :lateon-code])
         lexical-ids (vec (keep :id lexical-results))
         latency-ms (:latency-ms semantic-attempt 0)
         raw-semantic-candidates (:candidates semantic-attempt)
@@ -161,15 +191,16 @@
                         (zero? raw-count))
                  :no-matches
                  (:status semantic-attempt))]
-    {:results results
-     :retrieval
-     (cond-> {:status status
-              :latency-ms latency-ms
-              :raw-candidate-count raw-count
-              :accepted-fresh-candidate-count accepted-count
-              :rejected-stale-candidate-count (- raw-count accepted-count)}
-       (:error semantic-attempt)
-       (assoc :error (:error semantic-attempt)))}))
+     {:results results
+      :retrieval
+      (cond-> {:mode retrieval-mode-value
+               :status status
+               :latency-ms latency-ms
+               :raw-candidate-count raw-count
+               :accepted-fresh-candidate-count accepted-count
+               :rejected-stale-candidate-count (- raw-count accepted-count)}
+        (:error semantic-attempt)
+        (assoc :error (:error semantic-attempt)))})))
 
 (defn search-with-metadata
   "Compatibility composition of external retrieval and freshness-safe fusion."

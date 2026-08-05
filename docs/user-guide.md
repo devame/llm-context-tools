@@ -77,10 +77,11 @@ llm-context query state-readers saved-programs
 ```
 
 `find-symbol` and the lexical half of `search` use Datalevin FTS. `search`
-adds local LateOn multi-vector retrieval when available. `--explain` reports
-semantic status, latency, raw candidates, accepted fresh candidates, and stale
-rejections. A timeout or runtime failure still returns FTS results with an
-explicit warning.
+supports `--mode fts-only`, `--mode lateon-only`, and `--mode hybrid` (the
+default); the first two are useful for controlled retrieval ablations.
+`--explain` reports semantic status, latency, raw candidates, accepted fresh
+candidates, and stale rejections. A timeout or runtime failure still returns
+FTS results with an explicit warning on the hybrid path.
 
 ## Build bounded context
 

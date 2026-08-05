@@ -1,0 +1,103 @@
+{:corpus/version 2
+ :name "clojure-lsp public development retrieval judgments"
+ :queries
+ [{:id :clojure-lsp/api-analyze-project-and-deps
+   :language :clojure :query-type :behavior :domain :analysis
+   :query "which public API analyzes a project together with its dependencies?"
+   :relevance [{:qualified-name "clojure-lsp.api/analyze-project-and-deps!" :grade 3}]
+   :hard-negatives [{:qualified-name "clojure-lsp.api/analyze-project-only!"}]}
+  {:id :clojure-lsp/api-analyze-project-only
+   :language :clojure :query-type :behavior :domain :analysis
+   :query "where is the public operation that analyzes only the current project?"
+   :relevance [{:qualified-name "clojure-lsp.api/analyze-project-only!" :grade 3}]
+   :hard-negatives [{:qualified-name "clojure-lsp.api/analyze-project-and-deps!"}]}
+  {:id :clojure-lsp/api-diagnostics
+   :language :clojure :query-type :behavior :domain :diagnostics
+   :query "which API returns diagnostics for a project or file?"
+   :relevance [{:qualified-name "clojure-lsp.api/diagnostics" :grade 3}]
+   :hard-negatives [{:qualified-name "clojure-lsp.api/references"}]}
+  {:id :clojure-lsp/api-references
+   :language :clojure :query-type :behavior :domain :references
+   :query "where does the public API find references to a symbol?"
+   :relevance [{:qualified-name "clojure-lsp.api/references" :grade 3}]
+   :hard-negatives [{:qualified-name "clojure-lsp.api/diagnostics"}]}
+  {:id :clojure-lsp/api-rename
+   :language :clojure :query-type :transformation :domain :refactoring
+   :query "which API computes a project-wide symbol rename?"
+   :relevance [{:qualified-name "clojure-lsp.api/rename!" :grade 3}]
+   :hard-negatives [{:qualified-name "clojure-lsp.api/format!"}]}
+  {:id :clojure-lsp/api-format
+   :language :clojure :query-type :transformation :domain :formatting
+   :query "where is the public formatting operation exposed?"
+   :relevance [{:qualified-name "clojure-lsp.api/format!" :grade 3}]
+   :hard-negatives [{:qualified-name "clojure-lsp.api/clean-ns!"}]}
+  {:id :clojure-lsp/api-clean-ns
+   :language :clojure :query-type :transformation :domain :namespace
+   :query "which API cleans and sorts a namespace declaration?"
+   :relevance [{:qualified-name "clojure-lsp.api/clean-ns!" :grade 3}]
+   :hard-negatives [{:qualified-name "clojure-lsp.api/format!"}]}
+  {:id :clojure-lsp/api-dump
+   :language :clojure :query-type :behavior :domain :protocol
+   :query "where does the API dump a serialized project or analysis value?"
+   :relevance [{:qualified-name "clojure-lsp.api/dump" :grade 3}]
+   :hard-negatives [{:qualified-name "clojure-lsp.api/safe-process-message"}]}
+  {:id :clojure-lsp/startup-initialize-project
+   :language :clojure :query-type :lifecycle :domain :startup
+   :query "which startup function initializes a language-server project?"
+   :relevance [{:qualified-name "clojure-lsp.startup/initialize-project" :grade 3}]
+   :hard-negatives [{:qualified-name "clojure-lsp.startup/enumerate-source-files"}]}
+  {:id :clojure-lsp/startup-analyze-source-paths
+   :language :clojure :query-type :behavior :domain :analysis
+   :query "where does startup analyze the configured source paths?"
+   :relevance [{:qualified-name "clojure-lsp.startup/analyze-source-paths!" :grade 3}]
+   :hard-negatives [{:qualified-name "clojure-lsp.startup/analyze-source-paths-namespaces-only!"}]}
+  {:id :clojure-lsp/enumerate-source-files
+   :language :clojure :query-type :data-flow :domain :project-files
+   :query "which helper enumerates analyzable source files in a project?"
+   :relevance [{:qualified-name "clojure-lsp.startup/enumerate-source-files" :grade 3}]
+   :hard-negatives [{:qualified-name "clojure-lsp.source-paths/resolve-source-paths"}]}
+  {:id :clojure-lsp/refresh-analysis
+   :language :clojure :query-type :state-flow :domain :analysis
+   :query "where is existing dependency-graph analysis refreshed?"
+   :relevance [{:qualified-name "clojure-lsp.dep-graph/refresh-analysis" :grade 3}]
+   :hard-negatives [{:qualified-name "clojure-lsp.dep-graph/update-definitions"}]}
+  {:id :clojure-lsp/ns-dependents
+   :language :clojure :query-type :data-flow :domain :dependencies
+   :query "which dependency-graph query finds namespaces that depend on a namespace?"
+   :relevance [{:qualified-name "clojure-lsp.dep-graph/ns-dependents-uris" :grade 3}]
+   :hard-negatives [{:qualified-name "clojure-lsp.dep-graph/ns-dependencies-uris"}]}
+  {:id :clojure-lsp/ns-dependencies
+   :language :clojure :query-type :data-flow :domain :dependencies
+   :query "where are the namespaces required by a namespace looked up?"
+   :relevance [{:qualified-name "clojure-lsp.dep-graph/ns-dependencies-uris" :grade 3}]
+   :hard-negatives [{:qualified-name "clojure-lsp.dep-graph/ns-dependents-uris"}]}
+  {:id :clojure-lsp/find-definition
+   :language :clojure :query-type :behavior :domain :navigation
+   :query "which custom-linter helper resolves a symbol to its definition?"
+   :relevance [{:qualified-name "clojure-lsp.custom-linters-api/find-definition" :grade 3}]
+   :hard-negatives [{:qualified-name "clojure-lsp.custom-linters-api/find-references"}]}
+  {:id :clojure-lsp/find-references
+   :language :clojure :query-type :behavior :domain :navigation
+   :query "where can a custom linter retrieve all references to a symbol?"
+   :relevance [{:qualified-name "clojure-lsp.custom-linters-api/find-references" :grade 3}]
+   :hard-negatives [{:qualified-name "clojure-lsp.custom-linters-api/find-definition"}]}
+  {:id :clojure-lsp/find-implementations
+   :language :clojure :query-type :behavior :domain :navigation
+   :query "which helper finds implementations of a definition?"
+   :relevance [{:qualified-name "clojure-lsp.custom-linters-api/find-implementations" :grade 3}]
+   :hard-negatives [{:qualified-name "clojure-lsp.custom-linters-api/find-declaration"}]}
+  {:id :clojure-lsp/completion
+   :language :clojure :query-type :behavior :domain :editor
+   :query "where is completion assembled for a cursor position?"
+   :relevance [{:qualified-name "clojure-lsp.feature.completion/completion" :grade 3}]
+   :hard-negatives [{:qualified-name "clojure-lsp.feature.completion/resolve-item"}]}
+  {:id :clojure-lsp/code-actions
+   :language :clojure :query-type :behavior :domain :editor
+   :query "which feature returns the available code actions for a document?"
+   :relevance [{:qualified-name "clojure-lsp.feature.code-actions/all" :grade 3}]
+   :hard-negatives [{:qualified-name "clojure-lsp.feature.completion/completion"}]}
+  {:id :clojure-lsp/call-hierarchy-incoming
+   :language :clojure :query-type :behavior :domain :navigation
+   :query "where are incoming callers for a call-hierarchy item computed?"
+   :relevance [{:qualified-name "clojure-lsp.feature.call-hierarchy/incoming" :grade 3}]
+   :hard-negatives [{:qualified-name "clojure-lsp.feature.call-hierarchy/outgoing"}]}]}

@@ -232,6 +232,11 @@
   (boolean (some #(selector-match? result %)
                  (normalized-relevance relevance))))
 
+(defn recall-at-k?
+  "Return whether any judged relevant result appears in the first k rows."
+  [results relevance k]
+  (boolean (some #(relevant? % relevance) (take k results))))
+
 (defn hard-negative? [result hard-negatives]
   (boolean
    (some #(selector-match? result (normalize-selector %)) hard-negatives)))

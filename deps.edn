@@ -25,5 +25,9 @@
   {:extra-paths ["bench"]
    :jvm-opts ["--enable-native-access=ALL-UNNAMED"]
    :main-opts ["-m" "llm-context.retrieval-corpus"]}
+  :public-semantic-evaluation
+  {:extra-paths ["bench"]
+   :jvm-opts ["--enable-native-access=ALL-UNNAMED"]
+   :main-opts ["-m" "llm-context.public-semantic-evaluation"]}
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.8"}}
           :ns-default build}}}
