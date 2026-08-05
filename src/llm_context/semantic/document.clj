@@ -170,8 +170,9 @@
         ;; annotation. High-connectivity symbols can otherwise spend the
         ;; entire document budget on relationship metadata.
         source-reserve (min 512 (max 1 (quot max-document-bytes 4)))
-        header-limit (- max-document-bytes (utf8-size separator) 64
-                        source-reserve)
+        header-limit (min 2048
+                          (- max-document-bytes (utf8-size separator) 64
+                             source-reserve))
         _ (when-not (pos? header-limit)
             (throw (ex-info "Semantic document byte limit is too small"
                             {:max-document-bytes max-document-bytes})))

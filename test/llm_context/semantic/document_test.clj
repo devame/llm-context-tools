@@ -156,23 +156,39 @@
 
 (deftest oversized-relationship-metadata-is-truncated-deterministically
   (let [source "(defn hub [] :ok)"
-        file (file "src/hub.clj" source :language/clojure)
-        symbol (symbol-entity file "symbol:hub" "hub" 1 1 1 18)
+        file-entity (file "src/hub.clj" source :language/clojure)
+        symbol (symbol-entity file-entity "symbol:hub" "hub" 1 1 1 18)
         relationships (mapv (fn [index]
                               {:kind :edge.kind/calls
                                :target (str "sample.target/operation-" index)})
                             (range 300))
-        first (document/build lateon symbol file source relationships)
-        second (document/build lateon symbol file source
+        first (document/build lateon symbol file-entity source relationships)
+        second (document/build lateon symbol file-entity source
                                (reverse relationships))
-        texts (mapv :text (:chunks first))]
+        texts (mapv :text (:chunks first))
+        large-source (str "(defn hub []\n"
+                          (apply str (map #(str "  (println " % ")\n")
+                                          (range 250)))
+                          ")")
+        large-file (file "src/large-hub.clj" large-source
+                         :language/clojure)
+        large-symbol
+        (assoc (symbol-entity large-file "symbol:large-hub" "large-hub"
+                              1 1 252 2)
+               :source/start-byte 0
+               :source/end-byte
+               (count (.getBytes large-source
+                                 java.nio.charset.StandardCharsets/UTF_8)))
+        large (document/build lateon large-symbol large-file
+                              large-source relationships)]
     (is (= first second))
     (is (some #(str/includes? % "Metadata: [truncated]") texts))
     (is (some #(str/includes? % source) texts))
     (is (every? #(<= (count (.getBytes ^String %
                                       java.nio.charset.StandardCharsets/UTF_8))
                      (:max-document-bytes lateon))
-                texts))))
+                texts))
+    (is (<= (count (:chunks large)) 3))))
 
 (deftest build-file-verifies-source-hash-and-skips-synthetic-modules
   (let [root (Files/createTempDirectory
