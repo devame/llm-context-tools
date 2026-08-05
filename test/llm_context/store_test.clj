@@ -7,7 +7,8 @@
             [llm-context.project :as project]
             [llm-context.semantic.reconcile :as semantic-reconcile]
             [llm-context.semantic.state :as semantic-state]
-            [llm-context.store :as store])
+            [llm-context.store :as store]
+            [llm-context.test-support.db :as db-support])
   (:import [java.nio.file Files]))
 
 (defn temp-project []
@@ -214,6 +215,28 @@
               graph
               '[:find ?detail :where [_ :effect/detail ?detail]]
               []))))))
+
+(defn replacement-operation-counts [symbol-count]
+  (let [project (temp-project)
+        file (file-entity "src/cardinality.clj" "old")
+        symbols (mapv #(symbol-entity file (str "sample/item-" %) (inc %))
+                      (range symbol-count))
+        changed (file-entity "src/cardinality.clj" "new")]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-file! graph file symbols)
+      (:counts
+       (db-support/with-operation-counts
+         (store/replace-file! graph changed symbols))))))
+
+(deftest file-replacement-planning-has-constant-database-cardinality
+  (let [small (replacement-operation-counts 50)
+        large (replacement-operation-counts 500)]
+    (is (= small large))
+    (is (<= (:query large) 12))
+    (is (zero? (:entity large)))
+    (is (zero? (:pull large)))
+    (is (= 1 (:pull-many large)))
+    (is (= 1 (:transact large)))))
 
 (deftest file-mutations-can-atomically-assert-semantic-dirty-markers
   (let [project (temp-project)
