@@ -142,6 +142,14 @@
          #"requires a running project service"
          (cli/execute context "semantic" ["sync"])))))
 
+(deftest semantic-sync-accepts-an-explicit-positive-wait-timeout
+  (is (= {:wait? true :timeout-ms 1200000}
+         (#'cli/parse-semantic-sync-options
+          ["--wait" "--timeout-ms" "1200000"])))
+  (is (thrown-with-msg?
+       clojure.lang.ExceptionInfo #"requires a positive integer"
+       (#'cli/parse-semantic-sync-options ["--timeout-ms" "0"]))))
+
 (deftest semantic-sync-reports-the-worker-failure-detail
   (let [root (Files/createTempDirectory
               "llm-context-semantic-worker-failure-"

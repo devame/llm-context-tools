@@ -327,6 +327,23 @@
        (zero? (:dirty status))
        (= :complete (:completeness status))))
 
+(defn- parse-semantic-sync-options [arguments]
+  (loop [remaining (seq arguments)
+         parsed {:wait? false :timeout-ms nil}]
+    (if-let [argument (first remaining)]
+      (case argument
+        "--wait" (recur (next remaining) (assoc parsed :wait? true))
+        "--timeout-ms"
+        (let [timeout-ms (some-> (second remaining) parse-long)]
+          (when-not (pos-int? timeout-ms)
+            (throw
+             (ex-info "semantic sync --timeout-ms requires a positive integer"
+                      {:exit-code 2})))
+          (recur (nnext remaining) (assoc parsed :timeout-ms timeout-ms)))
+        (throw (ex-info (str "Unknown semantic sync option: " argument)
+                        {:exit-code 2})))
+      parsed)))
+
 (defmethod execute "semantic" [context _ args]
   (let [subcommand (or (first args) "status")
         options (set (next args))
@@ -340,23 +357,22 @@
         (pprint/pprint (semantic-status context settings)))
 
       "sync"
-      (do
-        (when-let [unknown (first (remove #{"--wait"} options))]
-          (throw (ex-info (str "Unknown semantic sync option: " unknown)
-                          {:exit-code 2})))
+      (let [{:keys [wait? timeout-ms]}
+            (parse-semantic-sync-options (next args))]
         (let [initial (remote-value context {:op :semantic-sync})]
           (when (= unavailable initial)
             (throw
              (ex-info "Semantic synchronization requires a running project service"
                       {:exit-code 2})))
-          (if-not (contains? options "--wait")
+          (if-not wait?
             (pprint/pprint initial)
-            (let [timeout-ms (+ (get-in settings
-                                        [:semantic :lateon-code
-                                         :startup-timeout-ms])
-                                (get-in settings
-                                        [:semantic :lateon-code
-                                         :visibility-timeout-ms]))
+            (let [timeout-ms (or timeout-ms
+                                 (+ (get-in settings
+                                            [:semantic :lateon-code
+                                             :startup-timeout-ms])
+                                    (get-in settings
+                                            [:semantic :lateon-code
+                                             :visibility-timeout-ms])))
                   deadline (+ (System/currentTimeMillis) timeout-ms)]
               (loop [status initial]
                 (let [runtime (:runtime status)

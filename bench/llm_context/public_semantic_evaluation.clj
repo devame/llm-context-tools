@@ -288,8 +288,13 @@
                 :analysis ["analyze" "--full"] timeouts)
   (run-and-log! checkout ".llm-context/public-semantic-evaluation/preflight/service-start.edn"
                 :service-start ["service" "start"] timeouts)
-  (run-and-log! checkout ".llm-context/public-semantic-evaluation/preflight/sync.edn"
-                :semantic-sync ["semantic" "sync" "--wait"] timeouts)
+  (let [stage-timeout (:semantic-sync timeouts)
+        cli-timeout (max 1 (- stage-timeout 30000))]
+    (run-and-log! checkout ".llm-context/public-semantic-evaluation/preflight/sync.edn"
+                  :semantic-sync
+                  ["semantic" "sync" "--wait" "--timeout-ms"
+                   (str cli-timeout)]
+                  timeouts))
   (let [status-result
         (run-and-log! checkout
                       ".llm-context/public-semantic-evaluation/preflight/status.edn"
