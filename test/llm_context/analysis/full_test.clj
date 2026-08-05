@@ -111,6 +111,7 @@
               :semantic-reconcile-start :semantic-reconcile-complete
               :complete]
              (mapv :stage @events)))
+      (is (= 1000 full/persistence-batch-size))
       (is (= full/persistence-batch-size
              (:batch-size (first (filter #(= :persist-start (:stage %))
                                         @events)))))

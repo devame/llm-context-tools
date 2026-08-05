@@ -8,7 +8,7 @@
             [llm-context.semantic.reconcile :as semantic-reconcile]
             [llm-context.store :as store]))
 
-(def persistence-batch-size 100)
+(def persistence-batch-size 1000)
 (def analyzer-name "clj-kondo+janet-semantic")
 
 (defn- emit! [progress stage data]

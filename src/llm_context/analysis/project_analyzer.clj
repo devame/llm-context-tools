@@ -179,6 +179,12 @@
                      {:files (count clojure-files)
                       :records (reduce + 0 (vals (analysis-counts snapshot)))}))
         clojure-snapshot (:value clojure-phase)
+        clojure-ms (:elapsed-ms clojure-phase)
+        clojure-records (analysis-counts clojure-snapshot)
+        clojure-analyzer
+        {:version (:analyzer-version clojure-snapshot)
+         :configuration-fingerprint
+         (:configuration-fingerprint clojure-snapshot)}
         janet-phase
         (run-phase progress :janet-analysis
                    #(if (seq janet-files)
@@ -191,6 +197,9 @@
                                         (map (comp count :entities)
                                              (:outputs snapshot)))}))
         janet-snapshot (:value janet-phase)
+        janet-ms (:elapsed-ms janet-phase)
+        janet-analyzer {:catalog-version (:catalog-version janet-snapshot)}
+        janet-diagnostics (vec (:diagnostics janet-snapshot))
         janet-outputs (:outputs janet-snapshot)
         materialize-phase
         (run-phase progress :relationship-materialization
@@ -206,36 +215,38 @@
                    (fn [{:keys [outputs clojure-metrics]}]
                      (merge (output-counts outputs) clojure-metrics)))
         materialized (:value materialize-phase)
+        materialize-ms (:elapsed-ms materialize-phase)
+        clojure-materialization (:clojure-metrics materialized)
         raw-outputs (:outputs materialized)
         canonical-phase
         (run-phase progress :canonicalization
                    #(canonicalize-outputs files raw-outputs)
                    output-counts)
         canonical-outputs (:value canonical-phase)
+        canonical-ms (:elapsed-ms canonical-phase)
         fingerprint-phase
         (run-phase progress :fingerprinting
                    #(fingerprint-outputs canonical-outputs)
                    output-counts)
         outputs (:value fingerprint-phase)
+        fingerprint-ms (:elapsed-ms fingerprint-phase)
         timings
-        {:clj-kondo-ms (:elapsed-ms clojure-phase)
-         :janet-analysis-ms (:elapsed-ms janet-phase)
-         :relationship-materialization-ms (:elapsed-ms materialize-phase)
-         :canonicalization-ms (:elapsed-ms canonical-phase)
-         :fingerprinting-ms (:elapsed-ms fingerprint-phase)}]
+        {:clj-kondo-ms clojure-ms
+         :janet-analysis-ms janet-ms
+         :relationship-materialization-ms materialize-ms
+         :canonicalization-ms canonical-ms
+         :fingerprinting-ms fingerprint-ms}]
     {:outputs
      outputs
      :analyzers
-     {:clj-kondo {:version (:analyzer-version clojure-snapshot)
-                  :configuration-fingerprint
-                  (:configuration-fingerprint clojure-snapshot)}
-      :janet {:catalog-version (:catalog-version janet-snapshot)}
+     {:clj-kondo clojure-analyzer
+      :janet janet-analyzer
       :semantic-fingerprint {:version canonical-hash/contract-version}}
      :analysis-metrics
      {:timings timings
-      :clojure-records (analysis-counts clojure-snapshot)
-      :clojure-materialization (:clojure-metrics materialized)
+      :clojure-records clojure-records
+      :clojure-materialization clojure-materialization
       :output (output-counts outputs)}
      ;; File-scoped clj-kondo integrity diagnostics live on their output so
      ;; preservation decisions and user reporting share one source of truth.
-     :diagnostics (vec (:diagnostics janet-snapshot))})))
+     :diagnostics janet-diagnostics})))
