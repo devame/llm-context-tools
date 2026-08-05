@@ -59,6 +59,21 @@
         {:source/start-line 2 :source/start-column 1
          :source/end-line 2 :source/end-column 2}))))
 
+(deftest format-three-byte-ranges-are-authoritative-for-unicode-source
+  (let [source "ignore 😀\n(defn résumé [] :ok)\n"
+        start (.indexOf source "(defn")
+        end (+ start (count "(defn résumé [] :ok)"))
+        start-byte (alength (.getBytes (subs source 0 start)
+                                      java.nio.charset.StandardCharsets/UTF_8))
+        end-byte (alength (.getBytes (subs source 0 end)
+                                    java.nio.charset.StandardCharsets/UTF_8))]
+    (is (= "(defn résumé [] :ok)"
+           (document/extract-range
+            source
+            {:source/start-line 99 :source/start-column 99
+             :source/end-line 99 :source/end-column 99
+             :source/start-byte start-byte :source/end-byte end-byte})))))
+
 (deftest document-text-and-hash-are-deterministic
   (let [source "(defn fetch [url]\n  (retry #(http/get url)))"
         file (file "src/http.clj" source :language/clojure)

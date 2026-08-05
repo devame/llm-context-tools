@@ -4,7 +4,8 @@
             [llm-context.analysis.clojure :as clojure-analysis]
             [llm-context.analysis.clojure-topics :as clojure-topics]
             [llm-context.analysis.project-analyzer :as project-analyzer]
-            [llm-context.project :as project])
+            [llm-context.project :as project]
+            [llm-context.source :as source])
   (:import [java.nio.file Files]))
 
 (defn- input [root relative language content]
@@ -69,13 +70,13 @@
         reference
         (#'clojure-analysis/local-reference
          (#'clojure-analysis/positional-index [owner]) {}
-         {"src/sample.cljs" {:content content}} record nil)]
+         (source/index content) record nil)]
     (is (= "done" (:reference/target-text reference)))
     (is (= :dynamic (:reference/classification reference)))
     (is (nil?
          (#'clojure-analysis/local-reference
           (#'clojure-analysis/positional-index [owner]) {}
-          {"src/sample.cljs" {:content ""}} record nil)))))
+          (source/index "") record nil)))))
 
 (deftest cljs-async-callback-with-omitted-kondo-name-remains-valid
   (let [root (Files/createTempDirectory
@@ -359,7 +360,7 @@
         reference
         (#'clojure-analysis/local-reference
          (#'clojure-analysis/positional-index [outer inner]) {}
-         {"src/nested.clj" {:content "\n\n\n    (callback)\n"}}
+         (source/index "\n\n\n    (callback)\n")
          {:filename "src/nested.clj" :platform :clj
           :row 4 :col 6 :end-row 4 :end-col 14 :name 'callback}
          nil)]

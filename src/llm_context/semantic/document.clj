@@ -39,25 +39,38 @@
        starts))))
 
 (defn extract-range
-  "Extract a Tree-sitter range from source. Lines and columns are one-based;
-  columns and the exclusive end point are UTF-8 byte offsets."
+  "Extract a canonical source range. Format-3 byte offsets are authoritative;
+  line/column conversion remains only for legacy records without byte ranges."
   [source {:source/keys [start-line start-column end-line end-column]
            :as range}]
-  (when-not (every? pos-int? [start-line start-column end-line end-column])
-    (throw (ex-info "Semantic source range is incomplete" {:range range})))
   (let [bytes (utf8-bytes source)
-        starts (line-start-offsets bytes)
-        line-count (count starts)]
-    (when-not (and (<= start-line line-count) (<= end-line line-count))
-      (throw (ex-info "Semantic source range exceeds file line count"
-                      {:range range :line-count line-count})))
-    (let [start (+ (nth starts (dec start-line)) (dec start-column))
-          end (+ (nth starts (dec end-line)) (dec end-column))]
-      (when-not (<= 0 start end (alength bytes))
-        (throw (ex-info "Semantic source range exceeds file byte length"
-                        {:range range :start-byte start :end-byte end
-                         :file-bytes (alength bytes)})))
-      (String. bytes start (- end start) StandardCharsets/UTF_8))))
+        start-byte (:source/start-byte range)
+        end-byte (:source/end-byte range)]
+    (if (and (some? start-byte) (some? end-byte))
+      (do
+        (when-not (and (nat-int? start-byte) (nat-int? end-byte)
+                       (<= start-byte end-byte (alength bytes)))
+          (throw (ex-info "Semantic source range exceeds file byte length"
+                          {:range range :start-byte start-byte
+                           :end-byte end-byte :file-bytes (alength bytes)})))
+        (String. bytes start-byte (- end-byte start-byte)
+                 StandardCharsets/UTF_8))
+      (do
+        (when-not (every? pos-int?
+                          [start-line start-column end-line end-column])
+          (throw (ex-info "Semantic source range is incomplete" {:range range})))
+        (let [starts (line-start-offsets bytes)
+              line-count (count starts)]
+          (when-not (and (<= start-line line-count) (<= end-line line-count))
+            (throw (ex-info "Semantic source range exceeds file line count"
+                            {:range range :line-count line-count})))
+          (let [start (+ (nth starts (dec start-line)) (dec start-column))
+                end (+ (nth starts (dec end-line)) (dec end-column))]
+            (when-not (<= 0 start end (alength bytes))
+              (throw (ex-info "Semantic source range exceeds file byte length"
+                              {:range range :start-byte start :end-byte end
+                               :file-bytes (alength bytes)})))
+            (String. bytes start (- end start) StandardCharsets/UTF_8)))))))
 
 (defn- label-value [label value]
   (when (and value (not (str/blank? (str value))))

@@ -3,7 +3,8 @@
   (:require [clojure.string :as str]
             [llm-context.analysis.clojure-topics :as topics]
             [llm-context.analysis.effects :as effects]
-            [llm-context.model.ids :as ids]))
+            [llm-context.model.ids :as ids]
+            [llm-context.source :as source]))
 
 (def definition-forms
   {'clojure.core/defn :symbol.kind/function
@@ -78,35 +79,12 @@
     (:end-row record) (assoc :source/end-line (:end-row record))
     (:end-col record) (assoc :source/end-column (:end-col record))))
 
-(defn- line-start-offsets [source]
-  (loop [index 0 result [0]]
-    (let [newline (.indexOf ^String source "\n" index)]
-      (if (neg? newline)
-        result
-        (recur (inc newline) (conj result (inc newline)))))))
-
-(defn- source-byte-offset
-  [source line-starts row column]
-  (when-let [line-start (and (pos-int? row)
-                             (nth line-starts (dec row) nil))]
-    (let [line-end (let [newline (.indexOf ^String source "\n" line-start)]
-                     (if (neg? newline) (count source) newline))
-          line-length (- line-end line-start)]
-      ;; clj-kondo columns follow JVM string (UTF-16 code-unit) offsets, while
-      ;; the canonical IR requires UTF-8 byte offsets.
-      (when (<= (dec column) line-length)
-        (let [character-offset (+ line-start (dec column))]
-          (alength (.getBytes (.substring ^String source
-                                          0 character-offset)
-                              java.nio.charset.StandardCharsets/UTF_8)))))))
-
-(defn- with-byte-range [source line-starts entity]
+(defn- with-byte-range [source-index entity]
   (let [{:source/keys [start-line start-column end-line end-column]} entity]
     (if (every? some? [start-line start-column end-line end-column])
-      (let [start-byte (source-byte-offset source line-starts
+      (let [start-byte (source/byte-offset source-index
                                            start-line start-column)
-            end-byte (source-byte-offset source line-starts
-                                         end-line end-column)]
+            end-byte (source/byte-offset source-index end-line end-column)]
         (cond-> entity
           (and (some? start-byte) (some? end-byte))
           (assoc :source/start-byte start-byte
@@ -364,11 +342,10 @@
            :clj-kondo-namespace-usage target-name)))))))
 
 (defn- local-call?
-  [content {:keys [row name-col col]}]
+  [source-index {:keys [row name-col col]}]
   (let [column (or name-col col)]
    (when (and row column)
-    (let [lines (str/split-lines content)
-          line (nth lines (dec row) nil)
+    (let [line (source/line-text source-index row)
           before (when (and line (> column 1))
                    (subs line 0 (min (count line) (dec column))))]
       (boolean (and before (re-find #"\(\s*$" before)))))))
@@ -377,17 +354,16 @@
   "Prefer clj-kondo's normalized local name, but recover it from the precise
   name range when analysis-data omits :name. clj-kondo can emit this shape for
   ClojureScript macro-bound locals such as cljs.test/async's `done` callback."
-  [content record]
+  [source-index record]
   (let [reported (some-> (:name record) str)]
     (or (when-not (str/blank? reported) reported)
         (let [row (or (:name-row record) (:row record))
               end-row (or (:name-end-row record) row)
               start-column (or (:name-col record) (:col record))
               end-column (or (:name-end-col record) (:end-col record))
-              line (when (and content
-                              (pos-int? row)
+              line (when (and (pos-int? row)
                               (= row end-row))
-                     (nth (str/split-lines content) (dec row) nil))
+                     (source/line-text source-index row))
               start (when (pos-int? start-column) (dec start-column))
               end (when (pos-int? end-column) (dec end-column))]
           (when (and line start end
@@ -487,7 +463,7 @@
         (group-by (juxt :symbol/file :symbol/platform) symbols)))
 
 (defn- local-reference
-  [owners namespaces-by-file-platform files-by-path record stats]
+  [owners namespaces-by-file-platform source-index record stats]
   (let [platform (:platform record)
         file-id (str "file:" (:filename record))
         _ (when stats (swap! stats update :ownership-lookups (fnil inc 0)))
@@ -496,10 +472,9 @@
                    (sort-by owner-order)
                    first)
         owner (or owner
-                  (get namespaces-by-file-platform [file-id platform]))
-        content (:content (get files-by-path (:filename record)))]
-    (when (and owner (local-call? content record))
-      (when-let [target (local-name content record)]
+                  (get namespaces-by-file-platform [file-id platform]))]
+    (when (and owner (local-call? source-index record))
+      (when-let [target (local-name source-index record)]
         (diagnostic-reference
          :edge.kind/calls owner record target :dynamic
          :clj-kondo-local-usage nil)))))
@@ -568,7 +543,6 @@
 (defn- materialize*
   [files snapshot stats]
   (let [files (vec files)
-        files-by-path (into {} (map (juxt :relative-path identity) files))
         file-entities (into {} (map (fn [file]
                                      [(:relative-path file)
                                       (file-entity file)]))
@@ -629,10 +603,9 @@
                 (namespace-relationship namespace-by-key
                                         (:platform record) record))
               (distinct (expand-platforms (:namespace-usages analysis))))
-        local-links
-        (keep #(local-reference symbols-by-position namespaces-by-file-platform
-                                files-by-path % stats)
-              (distinct (expand-platforms (:local-usages analysis))))
+        local-records-by-file
+        (group-by :filename
+                  (distinct (expand-platforms (:local-usages analysis))))
         protocol-links
         (keep (fn [record]
                 (protocol-relationship
@@ -676,7 +649,7 @@
                   (containment namespace entity)))
               symbols)
         facts (concat namespaces symbols containment-links
-                      namespace-links var-links local-links protocol-links
+                      namespace-links var-links protocol-links
                       java-class-links java-member-links instance-links)
         facts-by-file
         (group-by
@@ -693,9 +666,18 @@
     (mapv
      (fn [file]
        (let [path (:relative-path file)
+             source-index (source/index (:content file))
+             _ (when stats (swap! stats update :source-indexes-built
+                                  (fnil inc 0)))
              file-diagnostics (vec (get diagnostics-by-file path []))
              malformed? (boolean (seq file-diagnostics))
-             entities (vec (get facts-by-file path []))
+             local-links
+             (into []
+                   (keep #(local-reference symbols-by-position
+                                           namespaces-by-file-platform
+                                           source-index % stats))
+                   (get local-records-by-file path []))
+             entities (into (vec (get facts-by-file path [])) local-links)
              framework-facts
              (topics/extract
               file
@@ -717,8 +699,7 @@
                           :source/end-line (:source/end-line reference)
                           :source/end-column (:source/end-column reference)}))
                   (effects/analyze (:language file)))
-             line-starts (line-start-offsets (:content file))
-             entities (mapv #(with-byte-range (:content file) line-starts %)
+             entities (mapv #(with-byte-range source-index %)
                             (concat entities framework-facts
                                     external-effects))]
          {:file (get file-entities path)
@@ -736,7 +717,8 @@
   [files snapshot]
   (let [stats (atom {:ownership-lookups 0
                      :positional-candidates-examined 0
-                     :fact-owner-lookups 0})
+                     :fact-owner-lookups 0
+                     :source-indexes-built 0})
         outputs (materialize* files snapshot stats)]
     {:outputs outputs
      :metrics (assoc @stats

@@ -13,3 +13,20 @@
   (let [bytes (.getBytes "café" java.nio.charset.StandardCharsets/UTF_8)]
     (is (= {:content "café" :malformed? false}
            (source/decode-utf8 bytes)))))
+
+(deftest source-index-translates-utf16-columns-to-utf8-bytes
+  (let [indexed (source/index "a😀c\r\nβeta\n")]
+    (is (= 0 (source/byte-offset indexed 1 1)))
+    (is (= 1 (source/byte-offset indexed 1 2)))
+    ;; The emoji occupies two UTF-16 units and four UTF-8 bytes.
+    (is (= 5 (source/byte-offset indexed 1 4)))
+    (is (= "a😀c" (source/line-text indexed 1)))
+    (is (= "βeta" (source/line-text indexed 2)))
+    (is (= "" (source/line-text indexed 3)))
+    (is (= "😀" (source/slice-bytes indexed 1 5)))))
+
+(deftest empty-source-index-has-one-empty-line
+  (let [indexed (source/index "")]
+    (is (= "" (source/line-text indexed 1)))
+    (is (= 0 (source/character-offset indexed 1 1)))
+    (is (= 0 (source/byte-offset indexed 1 1)))))
