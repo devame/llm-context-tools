@@ -391,20 +391,22 @@
   "Remove queue, indexed-record, dirty-marker, and watermark entities before
   rebuilding a versioned semantic index. Canonical graph facts are untouched."
   [store]
-  (let [semantic-eids
-        (->> (d/q '[:find ?entity ?attribute
-                    :where [?entity ?attribute _]]
-                  (database store))
-             (keep (fn [[entity attribute]]
-                     (when (str/starts-with? (or (namespace attribute) "")
-                                             "semantic")
-                       entity)))
-             distinct
-             vec)]
-    (doseq [batch (partition-all 100 semantic-eids)]
-      (d/transact! (:connection store)
-                   (mapv (fn [eid] [:db/retractEntity eid]) batch)))
-    (count semantic-eids)))
+  (reduce
+   (fn [removed identity-attribute]
+     ;; Identity attributes are unique and indexed. Binding the attribute in
+     ;; the query avoids materializing every graph entity/attribute pair merely
+     ;; to discover the four semantic operational entity families.
+     (let [eids (d/q '[:find [?entity ...]
+                       :in $ ?identity-attribute
+                       :where [?entity ?identity-attribute _]]
+                     (database store) identity-attribute)]
+       (doseq [batch (partition-all 100 eids)]
+         (d/transact! (:connection store)
+                      (mapv (fn [eid] [:db/retractEntity eid]) batch)))
+       (+ removed (count eids))))
+   0
+   [:semantic.dirty/id :semantic.job/id
+    :semantic.indexed/id :semantic.watermark/id]))
 
 (defn- file-retraction-plan [db file-id]
   (let [symbols (d/q '[:find [?symbol ...]

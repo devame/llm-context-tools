@@ -462,6 +462,45 @@
               :semantic-index-name "llm-context-v2"})
       (is (= :ready (store/graph-state graph))))))
 
+(deftest semantic-reset-uses-operational-identities-and-preserves-graph
+  (let [project (temp-project)
+        file (file-entity "src/a.clj" "source")
+        symbol (symbol-entity file "sample/a" 1)]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-all! graph [file symbol])
+      (d/transact!
+       (:connection graph)
+       [{:semantic.dirty/id "dirty:a" :semantic.dirty/provider :lateon-code
+         :semantic.dirty/file-id (:file/id file)
+         :semantic.dirty/operation :upsert :semantic.dirty/created-at 1}
+        {:semantic.job/id "job:a" :semantic.job/provider :lateon-code
+         :semantic.job/symbol-id (:symbol/id symbol)
+         :semantic.job/file-id (:file/id file) :semantic.job/operation :upsert
+         :semantic.job/status :pending :semantic.job/attempts 0
+         :semantic.job/available-at 1 :semantic.job/updated-at 1}
+        {:semantic.indexed/id "indexed:a"
+         :semantic.indexed/provider :lateon-code
+         :semantic.indexed/symbol-id (:symbol/id symbol)
+         :semantic.indexed/file-id (:file/id file)
+         :semantic.indexed/document-hash "sha256:a"
+         :semantic.indexed/model-revision "revision"
+         :semantic.indexed/document-version 3
+         :semantic.indexed/chunk-count 1 :semantic.indexed/updated-at 1}
+        {:semantic.watermark/id "watermark:a"
+         :semantic.watermark/provider :lateon-code
+         :semantic.watermark/state :complete}])
+      (is (= 4 (store/reset-semantic-state! graph)))
+      (is (= #{(:file/id file)}
+             (set (store/query graph
+                               '[:find [?id ...] :where [_ :file/id ?id]] []))))
+      (is (= #{(:symbol/id symbol)}
+             (set (store/query graph
+                               '[:find [?id ...] :where [_ :symbol/id ?id]] []))))
+      (is (empty? (store/query
+                   graph
+                   '[:find [?entity ...]
+                     :where [?entity :semantic.job/id _]] []))))))
+
 (deftest incremental-topic-cleanup-retracts-only-unreferenced-topics
   (let [project (temp-project)
         file (file-entity "src/a.cljs" "source")
