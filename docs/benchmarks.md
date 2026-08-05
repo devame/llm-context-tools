@@ -40,26 +40,55 @@ detached project coordinator; query, context, and export commands discover it
 through `.llm-context/service.edn` and fall back to direct execution when it is
 absent.
 
+Run the maintained Clojure and Janet retrieval corpus with:
+
+```bash
+clojure -M:validate-semantic-corpus
+llm-context -C bench/retrieval-corpus/project analyze --full
+llm-context -C bench/retrieval-corpus/project service start
+clojure -M:semantic-bench \
+  bench/retrieval-corpus/project \
+  bench/retrieval-corpus/queries.edn
+```
+
+The checked-in corpus is a stable benchmark project with 24 graded queries.
+It includes identifier, behavior, state-flow, graph-flow, framework-convention,
+hard-negative, and cross-language slices. See
+[`bench/retrieval-corpus/README.md`](../bench/retrieval-corpus/README.md) for
+the judgment contract and maintenance rules.
+
 For a repository-specific semantic query set, use:
 
 ```bash
 clojure -M:semantic-bench /path/to/project query-set.edn
 ```
 
-The EDN input is a vector of natural-language queries and acceptable symbol
-IDs/names:
+The preferred EDN input is a versioned corpus with natural-language queries,
+stable slice metadata, graded relevance judgments, and hard negatives:
 
 ```clojure
-[{:query "where is a user session authenticated?"
-  :expected ["authenticate-user" "auth.core/authenticate-user"]}]
+{:corpus/version 1
+ :queries
+ [{:id :clojure/authenticate-session
+   :language :clojure
+   :query-type :behavior
+   :query "where is a user session authenticated?"
+   :relevance {"auth.core/authenticate-user" 3
+               "auth.core/decode-session" 1}
+   :hard-negatives ["auth.core/authorize-user"]}]}
 ```
+
+The legacy vector of `{:query string :expected [...]}` entries remains
+accepted and is normalized to ungraded relevance for compatibility.
 
 The harness requires a running, synchronized project service. For every query
 it evaluates both hybrid search and `context --intent`, reporting search
-recall-at-k, context seed recall-at-1, final packet recall, LateOn query/seed
-rates, separate search and end-to-end context latency distributions, misses,
-and context errors. Keep the same graph, model revision, query set, context
-budget, and hardware when comparing changes.
+recall-at-k, MRR, nDCG-at-k, hard-negative-before-relevant rate, context seed
+recall-at-1, final packet recall, per-language and per-query-type quality slices,
+LateOn query/seed rates, separate search and end-to-end context latency
+distributions, misses, and context errors. Here `k` is the returned hybrid
+candidate count. Keep the same graph, model revision, query set, candidate
+count, context budget, and hardware when comparing changes.
 
 Benchmark output is descriptive rather than a universal release gate because
 filesystem location, JDK, native architecture, and project language mix have

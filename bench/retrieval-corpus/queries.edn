@@ -1,0 +1,199 @@
+{:corpus/version 1
+ :name "llm-context Clojure and Janet retrieval corpus"
+ :description
+ "Natural-language retrieval judgments with graded relevance and hard negatives. Grade 3 is the primary answer; grade 1 is useful supporting context."
+ :queries
+ [
+  {:id :clojure/authenticate-browser-session
+   :language :clojure
+   :query-type :behavior
+   :query "where is an incoming browser request authenticated from its session cookie?"
+   :relevance {"corpus.auth.session/authenticate-request" 3
+               "corpus.auth.session/decode-session-cookie" 1
+               "corpus.auth.session/load-session-record" 1}
+   :hard-negatives ["corpus.auth.session/authorize-request"
+                    "corpus.auth.session/refresh-session"]}
+
+  {:id :clojure/decode-cookie
+   :language :clojure
+   :query-type :identifier
+   :query "decode the signed browser session cookie"
+   :relevance {"corpus.auth.session/decode-session-cookie" 3}
+   :hard-negatives ["corpus.auth.session/refresh-session"]}
+
+  {:id :clojure/authorization-vs-authentication
+   :language :clojure
+   :query-type :hard-negative
+   :query "which function checks a required role after authentication?"
+   :relevance {"corpus.auth.session/authorize-request" 3}
+   :hard-negatives ["corpus.auth.session/authenticate-request"]}
+
+  {:id :clojure/persist-graph-facts
+   :language :clojure
+   :query-type :behavior
+   :query "which function commits canonical graph facts to durable storage?"
+   :relevance {"corpus.graph.transaction/persist-graph-transaction" 3
+               "corpus.graph.transaction/normalize-transaction" 1}
+   :hard-negatives ["corpus.graph.transaction/replay-graph-transaction"
+                    "corpus.graph.transaction/validate-graph-transaction"]}
+
+  {:id :clojure/recovery-replay
+   :language :clojure
+   :query-type :hard-negative
+   :query "reapply historical graph transactions during disaster recovery"
+   :relevance {"corpus.graph.transaction/replay-graph-transaction" 3
+               "corpus.graph.transaction/persist-graph-transaction" 1}
+   :hard-negatives ["corpus.graph.transaction/validate-graph-transaction"]}
+
+  {:id :clojure/claim-oldest-job
+   :language :clojure
+   :query-type :state-flow
+   :query "atomically take the oldest queued embedding job for a worker"
+   :relevance {"corpus.jobs.worker/claim-index-job" 3}
+   :hard-negatives ["corpus.jobs.worker/inspect-index-job"
+                    "corpus.jobs.worker/retry-index-job"]}
+
+  {:id :clojure/process-index-job
+   :language :clojure
+   :query-type :behavior
+   :query "where are embeddings built and published for a claimed source document?"
+   :relevance {"corpus.jobs.worker/process-index-job" 3}
+   :hard-negatives ["corpus.jobs.worker/claim-index-job"
+                    "corpus.jobs.worker/inspect-index-job"]}
+
+  {:id :clojure/retry-index-job
+   :language :clojure
+   :query-type :state-flow
+   :query "return a failed indexing job to its queue with bounded backoff"
+   :relevance {"corpus.jobs.worker/retry-index-job" 3}
+   :hard-negatives ["corpus.jobs.worker/process-index-job"]}
+
+  {:id :clojure/intent-context-packet
+   :language :clojure
+   :query-type :graph-flow
+   :query "build a token-bounded context packet from an intent-selected symbol and exact neighbors"
+   :relevance {"corpus.context.packet/build-context-packet" 3
+               "corpus.context.packet/choose-context-seed" 1
+               "corpus.context.packet/expand-exact-neighbors" 1}
+   :hard-negatives ["corpus.context.packet/build-summary-packet"]}
+
+  {:id :clojure/exact-neighbor-traversal
+   :language :clojure
+   :query-type :graph-flow
+   :query "traverse verified callers and callees around a selected symbol"
+   :relevance {"corpus.context.packet/expand-exact-neighbors" 3}
+   :hard-negatives ["corpus.context.packet/choose-context-seed"]}
+
+  {:id :clojure/load-validated-config
+   :language :clojure
+   :query-type :framework-convention
+   :query "load EDN project configuration and fail closed if required settings are invalid"
+   :relevance {"corpus.config.project/load-project-config" 3
+               "corpus.config.project/validate-project-config" 1
+               "corpus.config.project/read-project-config" 1}
+   :hard-negatives ["corpus.config.project/load-project-cache"]}
+
+  {:id :clojure/config-validation
+   :language :clojure
+   :query-type :hard-negative
+   :query "check analysis include paths and semantic settings without reading cached data"
+   :relevance {"corpus.config.project/validate-project-config" 3}
+   :hard-negatives ["corpus.config.project/load-project-cache"
+                    "corpus.config.project/read-project-config"]}
+
+  {:id :janet/verify-api-session
+   :language :janet
+   :query-type :behavior
+   :query "where does Janet authenticate an API request from its bearer token?"
+   :relevance {"janet/session/verify-api-session" 3
+               "janet/session/decode-bearer-token" 1}
+   :hard-negatives ["janet/session/authorize-api-session"
+                    "janet/session/renew-api-session"]}
+
+  {:id :janet/decode-bearer
+   :language :janet
+   :query-type :identifier
+   :query "decode an authorization bearer header into identity claims"
+   :relevance {"janet/session/decode-bearer-token" 3}
+   :hard-negatives ["janet/session/renew-api-session"]}
+
+  {:id :janet/authorization-vs-verification
+   :language :janet
+   :query-type :hard-negative
+   :query "check a permission for an already authenticated API session"
+   :relevance {"janet/session/authorize-api-session" 3}
+   :hard-negatives ["janet/session/verify-api-session"]}
+
+  {:id :janet/http-route-dispatch
+   :language :janet
+   :query-type :framework-convention
+   :query "select the Janet request handler whose URL pattern matches"
+   :relevance {"janet/routing/resolve-http-route" 3
+               "janet/routing/compile-route-pattern" 1}
+   :hard-negatives ["janet/routing/resolve-route-alias"
+                    "janet/routing/render-route-link"]}
+
+  {:id :janet/route-alias
+   :language :janet
+   :query-type :hard-negative
+   :query "expand a symbolic route name without dispatching an HTTP request"
+   :relevance {"janet/routing/resolve-route-alias" 3}
+   :hard-negatives ["janet/routing/resolve-http-route"]}
+
+  {:id :janet/enqueue-document
+   :language :janet
+   :query-type :state-flow
+   :query "put a source document onto the semantic embedding queue"
+   :relevance {"janet/indexer/enqueue-semantic-document" 3}
+   :hard-negatives ["janet/indexer/flush-document-batch"
+                    "janet/indexer/inspect-document-batch"]}
+
+  {:id :janet/publish-document-batch
+   :language :janet
+   :query-type :behavior
+   :query "encode and publish a batch of documents into the vector index"
+   :relevance {"janet/indexer/flush-document-batch" 3}
+   :hard-negatives ["janet/indexer/enqueue-semantic-document"
+                    "janet/indexer/inspect-document-batch"]}
+
+  {:id :janet/requeue-failed-batch
+   :language :janet
+   :query-type :state-flow
+   :query "requeue a failed semantic document batch for another attempt"
+   :relevance {"janet/indexer/retry-document-batch" 3}
+   :hard-negatives ["janet/indexer/flush-document-batch"]}
+
+  {:id :janet/load-runtime-settings
+   :language :janet
+   :query-type :framework-convention
+   :query "read and validate Janet service settings before startup"
+   :relevance {"janet/config/load-runtime-settings" 3
+               "janet/config/read-runtime-settings" 1
+               "janet/config/validate-runtime-settings" 1}
+   :hard-negatives ["janet/config/load-runtime-cache"]}
+
+  {:id :janet/validate-runtime-settings
+   :language :janet
+   :query-type :hard-negative
+   :query "check for a service port and storage path without loading cached values"
+   :relevance {"janet/config/validate-runtime-settings" 3}
+   :hard-negatives ["janet/config/load-runtime-cache"
+                    "janet/config/read-runtime-settings"]}
+
+  {:id :cross-language/authentication
+   :language :cross-language
+   :query-type :cross-language
+   :query "find the request authentication entry points in both Clojure and Janet"
+   :relevance {"corpus.auth.session/authenticate-request" 3
+               "janet/session/verify-api-session" 3}
+   :hard-negatives ["corpus.auth.session/authorize-request"
+                    "janet/session/authorize-api-session"]}
+
+  {:id :cross-language/index-retry
+   :language :cross-language
+   :query-type :cross-language
+   :query "where do the Clojure and Janet workers requeue failed semantic indexing work?"
+   :relevance {"corpus.jobs.worker/retry-index-job" 3
+               "janet/indexer/retry-document-batch" 3}
+   :hard-negatives ["corpus.jobs.worker/inspect-index-job"
+                    "janet/indexer/inspect-document-batch"]}]}
