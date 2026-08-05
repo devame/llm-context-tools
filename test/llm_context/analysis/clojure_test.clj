@@ -26,8 +26,7 @@
                :symbol/qualified-name "sample.ui/render"}
         reference {:reference/symbol "symbol:owner"
                    :reference/qualified-target "cljs.core/get-in"}]
-    (is (empty? (clojure-topics/extract file [owner] [reference])))
-    (is (nil? (#'clojure-topics/offset-at (:content file) nil nil)))))
+    (is (empty? (clojure-topics/extract file [owner] [reference])))))
 
 (deftest canonical-file-size-bounds-the-normalized-analyzer-source
   (let [file (#'clojure-analysis/file-entity
@@ -462,11 +461,31 @@
                    :source/start-line 1 :source/start-column 1
                    :source/end-line 1 :source/end-column 36}
         facts (clojure-topics/extract file [owner] [reference])]
-    (is (= ::clojure-topics/unreadable
-           (#'clojure-topics/read-form unsafe :cljs)))
+    (is (empty? (:calls (#'clojure-topics/form-index unsafe))))
     (is (false? @executed?))
     (is (empty? (filter #(= :entity.type/topic (:entity/type %)) facts)))
     (is (= :dynamic (:reference/classification (first facts))))))
+
+(deftest framework-form-index-preserves-platforms-nesting-and-tags
+  (let [indexed (#'clojure-topics/form-index
+                 (str "#?(:clj (clj-only) :cljs (cljs-only (nested)))\n"
+                      "(shared #custom/tag {:value 1})\n"))
+        heads
+        (fn [platform]
+          (->> (:calls indexed)
+               (keep (fn [[[candidate _ _] {:keys [form]}]]
+                       (when (= platform candidate) (some-> form first str))))
+               set))]
+    (is (contains? (heads :clj) "clj-only"))
+    (is (not (contains? (heads :cljs) "clj-only")))
+    (is (contains? (heads :cljs) "cljs-only"))
+    (is (contains? (heads :cljs) "nested"))
+    (is (contains? (heads :clj) "shared"))
+    (is (contains? (heads :cljs) "shared"))))
+
+(deftest framework-form-heads-fail-closed-for-list-valued-heads
+  (is (nil? (#'clojure-topics/form-head-name '((fn [] :value)))))
+  (is (= "deref" (#'clojure-topics/form-head-name '(deref state)))))
 
 (deftest source-byte-ranges-follow-utf8-not-character-columns
   (let [root (Files/createTempDirectory

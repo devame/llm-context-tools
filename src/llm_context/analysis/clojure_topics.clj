@@ -4,6 +4,7 @@
   never loaded or evaluated."
   (:require [clojure.string :as str]
             [clojure.tools.reader :as reader]
+            [clojure.tools.reader.reader-types :as reader-types]
             [llm-context.model.ids :as ids]))
 
 (def framework-apis
@@ -42,48 +43,82 @@
                     (keys state-apis)
                     mutation-apis atom-read-apis atom-write-apis)))
 
-(defn- offset-at [source row column]
-  (when (and (string? source) (pos-int? row) (pos-int? column))
-    (let [lines (str/split source #"\n" -1)]
-      (when-let [line (nth lines (dec row) nil)]
-        (+ (reduce + 0 (map #(inc (count %)) (take (dec row) lines)))
-           (min (count line) (dec column)))))))
+(defn- form-head-name [form]
+  (let [head (when (seq? form) (first form))]
+    (when (instance? clojure.lang.Named head)
+      (name head))))
 
-(defn- opening-list [source offset]
-  (loop [index (if (and (< offset (count source))
-                        (= \( (.charAt source offset)))
-                 offset
-                 (dec offset))]
-    (when (>= index 0)
-      (let [character (.charAt source index)]
-        (cond
-          (= character \() index
-          (Character/isWhitespace character) (recur (dec index))
-          :else nil)))))
+(defn- form-range [form]
+  (let [{:keys [line column end-line end-column]} (meta form)]
+    (when (every? pos-int? [line column end-line end-column])
+      {:start [line column] :end [end-line end-column]})))
 
-(defn- read-form [source platform]
+(defn- index-call [result form platforms]
+  (if-not (seq? form)
+    result
+    (let [head (first form)
+          head-meta (meta head)
+          form-meta (meta form)
+          keys (for [platform platforms
+                     [row column] [[(:line head-meta) (:column head-meta)]
+                                   [(:line form-meta) (:column form-meta)]]
+                     :when (and (pos-int? row) (pos-int? column))]
+                 [platform row column])
+          entry {:form form :range (form-range form)}]
+      (reduce #(assoc-in %1 [:calls %2] entry) result keys))))
+
+(declare index-form)
+
+(defn- index-reader-conditional [result conditional platforms]
+  (reduce
+   (fn [state [feature branch]]
+     (let [branch-platforms
+           (cond
+             (= :default feature) platforms
+             (contains? #{:clj :cljs} feature)
+             (if (contains? platforms feature) #{feature} #{})
+             :else #{})]
+       (if (seq branch-platforms)
+         (index-form state branch branch-platforms)
+         state)))
+   result
+   (partition 2 (.form ^clojure.lang.ReaderConditional conditional))))
+
+(defn- index-form [result form platforms]
+  (cond
+    (reader-conditional? form)
+    (index-reader-conditional result form platforms)
+
+    (coll? form)
+    (reduce #(index-form %1 %2 platforms)
+            (index-call result form platforms)
+            form)
+
+    :else result))
+
+(defn- form-index [source]
   (try
     (binding [reader/*read-eval* false
               reader/*data-readers* {}
-              reader/*default-data-reader-fn* nil]
-      (reader/read-string {:read-cond :allow
-                           :features #{platform}
-                           :eof ::eof}
-                          source))
+              reader/*default-data-reader-fn*
+              (fn [tag value] (tagged-literal tag value))]
+      (let [input (reader-types/indexing-push-back-reader source)]
+        (loop [result {:calls {}}]
+          (let [form (reader/read {:read-cond :preserve :eof ::eof} input)]
+            (if (= ::eof form)
+              result
+              (recur (index-form result form #{:clj :cljs})))))))
     (catch Throwable _
-      ::unreadable)))
+      {:calls {}})))
 
-(defn- call-form [source reference platform]
-  (when-let [offset (offset-at source (:source/start-line reference)
-                               (:source/start-column reference))]
-    (when-let [start (opening-list source offset)]
-      (let [form (read-form (subs source start) platform)]
-        (when (seq? form) form)))))
-
-(defn- source-form [source reference platform]
-  (when-let [offset (offset-at source (:source/start-line reference)
-                               (:source/start-column reference))]
-    (read-form (subs source offset) platform)))
+(defn- call-form [index reference platform]
+  (some-> (or (get-in index [:calls [platform
+                                     (:source/start-line reference)
+                                     (:source/start-column reference)]])
+              (get-in index [:calls [platform
+                                     (:source/start-line reference)
+                                     (inc (:source/start-column reference))]]))
+          :form))
 
 (defn- static-data? [value]
   (cond
@@ -135,7 +170,7 @@
   (cond
     (symbol? value) value
     (and (seq? value)
-         (= "deref" (some-> value first name))
+         (= "deref" (form-head-name value))
          (symbol? (second value)))
     (second value)))
 
@@ -153,15 +188,15 @@
          (not (neg? (compare inner-start outer-start)))
          (neg? (compare inner-start outer-end)))))
 
-(defn- handler-db-roots [source symbols-by-id references]
+(defn- handler-db-roots [forms symbols-by-id references]
   (keep
    (fn [reference]
      (when (= "re-frame.core/reg-event-db"
               (:reference/qualified-target reference))
        (when-let [owner (get symbols-by-id (:reference/symbol reference))]
-         (let [form (call-form source reference (:symbol/platform owner))
+         (let [form (call-form forms reference (:symbol/platform owner))
                handler (some #(when (and (seq? %)
-                                         (= "fn" (some-> % first name)))
+                                         (= "fn" (form-head-name %)))
                                 %)
                              (drop 2 form))
                parameters (some #(when (vector? %) %) (rest handler))
@@ -232,14 +267,14 @@
                        :source/end-line :source/end-column]))))
 
 (defn- facts-for-reference
-  [{:keys [symbols-by-id source atom-names handler-roots]} reference]
+  [{:keys [symbols-by-id forms atom-names handler-roots]} reference]
   (let [owner (get symbols-by-id (:reference/symbol reference))
         target (:reference/qualified-target reference)]
     (when (and owner (= :cljs (:symbol/platform owner))
                (contains? topic-apis target)
                (pos-int? (:source/start-line reference))
                (pos-int? (:source/start-column reference)))
-      (let [form (call-form source reference (:symbol/platform owner))]
+      (let [form (call-form forms reference (:symbol/platform owner))]
         (cond
           (contains? framework-apis target)
           (let [[topic-kind edge-kind] (get framework-apis target)
@@ -286,11 +321,9 @@
           (contains? atom-read-apis target)
           (let [atom-value
                 (or (nth form 1 nil)
-                    (let [value (source-form
-                                 source reference
-                                 (:symbol/platform owner))]
-                      (when (and (seq? value)
-                                 (= "deref" (some-> value first name)))
+                    (let [value (call-form
+                                 forms reference (:symbol/platform owner))]
+                      (when (= "deref" (form-head-name value))
                         (second value))))]
             (when-let [key (when (atom-root? atom-names atom-value)
                              (atom-key atom-value))]
@@ -312,7 +345,15 @@
   Dynamic or computed keys remain absent rather than becoming false topics."
   [file symbols references]
   (let [symbols-by-id (into {} (map (juxt :symbol/id identity)) symbols)
-        source (:content file)
+        relevant?
+        (some (fn [reference]
+                (when-let [owner (get symbols-by-id
+                                      (:reference/symbol reference))]
+                  (and (= :cljs (:symbol/platform owner))
+                       (contains? topic-apis
+                                  (:reference/qualified-target reference)))))
+              references)
+        forms (if relevant? (form-index (:content file)) {:calls {}})
         atom-owner-ids
         (into #{}
               (keep #(when (contains? atom-constructor-apis
@@ -327,10 +368,10 @@
                           (:symbol/qualified-name symbol))]))
               (keep symbols-by-id atom-owner-ids))
         context {:symbols-by-id symbols-by-id
-                 :source source
+                 :forms forms
                  :atom-names atom-names
                  :handler-roots
-                 (handler-db-roots source symbols-by-id references)}]
+                 (handler-db-roots forms symbols-by-id references)}]
     (->> references
          (mapcat #(facts-for-reference context %))
          (remove nil?)

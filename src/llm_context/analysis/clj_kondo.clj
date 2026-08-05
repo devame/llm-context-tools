@@ -18,8 +18,7 @@
   #{:language/clojure :language/clojurescript :language/clojure-common})
 
 (def analysis-options
-  {:keywords true
-   :locals true
+  {:locals true
    :arglists true
    :protocol-impls true
    :java-class-usages true
