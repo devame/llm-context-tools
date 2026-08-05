@@ -3,6 +3,7 @@
   symbols and their exact source ranges."
   (:require [clojure.string :as str]
             [datalevin.core :as d]
+            [llm-context.model.canonical-hash :as canonical-hash]
             [llm-context.model.ids :as ids]
             [llm-context.source :as source]
             [llm-context.store :as store])
@@ -329,7 +330,8 @@
                     [?file :file/id ?id]
                     [?file :file/content-hash ?content]]
                   db))]
-    (ids/content-hash (pr-str (sort rows)))))
+    (canonical-hash/hash-values
+     (canonical-hash/order-by first rows))))
 
 (defn- relationships-for-symbols [db symbol-ids]
   (if-not (seq symbol-ids)

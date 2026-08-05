@@ -2,6 +2,7 @@
   (:require [llm-context.analysis.files :as files]
             [llm-context.analysis.project-analyzer :as project-analyzer]
             [llm-context.graph.read :as graph-read]
+            [llm-context.model.canonical-hash :as canonical-hash]
             [llm-context.semantic.reconcile :as semantic-reconcile]
             [llm-context.store :as store]))
 
@@ -29,6 +30,7 @@
    graph
    {:analyzer-name (:llm-context/analyzer-name metadata)
     :analyzer-version (:llm-context/analyzer-version metadata)
+    :semantic-fingerprint-version canonical-hash/contract-version
     :janet-catalog-version
     (:llm-context/janet-catalog-version metadata)
     :semantic-document-version
@@ -61,10 +63,16 @@
                (vec (concat diagnostics
                             (:diagnostics snapshot)
                             (mapcat :diagnostics preserved)))})))
-        changed (filterv #(changed-output? existing %) outputs)
+        metadata (store/graph-metadata graph)
+        fingerprint-compatible?
+        (= canonical-hash/contract-version
+           (:llm-context/semantic-fingerprint-version metadata))
+        changed (if fingerprint-compatible?
+                  (filterv #(changed-output? existing %) outputs)
+                  outputs)
         deleted (->> (keys existing) (remove scanned) sort vec)
         updating? (boolean (or (seq changed) (seq deleted)))
-        metadata (when updating? (store/graph-metadata graph))]
+        metadata (when updating? metadata)]
     ;; File replacements are individually atomic, but a cross-file semantic
     ;; snapshot may span several of them. Mark the graph unavailable before
     ;; the first mutation so a process interruption cannot advertise a mixed

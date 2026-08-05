@@ -3,6 +3,7 @@
             [llm-context.analysis.full :as full]
             [llm-context.analysis.incremental :as incremental]
             [llm-context.config :as config]
+            [llm-context.model.canonical-hash :as canonical-hash]
             [llm-context.project :as project]
             [llm-context.store :as store])
   (:import [java.nio.file Files]))
@@ -103,6 +104,34 @@
               nil
               (catch clojure.lang.ExceptionInfo error error))]
         (is (= :graph/update-incomplete (:type (ex-data error))))))))
+
+(deftest fingerprint-contract-change-forces-safe-recomputation
+  (let [root (Files/createTempDirectory
+              "llm-context-incremental-fingerprint-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        src (.resolve root "src")
+        project (project/context (str root))
+        settings (assoc-in (config/defaults) [:semantic :providers] [])]
+    (Files/createDirectories src
+                             (make-array java.nio.file.attribute.FileAttribute 0))
+    (spit (str (.resolve src "app.clj")) "(ns app) (defn stable [] 1)")
+    (full/analyze! project settings)
+    (store/with-store [graph project settings]
+      (let [metadata (store/graph-metadata graph)]
+        (store/write-graph-metadata!
+         graph
+         {:analyzer-name (:llm-context/analyzer-name metadata)
+          :analyzer-version (:llm-context/analyzer-version metadata)
+          :semantic-fingerprint-version 0
+          :janet-catalog-version (:llm-context/janet-catalog-version metadata)
+          :semantic-document-version
+          (:llm-context/semantic-document-version metadata)
+          :semantic-index-name (:llm-context/semantic-index-name metadata)})))
+    (is (= 1 (:changed (incremental/analyze! project settings))))
+    (store/with-store [graph project settings]
+      (is (= canonical-hash/contract-version
+             (:llm-context/semantic-fingerprint-version
+              (store/graph-metadata graph)))))))
 
 (deftest malformed-incremental-source-preserves-the-complete-active-graph
   (let [root (Files/createTempDirectory

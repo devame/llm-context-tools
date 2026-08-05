@@ -34,3 +34,19 @@
            (#'project-analyzer/outputs-by-path!
             [(discovered "src/a.clj") (discovered "src/b.janet")]
             [(output "src/b.janet") (output "src/a.clj")]))))))
+
+(deftest semantic-fingerprint-ignores-order-and-derived-search-text
+  (let [symbol-a {:entity/type :entity.type/symbol
+                  :symbol/id "symbol:a" :symbol/name "a"
+                  :symbol/search-text "derived-a"}
+        symbol-b {:entity/type :entity.type/symbol
+                  :symbol/id "symbol:b" :symbol/name "b"}]
+    (is (= (project-analyzer/semantic-fingerprint
+            {:entities [symbol-a symbol-b]})
+           (project-analyzer/semantic-fingerprint
+            {:entities [(assoc symbol-b :db/id 42)
+                        (assoc symbol-a :symbol/search-text "different")]})))
+    (is (not= (project-analyzer/semantic-fingerprint
+               {:entities [symbol-a symbol-b]})
+              (project-analyzer/semantic-fingerprint
+               {:entities [symbol-a (assoc symbol-b :symbol/name "changed")]})))))

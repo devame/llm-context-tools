@@ -3,6 +3,7 @@
             [llm-context.analysis.clj-kondo :as clj-kondo]
             [llm-context.analysis.janet :as janet]
             [llm-context.analysis.project-analyzer :as project-analyzer]
+            [llm-context.model.canonical-hash :as canonical-hash]
             [llm-context.query :as query]
             [llm-context.semantic.reconcile :as semantic-reconcile]
             [llm-context.store :as store]))
@@ -37,6 +38,7 @@
      graph
      {:analyzer-name analyzer-name
       :analyzer-version clj-kondo/analyzer-version
+      :semantic-fingerprint-version canonical-hash/contract-version
       :janet-catalog-version janet/catalog-version
       :semantic-document-version (:document-version lateon)
       :semantic-index-name (:index-name lateon)}))

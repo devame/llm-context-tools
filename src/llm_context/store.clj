@@ -368,16 +368,20 @@
 
 (defn write-graph-metadata!
   [store {:keys [analyzer-name analyzer-version janet-catalog-version
-                 semantic-document-version semantic-index-name]}]
+                 semantic-fingerprint-version semantic-document-version
+                 semantic-index-name]}]
   (d/transact!
    (:connection store)
-   [{:llm-context/meta-key graph-metadata-key
-     :llm-context/graph-format schema/graph-format-version
-     :llm-context/analyzer-name analyzer-name
-     :llm-context/analyzer-version analyzer-version
-     :llm-context/janet-catalog-version janet-catalog-version
-     :llm-context/semantic-document-version semantic-document-version
-     :llm-context/semantic-index-name semantic-index-name}]))
+   [(cond-> {:llm-context/meta-key graph-metadata-key
+             :llm-context/graph-format schema/graph-format-version
+             :llm-context/analyzer-name analyzer-name
+             :llm-context/analyzer-version analyzer-version
+             :llm-context/janet-catalog-version janet-catalog-version
+             :llm-context/semantic-document-version semantic-document-version
+             :llm-context/semantic-index-name semantic-index-name}
+      semantic-fingerprint-version
+      (assoc :llm-context/semantic-fingerprint-version
+             semantic-fingerprint-version))]))
 
 (defn reset-semantic-state!
   "Remove queue, indexed-record, dirty-marker, and watermark entities before

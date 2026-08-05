@@ -6,6 +6,7 @@
             [llm-context.analysis.clojure :as clojure-analysis]
             [llm-context.analysis.ir :as ir]
             [llm-context.analysis.janet :as janet]
+            [llm-context.model.canonical-hash :as canonical-hash]
             [llm-context.model.ids :as ids]))
 
 (defn- edn-output
@@ -24,11 +25,10 @@
    :diagnostics []})
 
 (defn semantic-fingerprint [{:keys [entities]}]
-  (ids/content-hash
-   (pr-str
-    (sort-by pr-str
-             (map #(dissoc % :db/id :symbol/search-text)
-                  entities)))))
+  (canonical-hash/hash-values
+   (canonical-hash/order-by
+    canonical/entity-identity
+    (mapv #(dissoc % :db/id :symbol/search-text) entities))))
 
 (defn- with-fingerprint [output]
   (assoc-in output [:file :file/semantic-hash]
@@ -229,7 +229,8 @@
      {:clj-kondo {:version (:analyzer-version clojure-snapshot)
                   :configuration-fingerprint
                   (:configuration-fingerprint clojure-snapshot)}
-      :janet {:catalog-version (:catalog-version janet-snapshot)}}
+      :janet {:catalog-version (:catalog-version janet-snapshot)}
+      :semantic-fingerprint {:version canonical-hash/contract-version}}
      :analysis-metrics
      {:timings timings
       :clojure-records (analysis-counts clojure-snapshot)
