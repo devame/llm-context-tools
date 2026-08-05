@@ -368,6 +368,7 @@
 
 (defn write-graph-metadata!
   [store {:keys [analyzer-name analyzer-version janet-catalog-version
+                 analyzer-configuration-fingerprint
                  semantic-fingerprint-version semantic-document-version
                  semantic-index-name]}]
   (d/transact!
@@ -381,7 +382,10 @@
              :llm-context/semantic-index-name semantic-index-name}
       semantic-fingerprint-version
       (assoc :llm-context/semantic-fingerprint-version
-             semantic-fingerprint-version))]))
+             semantic-fingerprint-version)
+      analyzer-configuration-fingerprint
+      (assoc :llm-context/analyzer-configuration-fingerprint
+             analyzer-configuration-fingerprint))]))
 
 (defn reset-semantic-state!
   "Remove queue, indexed-record, dirty-marker, and watermark entities before

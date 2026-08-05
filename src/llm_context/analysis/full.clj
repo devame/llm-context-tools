@@ -19,7 +19,10 @@
   (when progress
     (progress (assoc data :stage stage))))
 
-(defn- persist! [graph config entities progress]
+(defn- persist!
+  ([graph config entities progress]
+   (persist! graph config entities nil progress))
+  ([graph config entities analyzers progress]
   ;; A full analysis is the format upgrade boundary. Semantic operational
   ;; records belong to a versioned document/index contract and must not make a
   ;; new graph appear complete merely because an older index was complete.
@@ -42,11 +45,13 @@
      graph
      {:analyzer-name analyzer-name
       :analyzer-version clj-kondo/analyzer-version
+      :analyzer-configuration-fingerprint
+      (get-in analyzers [:clj-kondo :configuration-fingerprint])
       :semantic-fingerprint-version canonical-hash/contract-version
       :janet-catalog-version janet/catalog-version
       :semantic-document-version (:document-version lateon)
       :semantic-index-name (:index-name lateon)}))
-  nil)
+  nil))
 
 (defn- source-inventory [files]
   (mapv (fn [{:keys [relative-path content]}]
@@ -129,7 +134,7 @@
   (let [entities (:entities candidate)]
     (emit! progress :persist-start
            {:entities (count entities) :batch-size persistence-batch-size})
-    (persist! graph config entities progress)
+    (persist! graph config entities (:analyzers candidate) progress)
     (emit! progress :analyzer-finalize-start {})
     (let [quality (query/graph-quality graph)]
       (emit! progress :analyzer-finalize-complete quality)

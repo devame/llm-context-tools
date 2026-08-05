@@ -1,5 +1,6 @@
 (ns llm-context.analysis.incremental-test
   (:require [clojure.test :refer [deftest is]]
+            [llm-context.analysis.clj-kondo :as clj-kondo]
             [llm-context.analysis.full :as full]
             [llm-context.analysis.incremental :as incremental]
             [llm-context.config :as config]
@@ -18,7 +19,12 @@
     (Files/createDirectories src (make-array java.nio.file.attribute.FileAttribute 0))
     (spit (str path) "(ns app) (defn first [] 1)")
     (full/analyze! project settings)
-    (is (= 0 (:changed (incremental/analyze! project settings))))
+    (with-redefs [clj-kondo/analyze!
+                  (fn [& _]
+                    (throw (ex-info "unchanged path invoked clj-kondo" {})))]
+      (let [result (incremental/analyze! project settings)]
+        (is (= 0 (:changed result)))
+        (is (true? (get-in result [:analysis-metrics :short-circuit])))))
 
     (spit (str path) "(ns app) (defn second [] 2)")
     (let [result (incremental/analyze! project settings)]
@@ -131,6 +137,27 @@
     (store/with-store [graph project settings]
       (is (= canonical-hash/contract-version
              (:llm-context/semantic-fingerprint-version
+              (store/graph-metadata graph)))))))
+
+(deftest clj-kondo-configuration-change-forces-recomputation
+  (let [root (Files/createTempDirectory
+              "llm-context-incremental-config-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        src (.resolve root "src")
+        kondo (.resolve root ".clj-kondo")
+        project (project/context (str root))
+        settings (assoc-in (config/defaults) [:semantic :providers] [])]
+    (Files/createDirectories src
+                             (make-array java.nio.file.attribute.FileAttribute 0))
+    (spit (str (.resolve src "app.clj")) "(ns app) (defn stable [] 1)")
+    (full/analyze! project settings)
+    (Files/createDirectories kondo
+                             (make-array java.nio.file.attribute.FileAttribute 0))
+    (spit (str (.resolve kondo "config.edn")) "{:linters {:unused-binding {:level :off}}}")
+    (is (= 1 (:changed (incremental/analyze! project settings))))
+    (store/with-store [graph project settings]
+      (is (= (clj-kondo/config-fingerprint project)
+             (:llm-context/analyzer-configuration-fingerprint
               (store/graph-metadata graph)))))))
 
 (deftest malformed-incremental-source-preserves-the-complete-active-graph

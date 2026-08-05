@@ -97,27 +97,35 @@
           (let [full? (or force-full?
                           (not= :ready (store/graph-state graph))
                           (not (incremental/index-present? graph)))
-                candidate (full/prepare-current
-                           project settings service-progress!
-                           (if full? :full :incremental))]
-            (if (:stale? candidate)
-              candidate
-              {:full? full?
-               :result
-               (with-graph-write
-                 graph generation
-                 #(if full?
-                    (full/commit-candidate!
-                     graph settings candidate service-progress!)
-                    (incremental/commit-candidate!
-                     graph settings candidate)))})))]
-    (if (:stale? prepared)
+                unchanged (when-not full?
+                            (incremental/unchanged-result
+                             graph project settings))]
+            (if unchanged
+              {:complete-result unchanged}
+              (let [candidate (full/prepare-current
+                               project settings service-progress!
+                               (if full? :full :incremental))]
+                (if (:stale? candidate)
+                  candidate
+                  {:full? full?
+                   :result
+                   (with-graph-write
+                     graph generation
+                     #(if full?
+                        (full/commit-candidate!
+                         graph settings candidate service-progress!)
+                        (incremental/commit-candidate!
+                         graph settings candidate)))})))))]
+    (cond
+      (:complete-result prepared) (:complete-result prepared)
+      (:stale? prepared)
       prepared
-      (if (:full? prepared)
+      (:full? prepared)
         (full/finish-candidate!
          graph project settings (:result prepared) service-progress!)
-        (incremental/finish-candidate!
-         graph project settings (:result prepared))))))
+      :else
+      (incremental/finish-candidate!
+       graph project settings (:result prepared)))))
 
 (defn- read-consistently
   "Run a multi-query read without acquiring the graph monitor. A concurrent

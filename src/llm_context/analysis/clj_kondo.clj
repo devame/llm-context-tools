@@ -36,7 +36,7 @@
 (defn- clojure-file? [file]
   (contains? clojure-languages (:language file)))
 
-(defn- config-fingerprint [{:keys [^Path root]}]
+(defn config-fingerprint [{:keys [^Path root]}]
   (let [path (.resolve root ".clj-kondo/config.edn")
         content (if (Files/isRegularFile path (make-array LinkOption 0))
                   (slurp (.toFile path))
