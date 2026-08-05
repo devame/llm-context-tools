@@ -231,35 +231,63 @@
                (client/request project {:op :stop})))
         (is (not= ::timeout (deref running 5000 ::timeout)))))))
 
-(deftest graph-reads-reject-an-active-write-without-waiting
+(deftest graph-reads-remain-available-during-analysis-preparation
   (let [graph (Object.)
         generation (atom 0)
-        entered-analysis (promise)
-        release-analysis (promise)
+        entered-preparation (promise)
+        release-preparation (promise)
         runtime-state (atom {})]
-    (with-redefs [incremental/index-present? (constantly false)
-                  full/analyze!
+    (with-redefs [full/prepare-current
                   (fn [& _]
-                    (deliver entered-analysis true)
-                    @release-analysis
-                    {:mode :full})
+                    (deliver entered-preparation true)
+                    @release-preparation
+                    {:candidate true})
+                  full/commit-candidate!
+                  (fn [& _] {:mode :full :started 0})
+                  full/finish-candidate!
+                  (fn [& _] {:mode :full})
                   store/assert-query-compatible! identity
                   query/stats (constantly {:entities 0})]
       (let [analysis
             (future
               (#'server/dispatch nil {} graph generation runtime-state
                                  {:op :analyze :full? true}))]
-        (is (= true (deref entered-analysis 1000 false)))
-        (let [read
-              (future
-                (try
-                  (#'server/dispatch nil {} graph generation runtime-state
-                                     {:op :query :subcommand "stats" :args []})
-                  (catch clojure.lang.ExceptionInfo error
-                    (ex-data error))))]
-          (is (= :graph/update-in-progress
-                 (:type (deref read 1000 ::timeout))))
-          (deliver release-analysis true)
+        (is (= true (deref entered-preparation 1000 false)))
+        (is (= {:entities 0}
+               (#'server/dispatch nil {} graph generation runtime-state
+                                  {:op :query :subcommand "stats" :args []})))
+        (is (zero? @generation))
+        (deliver release-preparation true)
+        (is (= {:mode :full} (deref analysis 1000 ::timeout)))))))
+
+(deftest graph-reads-reject-an-active-analysis-commit-without-waiting
+  (let [graph (Object.)
+        generation (atom 0)
+        entered-commit (promise)
+        release-commit (promise)
+        runtime-state (atom {})]
+    (with-redefs [full/prepare-current (fn [& _] {:candidate true})
+                  full/commit-candidate!
+                  (fn [& _]
+                    (deliver entered-commit true)
+                    @release-commit
+                    {:mode :full :started 0})
+                  full/finish-candidate! (fn [& _] {:mode :full})
+                  store/assert-query-compatible! identity
+                  query/stats (constantly {:entities 0})]
+      (let [analysis
+            (future
+              (#'server/dispatch nil {} graph generation runtime-state
+                                 {:op :analyze :full? true}))]
+        (is (= true (deref entered-commit 1000 false)))
+        (let [read (try
+                     (#'server/dispatch
+                      nil {} graph generation runtime-state
+                      {:op :query :subcommand "stats" :args []})
+                     (catch clojure.lang.ExceptionInfo error
+                       (ex-data error)))]
+          (is (= :graph/update-in-progress (:type read)))
+          (deliver release-commit true)
           (is (= {:mode :full} (deref analysis 1000 ::timeout))))))))
 
 (deftest graph-read-discards-work-overlapped-by-a-write

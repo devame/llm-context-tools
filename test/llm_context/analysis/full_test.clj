@@ -173,3 +173,26 @@
                                [?edge :edge/kind :edge.kind/imports]
                                [?edge :edge/target-text ?target]]
                              []))))))
+
+(deftest stale-source-preparation-retries-once
+  (let [calls (atom 0)]
+    (with-redefs [full/prepare
+                  (fn [& _] {:attempt (swap! calls inc)})
+                  full/stale-candidate?
+                  (fn [_ _ candidate] (= 1 (:attempt candidate)))]
+      (is (= 2 (:attempt (full/prepare-current nil nil))))
+      (is (= 2 @calls)))))
+
+(deftest repeatedly-stale-source-returns-a-structured-result
+  (let [calls (atom 0)]
+    (with-redefs [full/prepare
+                  (fn [& _]
+                    (swap! calls inc)
+                    {:candidate true})
+                  full/stale-candidate? (constantly true)]
+      (is (= {:stale? true
+              :mode :stale-source
+              :type :analysis/stale-source
+              :attempts 2}
+             (full/prepare-current nil nil)))
+      (is (= 2 @calls)))))

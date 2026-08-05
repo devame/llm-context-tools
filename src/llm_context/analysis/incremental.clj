@@ -1,14 +1,11 @@
 (ns llm-context.analysis.incremental
-  (:require [llm-context.analysis.files :as files]
-            [llm-context.analysis.project-analyzer :as project-analyzer]
+  (:require [llm-context.analysis.full :as full]
             [llm-context.graph.read :as graph-read]
             [llm-context.model.canonical-hash :as canonical-hash]
             [llm-context.semantic.reconcile :as semantic-reconcile]
             [llm-context.store :as store]))
 
-(def supported-languages
-  #{:language/clojure :language/clojurescript :language/clojure-common
-    :language/janet :language/edn-data})
+(def supported-languages full/supported-languages)
 
 (defn index-present?
   ([project config]
@@ -37,32 +34,17 @@
     (:llm-context/semantic-document-version metadata)
     :semantic-index-name (:llm-context/semantic-index-name metadata)}))
 
-(defn- analyze-graph! [graph project config]
+(defn commit-candidate!
+  "Persist only changed/deleted files from a fully prepared candidate. The
+  caller coordinates this mutation boundary."
+  [graph config candidate]
   ;; Incremental mutation cannot recover an interrupted or format-incompatible
   ;; full snapshot because it has no authoritative old baseline to preserve.
   (store/assert-query-compatible! graph)
-  (let [{:keys [files diagnostics]}
-        (files/discover project config supported-languages)
+  (let [files (:files candidate)
         scanned (set (map :relative-path files))
         existing (graph-read/files-by-path (store/database graph))
-        snapshot (project-analyzer/analyze project files)
-        outputs (:outputs snapshot)
-        preserved (filterv :preserve? outputs)
-        _ (when (seq preserved)
-            ;; Without a persisted analyzer IR, mixing last-good stored facts
-            ;; with a newly resolved project snapshot would be internally
-            ;; inconsistent. Fail the complete incremental update before any
-            ;; mutation rather than changing callers around a malformed file.
-            (throw
-             (ex-info
-              "Incremental analysis produced an incomplete snapshot; existing graph was preserved"
-              {:exit-code 1
-               :type :analysis/incomplete-snapshot
-               :files (mapv (comp :file/path :file) preserved)
-               :diagnostics
-               (vec (concat diagnostics
-                            (:diagnostics snapshot)
-                            (mapcat :diagnostics preserved)))})))
+        outputs (:outputs candidate)
         metadata (store/graph-metadata graph)
         fingerprint-compatible?
         (= canonical-hash/contract-version
@@ -94,24 +76,34 @@
            (:file/id file) (:file/content-hash file) :upsert)])
         (store/replace-file! graph file entities)))
     (store/prune-orphan-topics! graph)
-    (let [semantic-plan
-          (semantic-reconcile/reconcile! graph project config)
-          result
+    (let [result
           {:mode :incremental
            :files (count files)
            :changed (count changed)
            :deleted (count deleted)
-           :entities (reduce + (map #(inc (count (:entities %))) changed))
-           :analysis-metrics (:analysis-metrics snapshot)
-           :semantic semantic-plan
-           :analyzers (:analyzers snapshot)
-           :diagnostics (vec (concat diagnostics
-                                     (:diagnostics snapshot)
-                                     (mapcat :diagnostics outputs)
-                                     (:diagnostics semantic-plan)))}]
+           :entities (reduce + 0 (map #(inc (count (:entities %))) changed))
+           :analysis-metrics (:analysis-metrics candidate)
+           :analyzers (:analyzers candidate)
+           :diagnostics (:diagnostics candidate)
+           :started (:started candidate)}]
       (when updating?
         (reactivate-metadata! graph metadata))
       result)))
+
+(defn finish-candidate!
+  [graph project config result]
+  (let [semantic-plan (semantic-reconcile/reconcile! graph project config)]
+    (-> result
+        (dissoc :started)
+        (assoc :semantic semantic-plan)
+        (update :diagnostics into (:diagnostics semantic-plan)))))
+
+(defn- analyze-graph! [graph project config]
+  (let [candidate (full/prepare-current project config nil :incremental)]
+    (if (:stale? candidate)
+      candidate
+      (finish-candidate!
+       graph project config (commit-candidate! graph config candidate)))))
 
 (defn analyze!
   "Run authoritative project analyzers, then persist only source or semantic

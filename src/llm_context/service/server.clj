@@ -19,7 +19,7 @@
            [java.net SocketException]
            [java.nio.channels FileChannel OverlappingFileLockException]
            [java.nio.file Files OpenOption StandardOpenOption]
-           [java.util UUID]
+           [java.util UUID WeakHashMap]
            [java.util.concurrent ArrayBlockingQueue RejectedExecutionException
             ThreadPoolExecutor ThreadPoolExecutor$AbortPolicy TimeUnit]))
 
@@ -82,14 +82,42 @@
       (finally
         (swap! generation inc)))))
 
+(defonce ^:private analysis-mutexes (WeakHashMap.))
+
+(defn- analysis-mutex [graph]
+  (locking analysis-mutexes
+    (or (.get analysis-mutexes graph)
+        (let [mutex (Object.)]
+          (.put analysis-mutexes graph mutex)
+          mutex))))
+
 (defn- analyze! [graph generation project settings force-full?]
-  (with-graph-write
-    graph generation
-    #(if (and (not force-full?)
-              (= :ready (store/graph-state graph))
-              (incremental/index-present? graph))
-       (incremental/analyze! graph project settings)
-       (full/analyze! graph project settings service-progress!))))
+  (let [prepared
+        (locking (analysis-mutex graph)
+          (let [full? (or force-full?
+                          (not= :ready (store/graph-state graph))
+                          (not (incremental/index-present? graph)))
+                candidate (full/prepare-current
+                           project settings service-progress!
+                           (if full? :full :incremental))]
+            (if (:stale? candidate)
+              candidate
+              {:full? full?
+               :result
+               (with-graph-write
+                 graph generation
+                 #(if full?
+                    (full/commit-candidate!
+                     graph settings candidate service-progress!)
+                    (incremental/commit-candidate!
+                     graph settings candidate)))})))]
+    (if (:stale? prepared)
+      prepared
+      (if (:full? prepared)
+        (full/finish-candidate!
+         graph project settings (:result prepared) service-progress!)
+        (incremental/finish-candidate!
+         graph project settings (:result prepared))))))
 
 (defn- read-consistently
   "Run a multi-query read without acquiring the graph monitor. A concurrent
@@ -403,8 +431,8 @@
                 (when worker-future
                   (when (= :timeout (deref worker-future 10000 :timeout))
                     (future-cancel worker-future)))
-                ;; Wait for an in-flight watched analysis before closing graph.
-                (locking graph nil)
+                ;; Wait for in-flight preparation/commit before closing graph.
+                (locking (analysis-mutex graph) nil)
                 (when (and runtime-future
                            (not (future-done? runtime-future)))
                   (future-cancel runtime-future))

@@ -4,12 +4,16 @@
             [llm-context.analysis.janet :as janet]
             [llm-context.analysis.project-analyzer :as project-analyzer]
             [llm-context.model.canonical-hash :as canonical-hash]
+            [llm-context.model.ids :as ids]
             [llm-context.query :as query]
             [llm-context.semantic.reconcile :as semantic-reconcile]
             [llm-context.store :as store]))
 
 (def persistence-batch-size 1000)
 (def analyzer-name "clj-kondo+janet-semantic")
+(def supported-languages
+  #{:language/clojure :language/clojurescript :language/clojure-common
+    :language/janet :language/edn-data})
 
 (defn- emit! [progress stage data]
   (when progress
@@ -44,6 +48,117 @@
       :semantic-index-name (:index-name lateon)}))
   nil)
 
+(defn- source-inventory [files]
+  (mapv (fn [{:keys [relative-path content]}]
+          [relative-path (ids/content-hash content)])
+        files))
+
+(defn prepare
+  "Prepare and validate a complete candidate without opening or mutating the
+  graph. The returned inventory is revalidated immediately before activation."
+  ([project config] (prepare project config nil :full))
+  ([project config progress] (prepare project config progress :full))
+  ([project config progress mode]
+   (let [started (System/nanoTime)]
+     (emit! progress :discover-start {})
+     (let [{:keys [files diagnostics]}
+           (files/discover project config supported-languages)
+           total (count files)
+           _ (emit! progress :discover-complete
+                    {:files total :diagnostics (count diagnostics)})
+           _ (emit! progress :parse-progress
+                    {:completed 0 :total total
+                     :file (some-> files first :relative-path)})
+           project-snapshot (project-analyzer/analyze project files progress)
+           outputs (:outputs project-snapshot)
+           preserved (filterv :preserve? outputs)
+           _ (emit! progress :parse-complete
+                    {:completed total :total total})]
+       (when (seq preserved)
+         (throw
+          (ex-info
+           (str (if (= :incremental mode) "Incremental" "Full")
+                " analysis produced an incomplete snapshot; existing graph was preserved")
+           {:exit-code 1
+            :type :analysis/incomplete-snapshot
+            :files (mapv (comp :file/path :file) preserved)
+            :diagnostics
+            (vec (concat diagnostics
+                         (:diagnostics project-snapshot)
+                         (mapcat :diagnostics preserved)))})))
+       {:started started
+        :files files
+        :file-count total
+        :source-inventory (source-inventory files)
+        :outputs outputs
+        :entities (vec (mapcat (fn [{:keys [file entities]}]
+                                (cons file entities))
+                              outputs))
+        :analysis-metrics (:analysis-metrics project-snapshot)
+        :analyzers (:analyzers project-snapshot)
+        :diagnostics
+        (vec (concat diagnostics
+                     (:diagnostics project-snapshot)
+                     (mapcat :diagnostics outputs)))}))))
+
+(defn stale-candidate?
+  [project config candidate]
+  (let [{:keys [files]} (files/discover project config supported-languages)]
+    (not= (:source-inventory candidate) (source-inventory files))))
+
+(defn prepare-current
+  "Prepare and revalidate once, retrying one stale preparation."
+  ([project config] (prepare-current project config nil :full))
+  ([project config progress] (prepare-current project config progress :full))
+  ([project config progress mode]
+   (loop [attempt 0]
+     (let [candidate (prepare project config progress mode)]
+       (if-not (stale-candidate? project config candidate)
+         candidate
+         (if (zero? attempt)
+           (recur 1)
+           {:stale? true
+            :mode :stale-source
+            :type :analysis/stale-source
+            :attempts 2}))))))
+
+(defn commit-candidate!
+  "Activate a prepared full candidate. Callers coordinate this short mutation
+  boundary; semantic reconciliation intentionally happens afterward."
+  [graph config candidate progress]
+  (let [entities (:entities candidate)]
+    (emit! progress :persist-start
+           {:entities (count entities) :batch-size persistence-batch-size})
+    (persist! graph config entities progress)
+    (emit! progress :analyzer-finalize-start {})
+    (let [quality (query/graph-quality graph)]
+      (emit! progress :analyzer-finalize-complete quality)
+      {:mode :full
+       :files (:file-count candidate)
+       :entities (count entities)
+       :analysis-metrics (:analysis-metrics candidate)
+       :graph-quality quality
+       :diagnostics (:diagnostics candidate)
+       :started (:started candidate)})))
+
+(defn finish-candidate!
+  "Reconcile semantic state after graph activation and outside graph mutation
+  coordination."
+  [graph project config result progress]
+  (emit! progress :semantic-reconcile-start {})
+  (let [semantic-plan (semantic-reconcile/reconcile! graph project config)]
+    (emit! progress :semantic-reconcile-complete
+           {:upserts (:queued-upserts semantic-plan)
+            :deletes (:queued-deletes semantic-plan)
+            :deferred (:deferred semantic-plan)})
+    (emit! progress :complete
+           {:elapsed-seconds
+            (long (/ (- (System/nanoTime) (:started result)) 1000000000))})
+    (-> result
+        (dissoc :started)
+        (assoc :semantic semantic-plan)
+        (update :diagnostics into (:diagnostics semantic-plan)))))
+
 (defn analyze!
   "Perform a complete project scan and replace Datalevin facts in bounded
   transactions. Analyzer adapters emit final exact edges and classified
@@ -54,62 +169,10 @@
    (store/with-store [graph project config]
      (analyze! graph project config progress)))
   ([graph project config progress]
-   (let [started (System/nanoTime)]
-     (emit! progress :discover-start {})
-     (let [{:keys [files diagnostics]}
-           (files/discover project config
-                           #{:language/clojure :language/clojurescript
-                             :language/clojure-common :language/janet
-                             :language/edn-data})
-             total (count files)
-             _ (emit! progress :discover-complete
-                      {:files total :diagnostics (count diagnostics)})
-             _ (emit! progress :parse-progress
-                      {:completed 0 :total total
-                       :file (some-> files first :relative-path)})
-             project-snapshot (project-analyzer/analyze project files progress)
-             extracted (:outputs project-snapshot)
-             preserved (filterv :preserve? extracted)
-             _ (emit! progress :parse-complete
-                      {:completed total :total total})
-             _ (when (seq preserved)
-                 (throw
-                  (ex-info
-                   "Full analysis produced an incomplete snapshot; existing graph was preserved"
-                   {:exit-code 1
-                    :type :analysis/incomplete-snapshot
-                    :files (mapv (comp :file/path :file) preserved)
-                    :diagnostics
-                    (vec (concat diagnostics
-                                 (:diagnostics project-snapshot)
-                                 (mapcat :diagnostics preserved)))})))
-             all-entities (vec (mapcat (fn [{:keys [file entities]}]
-                                         (cons file entities))
-                                       extracted))
-             _ (emit! progress :persist-start
-                      {:entities (count all-entities)
-                       :batch-size persistence-batch-size})]
-         (persist! graph config all-entities progress)
-         (emit! progress :analyzer-finalize-start {})
-         (let [quality (query/graph-quality graph)
-               _ (emit! progress :analyzer-finalize-complete quality)
-               _ (emit! progress :semantic-reconcile-start {})
-               semantic-plan
-               (semantic-reconcile/reconcile! graph project config)
-               _ (emit! progress :semantic-reconcile-complete
-                        {:upserts (:queued-upserts semantic-plan)
-                         :deletes (:queued-deletes semantic-plan)
-                         :deferred (:deferred semantic-plan)})]
-           (emit! progress :complete
-                  {:elapsed-seconds
-                   (long (/ (- (System/nanoTime) started) 1000000000))})
-           {:mode :full
-            :files total
-            :entities (count all-entities)
-            :analysis-metrics (:analysis-metrics project-snapshot)
-            :graph-quality quality
-            :semantic semantic-plan
-            :diagnostics (vec (concat diagnostics
-                                      (:diagnostics project-snapshot)
-                                      (mapcat :diagnostics extracted)
-                                      (:diagnostics semantic-plan)))})))))
+   (let [candidate (prepare-current project config progress)]
+     (if (:stale? candidate)
+       candidate
+       (finish-candidate!
+        graph project config
+        (commit-candidate! graph config candidate progress)
+        progress)))))
