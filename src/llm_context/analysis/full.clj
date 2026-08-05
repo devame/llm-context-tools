@@ -2,11 +2,13 @@
   (:require [llm-context.analysis.files :as files]
             [llm-context.analysis.clj-kondo :as clj-kondo]
             [llm-context.analysis.janet :as janet]
+            [llm-context.analysis.manifest :as manifest]
             [llm-context.analysis.project-analyzer :as project-analyzer]
             [llm-context.model.canonical-hash :as canonical-hash]
             [llm-context.model.ids :as ids]
             [llm-context.query :as query]
             [llm-context.semantic.reconcile :as semantic-reconcile]
+            [llm-context.semantic.document :as semantic-document]
             [llm-context.store :as store]))
 
 (def persistence-batch-size 1000)
@@ -130,19 +132,25 @@
 (defn commit-candidate!
   "Activate a prepared full candidate. Callers coordinate this short mutation
   boundary; semantic reconciliation intentionally happens afterward."
-  [graph config candidate progress]
+  [graph project config candidate progress]
   (let [entities (:entities candidate)]
     (emit! progress :persist-start
            {:entities (count entities) :batch-size persistence-batch-size})
     (persist! graph config entities (:analyzers candidate) progress)
     (emit! progress :analyzer-finalize-start {})
-    (let [quality (query/graph-quality graph)]
+    (let [quality (query/graph-quality graph)
+          graph-revision (semantic-document/graph-revision
+                          (store/database graph))
+          manifest-index (manifest/write! project candidate graph-revision)]
       (emit! progress :analyzer-finalize-complete quality)
       {:mode :full
        :files (:file-count candidate)
        :entities (count entities)
        :analysis-metrics (:analysis-metrics candidate)
        :graph-quality quality
+       :manifest {:version (:version manifest-index)
+                  :graph-revision graph-revision
+                  :files (count (:files manifest-index))}
        :diagnostics (:diagnostics candidate)
        :started (:started candidate)})))
 
@@ -179,5 +187,5 @@
        candidate
        (finish-candidate!
         graph project config
-        (commit-candidate! graph config candidate progress)
+        (commit-candidate! graph project config candidate progress)
         progress)))))

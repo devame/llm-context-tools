@@ -113,9 +113,9 @@
                      graph generation
                      #(if full?
                         (full/commit-candidate!
-                         graph settings candidate service-progress!)
+                         graph project settings candidate service-progress!)
                         (incremental/commit-candidate!
-                         graph settings candidate)))})))))]
+                         graph project settings candidate)))})))))]
     (cond
       (:complete-result prepared) (:complete-result prepared)
       (:stale? prepared)

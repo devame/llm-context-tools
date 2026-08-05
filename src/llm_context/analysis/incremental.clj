@@ -3,10 +3,12 @@
             [llm-context.analysis.files :as files]
             [llm-context.analysis.full :as full]
             [llm-context.analysis.janet :as janet]
+            [llm-context.analysis.manifest :as manifest]
             [llm-context.graph.read :as graph-read]
             [llm-context.model.canonical-hash :as canonical-hash]
             [llm-context.model.ids :as ids]
             [llm-context.semantic.reconcile :as semantic-reconcile]
+            [llm-context.semantic.document :as semantic-document]
             [llm-context.store :as store]))
 
 (def supported-languages full/supported-languages)
@@ -66,7 +68,7 @@
 (defn commit-candidate!
   "Persist only changed/deleted files from a fully prepared candidate. The
   caller coordinates this mutation boundary."
-  [graph config candidate]
+  [graph project config candidate]
   ;; Incremental mutation cannot recover an interrupted or format-incompatible
   ;; full snapshot because it has no authoritative old baseline to preserve.
   (store/assert-query-compatible! graph)
@@ -105,7 +107,12 @@
            (:file/id file) (:file/content-hash file) :upsert)])
         (store/replace-file! graph file entities)))
     (store/prune-orphan-topics! graph)
-    (let [result
+    (when updating?
+      (reactivate-metadata! graph config candidate))
+    (let [graph-revision (semantic-document/graph-revision
+                          (store/database graph))
+          manifest-index (manifest/write! project candidate graph-revision)
+          result
           {:mode :incremental
            :files (count files)
            :changed (count changed)
@@ -113,10 +120,11 @@
            :entities (reduce + 0 (map #(inc (count (:entities %))) changed))
            :analysis-metrics (:analysis-metrics candidate)
            :analyzers (:analyzers candidate)
+           :manifest {:version (:version manifest-index)
+                      :graph-revision graph-revision
+                      :files (count (:files manifest-index))}
            :diagnostics (:diagnostics candidate)
            :started (:started candidate)}]
-      (when updating?
-        (reactivate-metadata! graph config candidate))
       result)))
 
 (defn finish-candidate!
@@ -165,7 +173,7 @@
           candidate
           (finish-candidate!
            graph project config
-           (commit-candidate! graph config candidate))))))
+           (commit-candidate! graph project config candidate))))))
 
 (defn analyze!
   "Run authoritative project analyzers, then persist only source or semantic

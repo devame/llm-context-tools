@@ -100,6 +100,7 @@
           result (full/analyze! project settings #(swap! events conj %))]
       (is (= 1 (:files result)))
       (is (pos? (:entities result)))
+      (is (= 1 (get-in result [:manifest :files])))
       (is (= [:discover-start :discover-complete :parse-progress
               :analyzer-phase-start :analyzer-phase-complete
               :analyzer-phase-start :analyzer-phase-complete
