@@ -109,6 +109,18 @@
         (is (= 1 (:completed (worker/process-once! worker))))
         (is (empty? (state/job-records graph reconcile/provider)))))))
 
+(deftest worker-reconciles-dirty-markers-created-after-startup
+  (let [{:keys [project]} (fixture)
+        client (fake/create)]
+    (store/with-store [graph project settings]
+      (let [worker (test-worker graph project client)]
+        (worker/prepare! worker)
+        (is (= 1 (:completed (worker/process-once! worker))))
+        (reconcile/mark-full! graph)
+        (is (= 1 (count (state/dirty-records graph reconcile/provider))))
+        (is (zero? (:leased (worker/process-once! worker))))
+        (is (empty? (state/dirty-records graph reconcile/provider)))))))
+
 (deftest worker-deletes-all-chunks-for-removed-symbol
   (let [{:keys [project path]} (fixture)
         client (fake/create)]

@@ -273,6 +273,13 @@
   [worker]
   (let [time (now worker)
         settings (:settings worker)
+        dirty? (seq (with-graph-lock
+                      worker
+                      #(state/dirty-records
+                        (:graph worker) reconcile/provider)))
+        _ (when dirty?
+            (reconcile/reconcile! (:graph worker) (:project worker)
+                                  (:config worker) time))
         _ (with-graph-lock
             worker
             #(state/recover-expired-leases!

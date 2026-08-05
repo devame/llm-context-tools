@@ -225,11 +225,11 @@
     :semantic-sync
     (do
       ;; An explicit sync is also the operator's repair action for exhausted
-      ;; jobs. Marking is a short mutation; document planning and source reads
-      ;; remain outside the project graph monitor.
+      ;; jobs. Marking is a short mutation; the worker performs document
+      ;; planning and source reads asynchronously outside request latency and
+      ;; the project graph monitor.
       (with-graph-write graph generation
                         #(semantic-reconcile/mark-full! graph))
-      (semantic-reconcile/reconcile! graph project settings)
       (read-consistently graph generation false
                          #(semantic-status % runtime)))
     :stop :stopping
