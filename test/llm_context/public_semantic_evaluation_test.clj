@@ -17,6 +17,15 @@
                           (:repositories manifest)))))
     (is (identical? manifest (suite/validate-manifest! manifest)))))
 
+(deftest corpus-paths-are-anchored-to-the-manifest-directory
+  (let [manifest (suite/read-manifest
+                  "bench/public-semantic-evaluation/manifest.edn")
+        repository (first (:repositories manifest))
+        manifest-directory (::suite/manifest-directory (meta manifest))
+        path (#'suite/corpus-path manifest-directory repository :development)]
+    (is (Files/exists path (make-array LinkOption 0)))
+    (is (.endsWith path "clojure-lsp/development.edn"))))
+
 (deftest semantic-preflight-requires-loopback-and-complete-coverage
   (let [complete {:completeness :complete
                   :pending 0 :leased 0 :failed 0 :dirty 0

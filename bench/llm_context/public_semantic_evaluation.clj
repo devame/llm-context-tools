@@ -54,8 +54,12 @@
   (throw (ex-info message (merge {:exit-code 1} data))))
 
 (defn read-manifest [path]
-  (with-open [reader (java.io.PushbackReader. (io/reader path))]
-    (edn/read {:eof nil} reader)))
+  (let [manifest-path (.toRealPath
+                       (Paths/get (str path) (make-array String 0))
+                       (make-array LinkOption 0))]
+    (with-open [reader (java.io.PushbackReader. (io/reader (str manifest-path)))]
+      (with-meta (edn/read {:eof nil} reader)
+        {::manifest-directory (.getParent manifest-path)}))))
 
 (defn validate-manifest!
   "Validate the public suite contract without touching any checkout."
@@ -303,11 +307,15 @@
     (catch clojure.lang.ExceptionInfo error
       (ex-data error))))
 
-(defn- validate-corpora! [checkout repository]
+(defn- corpus-path ^Path [manifest-directory repository split]
+  (.normalize
+   (.resolve ^Path manifest-directory (get-in repository [:corpus split]))))
+
+(defn- validate-corpora! [checkout manifest-directory repository]
   (into {}
         (for [split splits
               :let [relative (get-in repository [:corpus split])
-                    path (.normalize (.resolve ^Path (root-path ".") relative))
+                    path (corpus-path manifest-directory repository split)
                     validation (corpus/validate! (str checkout) (str path))
                     expected (get-in repository [:expected-queries split])]]
           (do
@@ -327,8 +335,9 @@
                                  metric-keys))
          (:query-results result))})
 
-(defn- benchmark-split! [checkout repository split repetitions timeouts]
-  (let [corpus-path (get-in repository [:corpus split])]
+(defn- benchmark-split!
+  [checkout manifest-directory repository split repetitions timeouts]
+  (let [corpus-path (str (corpus-path manifest-directory repository split))]
     (into {}
           (for [mode modes]
             (let [runs
@@ -554,13 +563,16 @@
                         resume? true}}]
    (validate-manifest! manifest)
    (let [source-root (root-path ".")
+         manifest-directory (or (::manifest-directory (meta manifest))
+                                source-root)
          timeouts (merge default-stage-timeouts-ms timeouts)
          repository-results
          (mapv
           (fn [repository]
             (let [checkout (checkout-path root (:checkout repository))]
               (clean-and-pinned! checkout repository)
-              (let [corpus-results (validate-corpora! checkout repository)
+              (let [corpus-results (validate-corpora!
+                                    checkout manifest-directory repository)
                     resume-key (repository-resume-key
                                 checkout repository corpus-results repetitions)]
                 (or
@@ -572,7 +584,8 @@
                           (for [split splits
                                 [mode result]
                                 (benchmark-split!
-                                 checkout repository split repetitions timeouts)]
+                                 checkout manifest-directory repository split
+                                 repetitions timeouts)]
                             {:repository (:id repository)
                              :split split
                              :mode mode
