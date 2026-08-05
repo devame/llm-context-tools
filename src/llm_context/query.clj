@@ -394,26 +394,99 @@
        (get topic-command-kinds subcommand)
        (assoc :edge-kind (get topic-command-kinds subcommand))))))
 
-(def reachability-rules
-  '[[(reachable ?from ?to)
-     [?edge :edge/from ?from]
-     [?edge :edge/to ?to]]
-    [(reachable ?from ?to)
-     [?edge :edge/from ?from]
-     [?edge :edge/to ?middle]
-     (reachable ?middle ?to)]])
+(defn transitive-callees
+  "Return a bounded, cycle-safe breadth-first trace over exact call edges."
+  ([graph source]
+   (transitive-callees graph source {:depth 4 :limit 200}))
+  ([graph source {:keys [depth limit] :or {depth 4 limit 200}}]
+   (when-not (pos-int? depth)
+     (throw (ex-info "Trace depth must be a positive integer"
+                     {:exit-code 2 :depth depth})))
+   (when-not (pos-int? limit)
+     (throw (ex-info "Trace limit must be a positive integer"
+                     {:exit-code 2 :limit limit})))
+   (let [db (store/database graph)]
+     (when-not (graph-read/symbol-by-id db source)
+       (throw (ex-info (str "Unknown trace source: " source)
+                       {:exit-code 2 :source source})))
+     (let [finish
+           (fn [results depth-truncated? limit-truncated?]
+             {:source source
+              :depth depth
+              :limit limit
+              :results (vec (sort-by (juxt :depth :name :id) results))
+              :truncated? (or depth-truncated? limit-truncated?)
+              :truncation {:depth? depth-truncated?
+                           :limit? limit-truncated?}})]
+       (loop [frontier [source]
+              visited #{source}
+              level 0
+              results []]
+         (cond
+           (empty? frontier)
+           (finish results false false)
 
-(defn transitive-callees [graph source]
-  (->> (store/query
-        graph
-        '[:find ?id ?name
-          :in $ % ?source-id
-          :where [?source :symbol/id ?source-id]
-                 (reachable ?source ?target)
-                 [?target :symbol/id ?id]
-                 [?target :symbol/qualified-name ?name]]
-        [reachability-rules source])
-       (mapv (fn [[id name]] {:id id :name name}))))
+           (>= level depth)
+           (finish results
+                   (boolean (seq (graph-read/outgoing-call-targets
+                                  db frontier visited 1)))
+                   false)
+
+           :else
+           (let [remaining (- limit (count results))
+                 candidates (graph-read/outgoing-call-targets
+                             db frontier visited (inc remaining))
+                 overflow? (> (count candidates) remaining)
+                 selected (vec (take remaining candidates))
+                 next-depth (inc level)
+                 layer (mapv (fn [{:keys [id qualified-name]}]
+                               {:id id :name qualified-name
+                                :depth next-depth})
+                             selected)
+                 next-frontier (mapv :id selected)
+                 visited (into visited next-frontier)
+                 results (into results layer)]
+             (cond
+               overflow?
+               (finish results false true)
+
+               (= (count results) limit)
+               (let [deeper? (boolean
+                              (seq (graph-read/outgoing-call-targets
+                                    db next-frontier visited 1)))]
+                 (finish results
+                         (and (= next-depth depth) deeper?)
+                         deeper?))
+
+               :else
+               (recur next-frontier visited next-depth results)))))))))
+
+(defn trace-command [graph settings args]
+  (let [source (first args)]
+    (when-not source
+      (throw (ex-info "query trace requires an argument" {:exit-code 2})))
+    (let [options (option-pairs (next args))
+          allowed #{"--depth" "--limit"}]
+      (when-let [unknown (first (remove allowed (keys options)))]
+        (throw (ex-info (str "Unknown query trace option: " unknown)
+                        {:exit-code 2})))
+      (let [parse-positive
+            (fn [option default]
+              (if-let [value (get options option)]
+                (let [parsed (parse-long value)]
+                  (when-not (pos-int? parsed)
+                    (throw (ex-info (str option " must be a positive integer")
+                                    {:exit-code 2 :option option
+                                     :value value})))
+                  parsed)
+                default))]
+        (transitive-callees
+         graph source
+         {:depth (parse-positive "--depth"
+                                 (get-in settings [:context :trace-depth] 4))
+          :limit (parse-positive "--limit"
+                                 (get-in settings [:context :trace-limit]
+                                         200))})))))
 
 (defn entry-points [graph]
   (graph-read/entry-points (store/database graph)))

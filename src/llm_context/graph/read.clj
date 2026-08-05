@@ -98,12 +98,11 @@
         (assoc :doc (:symbol/doc entity))))))
 
 (defn symbol-by-id [db id]
-  (some-> (d/q '[:find ?symbol .
-                 :in $ ?id
-                 :where [?symbol :symbol/id ?id]]
-               db id)
-          (d/pull db symbol-pull)
-          symbol-record))
+  (when-let [eid (d/q '[:find ?symbol .
+                        :in $ ?id
+                        :where [?symbol :symbol/id ?id]]
+                      db id)]
+    (symbol-record (d/pull db symbol-pull eid))))
 
 (defn exact-symbols
   ([db term]
@@ -233,6 +232,32 @@
            (sort-by (juxt :kind :from :to :edge-id :direction))
            (take limit)
            (mapv #(dissoc % ::resolution))))))
+
+(defn outgoing-call-targets
+  "Return at most limit distinct exact call targets from a frontier, excluding
+  already visited symbol IDs. Results are stable by qualified name and ID."
+  [db source-ids visited limit]
+  (if-not (and (seq source-ids) (pos? limit))
+    []
+    (mapv
+     (fn [[id qualified]] {:id id :qualified-name qualified})
+     (d/q
+      (conj
+       '[:find ?target-id ?qualified
+         :in $ [?source-id ...] ?visited
+         :where
+         [?source :symbol/id ?source-id]
+         [?edge :edge/from ?source]
+         [?edge :edge/kind :edge.kind/calls]
+         [?edge :edge/resolution :resolution/exact]
+         [?edge :edge/to ?target]
+         [?target :symbol/id ?target-id]
+         [?target :symbol/qualified-name ?qualified]
+         [(not (contains? ?visited ?target-id))]
+         :order-by [?qualified :asc ?target-id :asc]
+         :limit]
+       (long limit))
+      db (vec source-ids) visited))))
 
 (defn topics-by-ids [db ids]
   (if-not (seq ids)

@@ -72,6 +72,12 @@
     (not (pos-int? (get-in config [:context :default-max-tokens])))
     (conj ":context/:default-max-tokens must be a positive integer")
 
+    (not (pos-int? (get-in config [:context :trace-depth])))
+    (conj ":context/:trace-depth must be a positive integer")
+
+    (not (pos-int? (get-in config [:context :trace-limit])))
+    (conj ":context/:trace-limit must be a positive integer")
+
     (not (and (vector? (get-in config [:semantic :providers]))
               (every? keyword? (get-in config [:semantic :providers]))))
     (conj ":semantic/:providers must be a vector of keywords")

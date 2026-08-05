@@ -55,4 +55,5 @@
 
  :context
  {:default-max-tokens 8000
-  :trace-depth 4}}
+  :trace-depth 4
+  :trace-limit 200}}

@@ -45,7 +45,7 @@
                                    (query-search-term args))
     "callers" (query/callers graph (argument))
     "callees" (query/callees-command graph args)
-    "trace" (query/transitive-callees graph (argument))
+    "trace" (query/trace-command graph settings args)
     "entry-points" (query/entry-points graph)
     "effects" (query/effects graph)
     "unresolved" (query/unresolved-command graph args)
