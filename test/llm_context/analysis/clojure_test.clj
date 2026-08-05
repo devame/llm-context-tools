@@ -405,6 +405,63 @@
     (is (= ["symbol:target"] (mapv :symbol/id matches)))
     (is (= 1 (:positional-candidates-examined @stats)))))
 
+(deftest dense-var-usages-build-one-source-index-and-one-fact-per-usage
+  (let [usage-count 500
+        file {:relative-path "src/dense.clj"
+              :language :language/clojure
+              :content (apply str (repeat (+ usage-count 10) "\n"))
+              :size (+ usage-count 10) :modified-at 1}
+        namespace {:filename "src/dense.clj" :platforms [:clj]
+                   :row 1 :col 1 :end-row 1 :end-col 11 :name 'dense}
+        owner {:filename "src/dense.clj" :platforms [:clj]
+               :row 2 :col 1 :end-row (+ usage-count 5) :end-col 2
+               :ns 'dense :name 'owner :defined-by 'clojure.core/defn}
+        target {:filename "src/dense.clj" :platforms [:clj]
+                :row 3 :col 1 :end-row 3 :end-col 20
+                :ns 'dense :name 'target :defined-by 'clojure.core/defn}
+        usages (mapv (fn [index]
+                       {:filename "src/dense.clj" :platforms [:clj]
+                        :row (+ index 4) :col 3
+                        :end-row (+ index 4) :end-col 11
+                        :from 'dense :from-var 'owner
+                        :to 'dense :name 'target :arity 0})
+                     (range usage-count))
+        result (clojure-analysis/materialize-with-metrics
+                [file]
+                {:analysis {:namespace-definitions [namespace]
+                            :var-definitions [owner target]
+                            :var-usages usages}})]
+    (is (= 1 (get-in result [:metrics :source-indexes-built])))
+    (is (= usage-count (get-in result [:metrics :var-usages])))
+    (is (= (+ usage-count 5)
+           (get-in result [:metrics :generated-facts])))))
+
+(deftest positional-candidate-count-scales-with-nesting-not-repository-size
+  (let [depth 40
+        usages 100
+        nested
+        (mapv (fn [index]
+                {:symbol/id (str "symbol:nested-" index)
+                 :symbol/file "file:src/nested.clj" :symbol/platform :clj
+                 :source/start-line (inc index) :source/start-column 1
+                 :source/end-line (- 100 index) :source/end-column 1})
+              (range depth))
+        unrelated
+        (mapv (fn [index]
+                {:symbol/id (str "symbol:other-" index)
+                 :symbol/file (str "file:src/other-" index ".clj")
+                 :symbol/platform :clj
+                 :source/start-line 1 :source/start-column 1
+                 :source/end-line 100 :source/end-column 1})
+              (range 1000))
+        index (#'clojure-analysis/positional-index (into nested unrelated))
+        stats (atom {:positional-candidates-examined 0})]
+    (dotimes [_ usages]
+      (#'clojure-analysis/interval-matches
+       (get index ["file:src/nested.clj" :clj]) [50 1] stats))
+    (is (= (* depth usages)
+           (:positional-candidates-examined @stats)))))
+
 (deftest ambiguous-cross-file-definition-is-not-resolved-by-order
   (let [owner {:symbol/id "symbol:owner" :symbol/platform :clj}
         candidate-a {:symbol/id "symbol:a"}
