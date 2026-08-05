@@ -393,14 +393,12 @@
   [store]
   (reduce
    (fn [removed identity-attribute]
-     ;; Identity attributes are unique and indexed. Binding the attribute in
-     ;; the query avoids materializing every graph entity/attribute pair merely
-     ;; to discover the four semantic operational entity families.
-     (let [eids (d/q '[:find [?entity ...]
-                       :in $ ?identity-attribute
-                       :where [?entity ?identity-attribute _]]
-                     (database store) identity-attribute)]
-       (doseq [batch (partition-all 100 eids)]
+     ;; Identity attributes are unique and indexed. Traverse the AVE index
+     ;; directly so reset cost is proportional to semantic operational state,
+     ;; independent of Datalog planning and canonical graph cardinality.
+     (let [eids (mapv :e (d/datoms (database store)
+                                   :ave identity-attribute))]
+       (doseq [batch (partition-all 1000 eids)]
          (d/transact! (:connection store)
                       (mapv (fn [eid] [:db/retractEntity eid]) batch)))
        (+ removed (count eids))))
