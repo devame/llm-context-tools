@@ -1,6 +1,7 @@
 (ns llm-context.public-semantic-evaluation-test
   (:require [clojure.test :refer [deftest is testing]]
-            [llm-context.public-semantic-evaluation :as suite])
+            [llm-context.public-semantic-evaluation :as suite]
+            [llm-context.retrieval-corpus :as corpus])
   (:import [java.nio.file Files LinkOption]))
 
 (defn- temp-checkout []
@@ -25,6 +26,25 @@
         path (#'suite/corpus-path manifest-directory repository :development)]
     (is (Files/exists path (make-array LinkOption 0)))
     (is (.endsWith path "clojure-lsp/development.edn"))))
+
+(deftest both-corpus-splits-reuse-one-project-analysis
+  (let [manifest (suite/read-manifest
+                  "bench/public-semantic-evaluation/manifest.edn")
+        repository (first (:repositories manifest))
+        manifest-directory (::suite/manifest-directory (meta manifest))
+        checkout (temp-checkout)
+        analyses (atom 0)
+        validations (atom 0)]
+    (with-redefs [corpus/analyze-project
+                  (fn [_] (swap! analyses inc) {:symbols []})
+                  corpus/validate-analysis!
+                  (fn [_ _]
+                    (swap! validations inc)
+                    {:corpus/version 2 :queries 20})]
+      (#'suite/validate-corpora!
+       checkout manifest-directory repository))
+    (is (= 1 @analyses))
+    (is (= 2 @validations))))
 
 (deftest semantic-preflight-requires-loopback-and-complete-coverage
   (let [complete {:completeness :complete

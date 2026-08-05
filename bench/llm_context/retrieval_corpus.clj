@@ -64,23 +64,31 @@
      :overlap (when (seq overlap)
                 {:query-id (:id query) :symbol-ids (vec (sort overlap))})}))
 
-(defn validate!
-  [project-path query-path]
+(defn analyze-project
+  "Materialize analyzer symbols and diagnostics once for corpus validation."
+  [project-path]
   (let [project (project/context project-path)
         config (config/load-config project)
         discovery (files/discover project config incremental/supported-languages)
         snapshot (project-analyzer/analyze project (:files discovery))
         outputs (:outputs snapshot)
         symbols (vec (result-symbols outputs))
-        corpus (evaluation/read-corpus-data query-path)
+        diagnostics (vec (concat (:diagnostics discovery)
+                                 (:diagnostics snapshot)
+                                 (mapcat :diagnostics outputs)))]
+    {:files (count (:files discovery))
+     :symbols symbols
+     :diagnostics diagnostics}))
+
+(defn validate-analysis!
+  "Validate one corpus against a reusable project analysis."
+  [{:keys [files symbols diagnostics]} query-path]
+  (let [corpus (evaluation/read-corpus-data query-path)
         queries (:queries corpus)
         resolutions (mapv #(query-resolution-errors symbols %) queries)
         missing (vec (mapcat :missing resolutions))
         ambiguous (vec (mapcat :ambiguous resolutions))
         overlaps (vec (keep :overlap resolutions))
-        diagnostics (vec (concat (:diagnostics discovery)
-                                 (:diagnostics snapshot)
-                                 (mapcat :diagnostics outputs)))
         errors (filterv #(= :error (:level %)) diagnostics)
         warnings (filterv #(not= :error (:level %)) diagnostics)
         selectors
@@ -99,10 +107,14 @@
      :queries (count queries)
      :languages (frequencies (map :language queries))
      :query-types (frequencies (map :query-type queries))
-     :files (count (:files discovery))
+     :files files
      :symbols (count symbols)
      :judged-identities (count selectors)
      :analyzer-warnings (count warnings)}))
+
+(defn validate!
+  [project-path query-path]
+  (validate-analysis! (analyze-project project-path) query-path))
 
 (defn -main [& [project-path query-path]]
   (prn (validate! (or project-path default-project)

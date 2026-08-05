@@ -317,21 +317,22 @@
    (.resolve ^Path manifest-directory (get-in repository [:corpus split]))))
 
 (defn- validate-corpora! [checkout manifest-directory repository]
-  (into {}
-        (for [split splits
-              :let [relative (get-in repository [:corpus split])
-                    path (corpus-path manifest-directory repository split)
-                    validation (corpus/validate! (str checkout) (str path))
-                    expected (get-in repository [:expected-queries split])]]
-          (do
-            (when-not (= expected (:queries validation))
-              (fail! "Public corpus query count does not match the manifest"
-                     {:repository (:id repository) :split split}))
-            [split {:path relative
-                    :hash (sha256 path)
-                    :validation (select-keys validation
-                                             [:corpus/version :queries :languages
-                                              :query-types])}]))))
+  (let [analysis (corpus/analyze-project (str checkout))]
+    (into {}
+          (for [split splits
+                :let [relative (get-in repository [:corpus split])
+                      path (corpus-path manifest-directory repository split)
+                      validation (corpus/validate-analysis! analysis (str path))
+                      expected (get-in repository [:expected-queries split])]]
+            (do
+              (when-not (= expected (:queries validation))
+                (fail! "Public corpus query count does not match the manifest"
+                       {:repository (:id repository) :split split}))
+              [split {:path relative
+                      :hash (sha256 path)
+                      :validation (select-keys validation
+                                               [:corpus/version :queries :languages
+                                                :query-types])}])))))
 
 (defn- deterministic-view [result]
   {:retrieval-mode (:retrieval-mode result)
