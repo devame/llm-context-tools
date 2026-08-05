@@ -98,12 +98,11 @@
         (assoc :doc (:symbol/doc entity))))))
 
 (defn symbol-by-id [db id]
-  (some-> (d/q '[:find ?symbol .
-                 :in $ ?id
-                 :where [?symbol :symbol/id ?id]]
-               db id)
-          (d/pull db symbol-pull)
-          symbol-record))
+  (when-let [eid (d/q '[:find ?symbol .
+                        :in $ ?id
+                        :where [?symbol :symbol/id ?id]]
+                      db id)]
+    (symbol-record (d/pull db symbol-pull eid))))
 
 (defn exact-symbols
   ([db term]
@@ -151,139 +150,77 @@
            (into {})))
     {}))
 
-(defn substring-symbol-ids
-  "Evaluate the compatibility substring predicate inside Datalevin so symbol
-  rows that do not match are never materialized in application memory."
-  ([db needle]
-   (if (empty? needle)
-     []
-     (d/q '[:find [?id ...]
-            :in $ ?needle
-            :where
-            [?symbol :symbol/id ?id]
-            [?symbol :symbol/name ?name]
-            [?symbol :symbol/qualified-name ?qualified]
-            [(clojure.string/lower-case ?name) ?lower-name]
-            [(clojure.string/lower-case ?qualified) ?lower-qualified]
-            (or [(clojure.string/includes? ?lower-name ?needle)]
-                [(clojure.string/includes? ?lower-qualified ?needle)])]
-          db needle)))
-  ([db needle limit]
-   (if (empty? needle)
-     []
-     (d/q
-      (conj
-       '[:find [?id ...]
-         :in $ ?needle
-         :where
-         [?symbol :symbol/id ?id]
-         [?symbol :symbol/name ?name]
-         [?symbol :symbol/qualified-name ?qualified]
-         [(clojure.string/lower-case ?name) ?lower-name]
-         [(clojure.string/lower-case ?qualified) ?lower-qualified]
-         (or [(clojure.string/includes? ?lower-name ?needle)]
-             [(clojure.string/includes? ?lower-qualified ?needle)])
-         :order-by ?id
-         :limit]
-       (long limit))
-      db needle))))
-
 (defn adjacent-exact
   "Return a bounded exact-edge frontier over symbol and topic IDs. Filtering
-  and per-direction limits are applied by Datalevin before rows are returned."
+  uses Datalevin's indexed reverse references so traversal does not repeatedly
+  plan four Datalog joins for every visited node."
   [db frontier-ids {:keys [directions edge-kinds limit]
                     :or {directions #{:outgoing :incoming}
                          limit 200}}]
   (if-not (and (seq frontier-ids) (pos? limit))
     []
-    (let [frontier (vec frontier-ids)
-          kinds (set edge-kinds)
-          run
-          (fn [query direction from-type to-type]
-            (->> (d/q (conj query (long limit)) db frontier (vec kinds))
-                 (map (fn [[edge-id kind from-id to-id evidence line]]
-                        {:edge-id edge-id :kind kind :from from-id :to to-id
-                         :direction direction :from-type from-type
-                         :to-type to-type :evidence evidence :line line}))
-                 vec))
-          symbol-symbol-out
-          '[:find ?edge-id ?kind ?from-id ?to-id ?evidence ?line
-            :in $ [?frontier-id ...] [?kind ...]
-            :where
-            [?from :symbol/id ?frontier-id]
-            [?from :symbol/id ?from-id]
-            [?edge :edge/from ?from]
-            [?edge :edge/to ?to]
-            [?to :symbol/id ?to-id]
-            [?edge :edge/id ?edge-id]
-            [?edge :edge/kind ?kind]
-            [?edge :edge/resolution :resolution/exact]
-            [?edge :edge/evidence ?evidence]
-            [(get-else $ ?edge :source/start-line 1) ?line]
-            :order-by [?kind :asc ?to-id :asc ?edge-id :asc]
-            :limit]
-          symbol-topic-out
-          '[:find ?edge-id ?kind ?from-id ?to-id ?evidence ?line
-            :in $ [?frontier-id ...] [?kind ...]
-            :where
-            [?from :symbol/id ?frontier-id]
-            [?from :symbol/id ?from-id]
-            [?edge :edge/from ?from]
-            [?edge :edge/to ?to]
-            [?to :topic/id ?to-id]
-            [?edge :edge/id ?edge-id]
-            [?edge :edge/kind ?kind]
-            [?edge :edge/resolution :resolution/exact]
-            [?edge :edge/evidence ?evidence]
-            [(get-else $ ?edge :source/start-line 1) ?line]
-            :order-by [?kind :asc ?to-id :asc ?edge-id :asc]
-            :limit]
-          symbol-symbol-in
-          '[:find ?edge-id ?kind ?from-id ?to-id ?evidence ?line
-            :in $ [?frontier-id ...] [?kind ...]
-            :where
-            [?to :symbol/id ?frontier-id]
-            [?to :symbol/id ?to-id]
-            [?edge :edge/to ?to]
-            [?edge :edge/from ?from]
-            [?from :symbol/id ?from-id]
-            [?edge :edge/id ?edge-id]
-            [?edge :edge/kind ?kind]
-            [?edge :edge/resolution :resolution/exact]
-            [?edge :edge/evidence ?evidence]
-            [(get-else $ ?edge :source/start-line 1) ?line]
-            :order-by [?kind :asc ?from-id :asc ?edge-id :asc]
-            :limit]
-          symbol-topic-in
-          '[:find ?edge-id ?kind ?from-id ?to-id ?evidence ?line
-            :in $ [?frontier-id ...] [?kind ...]
-            :where
-            [?to :topic/id ?frontier-id]
-            [?to :topic/id ?to-id]
-            [?edge :edge/to ?to]
-            [?edge :edge/from ?from]
-            [?from :symbol/id ?from-id]
-            [?edge :edge/id ?edge-id]
-            [?edge :edge/kind ?kind]
-            [?edge :edge/resolution :resolution/exact]
-            [?edge :edge/evidence ?evidence]
-            [(get-else $ ?edge :source/start-line 1) ?line]
-            :order-by [?kind :asc ?from-id :asc ?edge-id :asc]
-            :limit]
+    (let [kinds (set edge-kinds)
+          node-id (fn [entity]
+                    (or (:symbol/id entity) (:topic/id entity)))
+          node-type (fn [entity]
+                      (if (:topic/id entity) :topic :symbol))
+          edge-record
+          (fn [direction edge]
+            (let [from (:edge/from edge)
+                  to (:edge/to edge)]
+              {:edge-id (:edge/id edge)
+               :kind (:edge/kind edge)
+               :from (node-id from)
+               :to (node-id to)
+               :direction direction
+               :from-type (node-type from)
+               :to-type (node-type to)
+               :evidence (:edge/evidence edge)
+               :line (or (:source/start-line edge) 1)
+               ::resolution (:edge/resolution edge)}))
           rows
-          (concat
-           (when (directions :outgoing)
-             (concat
-              (run symbol-symbol-out :outgoing :symbol :symbol)
-              (run symbol-topic-out :outgoing :symbol :topic)))
-           (when (directions :incoming)
-             (concat
-              (run symbol-symbol-in :incoming :symbol :symbol)
-              (run symbol-topic-in :incoming :symbol :topic))))]
+          (mapcat
+           (fn [frontier-id]
+             (when-let [node (or (d/entity db [:symbol/id frontier-id])
+                                 (d/entity db [:topic/id frontier-id]))]
+               (concat
+                (when (directions :outgoing)
+                  (map #(edge-record :outgoing %) (:edge/_from node)))
+                (when (directions :incoming)
+                  (map #(edge-record :incoming %) (:edge/_to node))))))
+           frontier-ids)]
       (->> rows
+           (filter #(and (= :resolution/exact (::resolution %))
+                         (contains? kinds (:kind %))))
            (sort-by (juxt :kind :from :to :edge-id :direction))
            (take limit)
-           vec))))
+           (mapv #(dissoc % ::resolution))))))
+
+(defn outgoing-call-targets
+  "Return at most limit distinct exact call targets from a frontier, excluding
+  already visited symbol IDs. Results are stable by qualified name and ID."
+  [db source-ids visited limit]
+  (if-not (and (seq source-ids) (pos? limit))
+    []
+    (mapv
+     (fn [[id qualified]] {:id id :qualified-name qualified})
+     (d/q
+      (conj
+       '[:find ?target-id ?qualified
+         :in $ [?source-id ...] ?visited
+         :where
+         [?source :symbol/id ?source-id]
+         [?edge :edge/from ?source]
+         [?edge :edge/kind :edge.kind/calls]
+         [?edge :edge/resolution :resolution/exact]
+         [?edge :edge/to ?target]
+         [?target :symbol/id ?target-id]
+         [?target :symbol/qualified-name ?qualified]
+         [(not (contains? ?visited ?target-id))]
+         :order-by [?qualified :asc ?target-id :asc]
+         :limit]
+       (long limit))
+      db (vec source-ids) visited))))
 
 (defn topics-by-ids [db ids]
   (if-not (seq ids)
@@ -455,61 +392,42 @@
       {:indexed indexed :jobs jobs :dirty-files dirty-files})))
 
 (defn semantic-counts [db provider]
-  (let [symbol-count
+  (let [desired
         (or (d/q '[:find (count ?symbol) .
-                   :where [?symbol :symbol/id _]]
+                   :where
+                   [?symbol :symbol/id _]
+                   [?symbol :symbol/indexable? true]]
                  db)
             0)
-        wrapper-count
-        (or (d/q '[:find (count ?symbol) .
-                   :in $ [?kind ...]
-                   :where [?symbol :symbol/kind ?kind]]
-                 db [:symbol.kind/module :symbol.kind/namespace])
-            0)
-        desired (max 0 (- symbol-count wrapper-count))
-        indexed-present
+        indexed-current
         (or (d/q '[:find (count ?record) .
                    :in $ ?provider
                    :where
                    [?record :semantic.indexed/provider ?provider]
                    [?record :semantic.indexed/symbol-id ?symbol-id]
-                   [?symbol :symbol/id ?symbol-id]]
+                   [?symbol :symbol/id ?symbol-id]
+                   [?symbol :symbol/indexable? true]]
                  db provider)
             0)
-        indexed-wrappers
-        (or (d/q '[:find (count ?record) .
-                   :in $ ?provider [?kind ...]
-                   :where
-                   [?record :semantic.indexed/provider ?provider]
-                   [?record :semantic.indexed/symbol-id ?symbol-id]
-                   [?symbol :symbol/id ?symbol-id]
-                   [?symbol :symbol/kind ?kind]]
-                 db provider
-                 [:symbol.kind/module :symbol.kind/namespace])
-            0)
-        indexed-current (max 0 (- indexed-present indexed-wrappers))
         indexed
         (or (d/q '[:find (count ?record) .
                    :in $ ?provider
                    :where [?record :semantic.indexed/provider ?provider]]
                  db provider)
             0)
-        by-status
-        (into {}
-              (d/q '[:find ?status (count ?job)
-                     :in $ ?provider
-                     :where
-                     [?job :semantic.job/provider ?provider]
-                     [?job :semantic.job/status ?status]]
-                   db provider))
-        oldest
-        (d/q '[:find (min ?updated) .
+        status-rows
+        (d/q '[:find ?status (count ?job) (min ?updated)
                :in $ ?provider
                :where
                [?job :semantic.job/provider ?provider]
-               [?job :semantic.job/status :pending]
+               [?job :semantic.job/status ?status]
                [?job :semantic.job/updated-at ?updated]]
              db provider)
+        by-status (into {} (map (fn [[status count _]] [status count]))
+                        status-rows)
+        oldest (some (fn [[status _ updated]]
+                       (when (= :pending status) updated))
+                     status-rows)
         dirty
         (or (d/q '[:find (count ?marker) .
                    :in $ ?provider

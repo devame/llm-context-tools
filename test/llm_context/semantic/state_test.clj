@@ -3,7 +3,8 @@
             [llm-context.config :as config]
             [llm-context.semantic.state :as state]
             [llm-context.store :as store]
-            [llm-context.store-test :as fixture]))
+            [llm-context.store-test :as fixture]
+            [llm-context.test-support.db :as db-support]))
 
 (def provider :lateon-code)
 
@@ -248,3 +249,17 @@
         (is (= 1 (:failed summary))))
       (is (= "terminal"
              (:last-error (first (state/failure-records graph provider))))))))
+
+(deftest semantic-summary-uses-a-fixed-small-aggregate-set
+  (let [project (fixture/temp-project)
+        file (fixture/file-entity "src/status.clj" "source")
+        symbols (mapv #(fixture/symbol-entity
+                        file (str "sample/status-" %) (inc %))
+                      (range 200))]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-all! graph (into [file] symbols))
+      (let [measured (db-support/with-operation-counts
+                       (state/semantic-summary graph provider 100))]
+        (is (= 200 (get-in measured [:value :desired])))
+        (is (<= (get-in measured [:counts :query]) 6))
+        (is (zero? (get-in measured [:counts :pull-many])))))))

@@ -4,7 +4,8 @@
             [llm-context.model.ids :as ids]
             [llm-context.project :as project]
             [llm-context.query :as query]
-            [llm-context.store :as store])
+            [llm-context.store :as store]
+            [llm-context.test-support.db :as db-support])
   (:import [java.nio.file Files]))
 
 (defn fixture []
@@ -96,8 +97,140 @@
       (is (empty? (query/unresolved graph {:classification :dynamic})))
       (is (= "sample/caller"
              (:symbol (first (query/topic-relationships graph ":save")))))
-      (is (= [{:id "symbol:callee" :name "sample/callee"}]
-             (query/transitive-callees graph "symbol:caller")))
+      (is (= [{:id "symbol:callee" :name "sample/callee" :depth 1}]
+             (:results
+              (query/transitive-callees graph "symbol:caller"))))
       (is (= :effect.kind/logging (:kind (first (query/effects graph)))))
       (is (= #{"symbol:caller"}
              (set (map :id (query/entry-points graph))))))))
+
+(defn trace-fixture [unrelated-count]
+  (let [root (Files/createTempDirectory "llm-context-trace-"
+                                        (make-array java.nio.file.attribute.FileAttribute 0))
+        project (project/context (str root))
+        file {:entity/type :entity.type/file :file/id "file:src/trace.clj"
+              :file/path "src/trace.clj" :file/language :language/clojure
+              :file/content-hash (ids/content-hash "trace")
+              :file/size 5 :file/modified-at 1}
+        symbol (fn [id name line]
+                 {:entity/type :entity.type/symbol :symbol/id id
+                  :symbol/name name :symbol/qualified-name (str "trace/" name)
+                  :symbol/kind :symbol.kind/function :symbol/file (:file/id file)
+                  :symbol/platform :clj :symbol/analyzer :test
+                  :symbol/scope :scope/top-level :symbol/role :role/definition
+                  :symbol/indexable? true
+                  :source/start-line line :source/start-column 1
+                  :source/end-line line :source/end-column 10})
+        symbols [(symbol "symbol:source" "source" 1)
+                 (symbol "symbol:a" "a" 2)
+                 (symbol "symbol:b" "b" 3)
+                 (symbol "symbol:c" "c" 4)
+                 (symbol "symbol:non-call" "non-call" 5)]
+        unrelated (mapv #(symbol (str "symbol:unrelated-" %)
+                                 (str "unrelated-" %) (+ 10 %))
+                        (range unrelated-count))
+        edge (fn [id kind from to]
+               {:entity/type :entity.type/edge :edge/id id :edge/kind kind
+                :edge/from from :edge/to to :edge/target-text to
+                :edge/resolution :resolution/exact :edge/confidence 1.0
+                :edge/evidence :test-exact})
+        edges [(edge "edge:source-a" :edge.kind/calls
+                     "symbol:source" "symbol:a")
+               (edge "edge:source-b" :edge.kind/calls
+                     "symbol:source" "symbol:b")
+               (edge "edge:a-c" :edge.kind/calls "symbol:a" "symbol:c")
+               (edge "edge:b-c" :edge.kind/calls "symbol:b" "symbol:c")
+               (edge "edge:cycle" :edge.kind/calls "symbol:c" "symbol:source")
+               (edge "edge:contains" :edge.kind/contains
+                     "symbol:source" "symbol:non-call")]]
+    {:project project :file file
+     :entities (vec (concat symbols unrelated edges))}))
+
+(deftest trace-is-call-only-cycle-safe-bounded-and-deterministic
+  (let [{:keys [project file entities]} (trace-fixture 0)]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-file! graph file entities)
+      (let [complete (query/transitive-callees
+                      graph "symbol:source" {:depth 4 :limit 20})]
+        (is (= [["symbol:a" 1] ["symbol:b" 1] ["symbol:c" 2]]
+               (mapv (juxt :id :depth) (:results complete))))
+        (is (false? (:truncated? complete)))
+        (is (not-any? #{"symbol:non-call"}
+                      (map :id (:results complete)))))
+      (let [depth-limited (query/transitive-callees
+                           graph "symbol:source" {:depth 1 :limit 20})]
+        (is (true? (:truncated? depth-limited)))
+        (is (= {:depth? true :limit? false}
+               (:truncation depth-limited))))
+      (let [result-limited (query/transitive-callees
+                            graph "symbol:source" {:depth 4 :limit 1})]
+        (is (= ["symbol:a"] (mapv :id (:results result-limited))))
+        (is (= {:depth? false :limit? true}
+               (:truncation result-limited))))
+      (is (db-support/completes-while-monitor-held?
+           graph #(query/transitive-callees graph "symbol:source") 2000)))))
+
+(defn trace-operation-counts [unrelated-count]
+  (let [{:keys [project file entities]} (trace-fixture unrelated-count)]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-file! graph file entities)
+      (:counts
+       (db-support/with-operation-counts
+         (query/transitive-callees graph "symbol:source"))))))
+
+(deftest trace-database-cardinality-is-independent-of-disconnected-symbols
+  (let [small (trace-operation-counts 0)
+        large (trace-operation-counts 500)]
+    (is (= small large))
+    (is (<= (:query large) 4))
+    (is (= 1 (:pull large)))
+    (is (zero? (:entity large)))))
+
+(deftest trace-command-validates-options-and-uses-configured-defaults
+  (let [{:keys [project file entities]} (trace-fixture 0)
+        settings (assoc (config/defaults) :context
+                        {:default-max-tokens 8000
+                         :trace-depth 1 :trace-limit 1})]
+    (store/with-store [graph project settings]
+      (store/replace-file! graph file entities)
+      (is (= 1 (:depth (query/trace-command
+                        graph settings ["symbol:source"]))))
+      (is (= 1 (:limit (query/trace-command
+                        graph settings ["symbol:source"]))))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown query trace"
+                            (query/trace-command
+                             graph settings ["symbol:source" "--wat" "1"])))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"positive integer"
+                            (query/trace-command
+                             graph settings ["symbol:source" "--depth" "0"])))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown trace source"
+                            (query/transitive-callees graph "symbol:missing"))))))
+
+(deftest fuzzy-suggestions-evaluate-only-an-indexed-bounded-pool
+  (let [{:keys [project file entities]} (trace-fixture 500)]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-file! graph file entities)
+      (let [calls (atom 0)
+            original query/edit-distance
+            measured
+            (db-support/with-operation-counts
+              (with-redefs [query/edit-distance
+                            (fn [left right]
+                              (swap! calls inc)
+                              (original left right))]
+                (query/symbol-suggestions graph "sourve")))]
+        (is (some #{"trace/source"}
+                  (map :qualified-name (:value measured))))
+        (is (<= @calls 128))
+        (is (= 2 (get-in measured [:counts :query])))
+        (is (zero? (get-in measured [:counts :pull])))))))
+
+(deftest indexed-substring-selection-is-a-lazy-fallback
+  (let [{:keys [project file entities]} (fixture)]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-file! graph file entities)
+      (with-redefs [query/lexical-candidates
+                    (fn [& _]
+                      (throw (ex-info "fallback should not run" {})))]
+        (is (= "sample/caller"
+               (:qualified-name (first (query/symbols graph "caller")))))))))

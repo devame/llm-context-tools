@@ -59,12 +59,10 @@
             (recur)))))))
 
 (defn- document-for-job [worker job]
-  (let [built (with-graph-lock
-                worker
-                #(document/build-symbol
-                  (:graph worker) (:project worker) (:settings worker)
-                  (:semantic.job/file-id job)
-                  (:semantic.job/symbol-id job)))]
+  (let [built (document/build-symbol
+               (:graph worker) (:project worker) (:settings worker)
+               (:semantic.job/file-id job)
+               (:semantic.job/symbol-id job))]
     (when-not (= :ready (:status built))
       (throw
        (ex-info "Source changed before semantic ingestion"
@@ -190,16 +188,14 @@
   the project index before consuming jobs."
   [worker]
   (let [time (now worker)
-        {:keys [recovered planned]}
-        (with-graph-lock
-          worker
-          #(let [recovered (state/recover-expired-leases!
-                            (:graph worker) reconcile/provider time)
-                 planned (reconcile/reconcile! (:graph worker)
-                                               (:project worker)
-                                               (:config worker)
-                                               time)]
-             {:recovered recovered :planned planned}))
+        recovered (with-graph-lock
+                    worker
+                    #(state/recover-expired-leases!
+                      (:graph worker) reconcile/provider time))
+        planned (reconcile/reconcile! (:graph worker)
+                                      (:project worker)
+                                      (:config worker)
+                                      time)
         health (index/index-health (:client worker))]
     (when-not (:ready? health)
       (with-graph-lock

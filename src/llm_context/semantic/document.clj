@@ -261,10 +261,17 @@
 
 (defn- symbols-for-file [db file-eid]
   (let [format (graph-format db)
-        eids (d/q '[:find [?symbol ...]
-                    :in $ ?file
-                    :where [?symbol :symbol/file ?file]]
-                  db file-eid)]
+        eids (if (and format (>= (long format) 3))
+               (d/q '[:find [?symbol ...]
+                      :in $ ?file
+                      :where
+                      [?symbol :symbol/file ?file]
+                      [?symbol :symbol/indexable? true]]
+                    db file-eid)
+               (d/q '[:find [?symbol ...]
+                      :in $ ?file
+                      :where [?symbol :symbol/file ?file]]
+                    db file-eid))]
     (->> eids
          (d/pull-many db '[*])
          (filter #(indexable-symbol? format %))
@@ -274,14 +281,20 @@
 (defn indexable-symbol-ids
   "Return the exact desired semantic symbol identity set for this graph."
   [db]
-  (let [format (graph-format db)
-        eids (d/q '[:find [?symbol ...]
-                    :where [?symbol :symbol/id _]]
-                  db)]
-    (->> (if (seq eids) (d/pull-many db '[*] eids) [])
-         (filter #(indexable-symbol? format %))
-         (map :symbol/id)
-         set)))
+  (let [format (graph-format db)]
+    (if (and format (>= (long format) 3))
+      (set (d/q '[:find [?id ...]
+                  :where
+                  [?symbol :symbol/id ?id]
+                  [?symbol :symbol/indexable? true]]
+                db))
+      (let [eids (d/q '[:find [?symbol ...]
+                        :where [?symbol :symbol/id _]]
+                      db)]
+        (->> (if (seq eids) (d/pull-many db '[*] eids) [])
+             (filter #(indexable-symbol? format %))
+             (map :symbol/id)
+             set)))))
 
 (defn graph-revision
   "Return a deterministic revision of graph inputs that affect semantic
@@ -305,18 +318,25 @@
                   db))]
     (ids/content-hash (pr-str (sort rows)))))
 
-(defn- relationships-for [db symbol-id]
-  (->> (d/q '[:find ?kind ?target
-              :in $ ?symbol-id
-              :where
-              [?symbol :symbol/id ?symbol-id]
-              [?edge :edge/from ?symbol]
-              [?edge :edge/kind ?kind]
-              [?edge :edge/target-text ?target]]
-            db symbol-id)
-       (map (fn [[kind target]] {:kind kind :target target}))
-       (sort-by (juxt :kind :target))
-       vec))
+(defn- relationships-for-symbols [db symbol-ids]
+  (if-not (seq symbol-ids)
+    {}
+    (->> (d/q '[:find ?symbol-id ?kind ?target
+                :in $ [?symbol-id ...]
+                :where
+                [?symbol :symbol/id ?symbol-id]
+                [?edge :edge/from ?symbol]
+                [?edge :edge/kind ?kind]
+                [?edge :edge/target-text ?target]]
+              db (vec symbol-ids))
+         (reduce (fn [result [symbol-id kind target]]
+                   (update result symbol-id (fnil conj [])
+                           {:kind kind :target target}))
+                 {})
+         (into {}
+               (map (fn [[symbol-id relationships]]
+                      [symbol-id
+                       (vec (sort-by (juxt :kind :target) relationships))]))))))
 
 (defn- project-file ^Path [project relative]
   (let [root ^Path (:root project)
@@ -348,13 +368,15 @@
                           :file (:file/path file)}]})))))
 
 (defn- build-selected [db lateon file source-state symbols]
-  (let [results
+  (let [relationships
+        (relationships-for-symbols db (mapv :symbol/id symbols))
+        results
         (mapv
          (fn [symbol]
            (try
-             {:document
+              {:document
               (build lateon symbol file (:source-text source-state)
-                     (relationships-for db (:symbol/id symbol)))}
+                     (get relationships (:symbol/id symbol) []))}
              (catch clojure.lang.ExceptionInfo error
                {:diagnostic
                 {:level :warning

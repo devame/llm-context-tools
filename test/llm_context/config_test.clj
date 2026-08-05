@@ -21,7 +21,20 @@
     (is (= 2048
            (get-in loaded [:semantic :lateon-code :model-document-length])))
     (is (= 120000
-           (get-in loaded [:semantic :lateon-code :startup-timeout-ms])))))
+           (get-in loaded [:semantic :lateon-code :startup-timeout-ms])))
+    (is (= 4 (get-in loaded [:context :trace-depth])))
+    (is (= 200 (get-in loaded [:context :trace-limit])))))
+
+(deftest trace-bounds-must-be-positive
+  (let [context (temp-project)]
+    (spit (str (:config-file context))
+          "{:context {:trace-depth 0 :trace-limit -1}}")
+    (let [error (try (config/load-config context) nil
+                     (catch clojure.lang.ExceptionInfo error error))]
+      (is (= 2 (:exit-code (ex-data error))))
+      (is (= #{":context/:trace-depth must be a positive integer"
+               ":context/:trace-limit must be a positive integer"}
+             (set (:errors (ex-data error))))))))
 
 (deftest user-configuration-deep-merges
   (let [context (temp-project)]

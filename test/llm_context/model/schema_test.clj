@@ -68,6 +68,16 @@
     (is (clojure.string/includes? text "sample edn safe fields"))
     (is (clojure.string/includes? text "input value"))))
 
+(deftest symbol-search-grams-cover-short-and-qualified-substrings
+  (let [grams (schema/symbol-search-grams
+               {:symbol/name "safeFields"
+                :symbol/qualified-name "sample.edn/safe-fields!"})]
+    (is (contains? grams "s"))
+    (is (contains? grams "fi"))
+    (is (contains? grams "saf"))
+    (is (contains? grams "/sa"))
+    (is (not-any? #(> (count %) 3) grams))))
+
 (deftest diagnostic-references-are-not-traversable-edges
   (let [reference {:entity/type :entity.type/reference
                    :reference/id "reference:divide"

@@ -118,7 +118,7 @@ llm-context query find-symbol <name-or-id>
 llm-context query search <natural-language-query> [--explain]
 llm-context query callers <symbol-id>
 llm-context query callees <symbol-id> [--include-external]
-llm-context query trace <symbol-id>
+llm-context query trace <symbol-id> [--depth N] [--limit N]
 llm-context query entry-points
 llm-context query effects
 llm-context query unresolved [--classification unresolved|ambiguous|dynamic|external]
@@ -195,7 +195,8 @@ Use it as a read-only source validation gate.
    :quantization :int8}}
 
  :context {:default-max-tokens 8000
-           :trace-depth 4}}
+           :trace-depth 4
+           :trace-limit 200}}
 ```
 
 Set `:providers []` for a graph-only installation. There is intentionally

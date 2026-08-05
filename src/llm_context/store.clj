@@ -31,11 +31,26 @@
     (:reference/id entity) [:reference/id (:reference/id entity)]
     (:effect/id entity) [:effect/id (:effect/id entity)]))
 
-(defn- existing-eid [db [attribute value]]
-  (d/q '[:find ?entity .
-         :in $ ?attribute ?value
-         :where [?entity ?attribute ?value]]
-       db attribute value))
+(def ^:private canonical-identity-attributes
+  [:file/id :symbol/id :topic/id :edge/id :reference/id :effect/id])
+
+(defn- existing-identity-eids
+  "Resolve a set of canonical identities with at most one indexed query per
+  identity attribute. The returned map is suitable for transaction planning."
+  [db identities]
+  (reduce
+   (fn [result [attribute identities]]
+     (let [values (mapv second identities)]
+       (if-not (seq values)
+         result
+         (into result
+               (map (fn [[value eid]] [[attribute value] eid]))
+               (d/q '[:find ?value ?entity
+                      :in $ ?attribute [?value ...]
+                      :where [?entity ?attribute ?value]]
+                    db attribute values)))))
+   {}
+   (group-by first identities)))
 
 (defn- dependency-order
   "Put every referenced entity before entities that point at it. Datalevin can
@@ -198,38 +213,43 @@
   "Assign explicit entity/temp IDs so references within one transaction never
   create partial lookup-ref placeholders. Identities in force-new are recreated
   after retractEntity rather than reused in the same transaction."
-  [db entities force-new]
-  (let [entities (->> entities
-                      (map schema/with-derived-attributes)
-                      dependency-order
-                      vec)
-        _ (validate-identities! entities)
-        identities (mapv entity-identity entities)
-        db-ids (into {}
-                     (map-indexed
-                      (fn [index ident]
-                        [ident (or (when-not (contains? force-new ident)
-                                     (existing-eid db ident))
-                                   (- (inc index)))])
-                      identities))
-        ref (fn [attribute value]
-              (or (get db-ids [attribute value]) [attribute value]))]
-    (mapv (fn [entity]
-            (cond-> (assoc entity :db/id (get db-ids (entity-identity entity)))
-              (:symbol/file entity) (update :symbol/file #(ref :file/id %))
-              (:edge/from entity) (update :edge/from #(ref :symbol/id %))
-              (:edge/to entity)
-              (update :edge/to
-                      #(ref (if (str/starts-with? % "topic:")
-                              :topic/id :symbol/id) %))
-              (:reference/symbol entity)
-              (update :reference/symbol #(ref :symbol/id %))
-              (:effect/symbol entity) (update :effect/symbol #(ref :symbol/id %))))
-          entities)))
+  ([db entities force-new]
+   (let [identities (remove force-new (map entity-identity entities))]
+     (entities->tx db entities force-new
+                   (existing-identity-eids db identities))))
+  ([db entities force-new existing-eids]
+   (let [entities (->> entities
+                       (map schema/with-derived-attributes)
+                       dependency-order
+                       vec)
+         _ (validate-identities! entities)
+         identities (mapv entity-identity entities)
+         db-ids (into {}
+                      (map-indexed
+                       (fn [index ident]
+                         [ident (or (when-not (contains? force-new ident)
+                                      (get existing-eids ident))
+                                    (- (inc index)))])
+                       identities))
+         ref (fn [attribute value]
+               (or (get db-ids [attribute value]) [attribute value]))]
+     (mapv
+      (fn [entity]
+        (cond-> (assoc entity :db/id (get db-ids (entity-identity entity)))
+          (:symbol/file entity) (update :symbol/file #(ref :file/id %))
+          (:edge/from entity) (update :edge/from #(ref :symbol/id %))
+          (:edge/to entity)
+          (update :edge/to
+                  #(ref (if (str/starts-with? % "topic:")
+                          :topic/id :symbol/id) %))
+          (:reference/symbol entity)
+          (update :reference/symbol #(ref :symbol/id %))
+          (:effect/symbol entity) (update :effect/symbol #(ref :symbol/id %))))
+      entities))))
 
-(defn- backfill-symbol-search-text!
-  "Populate the derived full-text attribute once for databases created before
-  it existed. Missing-attribute detection makes interrupted batches resumable;
+(defn- backfill-symbol-search-index!
+  "Populate derived full-text and character-gram attributes for older
+  databases. Missing-attribute detection makes interrupted batches resumable;
   a version marker keeps normal database opens constant-time."
   [connection]
   (let [db (d/db connection)
@@ -238,35 +258,45 @@
                :where [?meta :llm-context/meta-key "search-index"]
                       [?meta :llm-context/search-schema-version ?version]]
              db)]
-    (when-not (= 1 current-version)
+    (when (or (nil? current-version) (< (long current-version) 2))
       (let [symbols (d/q '[:find ?symbol ?name ?qualified
                            :where [?symbol :symbol/name ?name]
                                   [?symbol :symbol/qualified-name ?qualified]]
                          db)
-            indexed (set (d/q '[:find [?symbol ...]
-                                :where [?symbol :symbol/search-text _]]
-                              db))
+            text-indexed (set (d/q '[:find [?symbol ...]
+                                     :where [?symbol :symbol/search-text _]]
+                                   db))
+            grams-indexed (set (d/q '[:find [?symbol ...]
+                                      :where [?symbol :symbol/search-grams _]]
+                                    db))
             signatures (into {} (d/q '[:find ?symbol ?signature
                                         :where [?symbol :symbol/signature ?signature]]
                                       db))
             docs (into {} (d/q '[:find ?symbol ?doc
                                   :where [?symbol :symbol/doc ?doc]]
                                 db))
-            missing (keep (fn [[symbol name qualified]]
-                            (when-not (contains? indexed symbol)
-                              {:db/id symbol
-                               :symbol/search-text
-                               (schema/symbol-search-text
-                                {:symbol/name name
-                                 :symbol/qualified-name qualified
-                                 :symbol/signature (get signatures symbol)
-                                 :symbol/doc (get docs symbol)})}))
-                          symbols)]
+            missing
+            (keep
+             (fn [[symbol name qualified]]
+               (let [source {:symbol/name name
+                             :symbol/qualified-name qualified
+                             :symbol/signature (get signatures symbol)
+                             :symbol/doc (get docs symbol)}
+                     entity
+                     (cond-> {:db/id symbol}
+                       (not (contains? text-indexed symbol))
+                       (assoc :symbol/search-text
+                              (schema/symbol-search-text source))
+                       (not (contains? grams-indexed symbol))
+                       (assoc :symbol/search-grams
+                              (schema/symbol-search-grams source)))]
+                 (when (< 1 (count entity)) entity)))
+             symbols)]
         (doseq [batch (partition-all 100 missing)]
           (d/transact! connection (vec batch)))
         (d/transact! connection
                      [{:llm-context/meta-key "search-index"
-                       :llm-context/search-schema-version 1}])))))
+                       :llm-context/search-schema-version 2}])))))
 
 (def graph-metadata-key "analysis-format")
 (def ^:private graph-update-analyzer-name "update-in-progress")
@@ -427,59 +457,90 @@
            (map (fn [[edge _target]] [:db/retractEntity edge]) inbound)))))
 
 (defn- dirty-marker-tx [db markers]
-  (mapcat
-   (fn [marker]
-     (let [id (:semantic.dirty/id marker)
-           existing (when id (existing-eid db [:semantic.dirty/id id]))
-           old-hash (when existing
-                      (d/q '[:find ?hash .
-                             :in $ ?entity
-                             :where [?entity :semantic.dirty/file-hash ?hash]]
-                           db existing))]
-       (cond-> []
-         (and old-hash (nil? (:semantic.dirty/file-hash marker)))
-         (conj [:db/retract existing :semantic.dirty/file-hash old-hash])
+  (let [ids (vec (keep :semantic.dirty/id markers))
+        existing
+        (if (seq ids)
+          (into {}
+                (map (fn [entity]
+                       [(:semantic.dirty/id entity) entity]))
+                (let [eids (d/q '[:find [?entity ...]
+                                  :in $ [?id ...]
+                                  :where [?entity :semantic.dirty/id ?id]]
+                                db ids)]
+                  (if (seq eids) (d/pull-many db '[*] eids) [])))
+          {})]
+    (mapcat
+     (fn [marker]
+       (let [current (get existing (:semantic.dirty/id marker))
+             old-hash (:semantic.dirty/file-hash current)]
+         (cond-> []
+           (and old-hash (nil? (:semantic.dirty/file-hash marker)))
+           (conj [:db/retract (:db/id current)
+                  :semantic.dirty/file-hash old-hash])
 
-         true
-         (conj marker))))
-   markers))
+           true
+           (conj marker))))
+     markers)))
 
-(defn- eid-attributes
-  [db eid]
-  (d/q '[:find ?attribute ?value
-         :in $ ?entity
-         :where [?entity ?attribute ?value]]
-       db eid))
+(defn- attributes-by-eid [db eids]
+  (if-not (seq eids)
+    {}
+    (reduce
+     (fn [result [eid attribute value]]
+       (update result eid (fnil conj []) [attribute value]))
+     {}
+     (d/q '[:find ?entity ?attribute ?value
+            :in $ [?entity ...]
+            :where [?entity ?attribute ?value]]
+          db (vec eids)))))
 
 (defn- stale-attribute-tx
   "Map upserts do not retract attributes omitted by a newer canonical entity.
   Explicitly remove those old values while retaining the entity's stable eid."
-  [db entities]
+  [entities existing-eids attributes]
   (mapcat
    (fn [entity]
-     (when-let [eid (existing-eid db (entity-identity entity))]
+     (when-let [eid (get existing-eids (entity-identity entity))]
        (let [desired (schema/with-derived-attributes entity)
              desired-attributes (set (keys desired))]
          (keep (fn [[attribute value]]
-                 (when-not (contains? desired-attributes attribute)
+                 (when (or (not (contains? desired-attributes attribute))
+                           (and (= :symbol/search-grams attribute)
+                                (not (contains?
+                                      (:symbol/search-grams desired)
+                                      value))))
                    [:db/retract eid attribute value]))
-               (eid-attributes db eid)))))
+               (get attributes eid)))))
    entities))
+
+(def ^:private identity-pull
+  (into [:db/id] canonical-identity-attributes))
+
+(defn- replacement-snapshot [db file-id entities]
+  (let [{:keys [owned inbound]} (file-retraction-plan db file-id)
+        identities (mapv entity-identity entities)
+        existing-eids (existing-identity-eids db identities)
+        relevant-eids (set (concat owned (vals existing-eids)))
+        identity-by-eid
+        (if-not (seq owned)
+          {}
+          (into {}
+                (keep (fn [entity]
+                        (when-let [identity (entity-identity entity)]
+                          [(:db/id entity) identity])))
+                (d/pull-many db identity-pull (vec owned))))]
+    {:owned owned
+     :inbound inbound
+     :existing-eids existing-eids
+     :attributes (attributes-by-eid db relevant-eids)
+     :identity-by-eid identity-by-eid}))
 
 (defn- replacement-retraction-tx
   "Retract only file-owned identities absent from the proposed replacement.
   Retained identities are updated in place so Datalevin never sees
   retractEntity and an upsert of the same unique identity in one transaction."
-  [db file-id asserted-identities]
-  (let [{:keys [owned inbound]} (file-retraction-plan db file-id)
-        identity-by-eid
-        (into {}
-              (keep (fn [eid]
-                      (when-let [identity
-                                 (entity-identity (d/pull db '[*] eid))]
-                        [eid identity])))
-              owned)
-        removed-symbol-eids
+  [{:keys [inbound identity-by-eid]} asserted-identities]
+  (let [removed-symbol-eids
         (set
          (keep (fn [[eid identity]]
                  (when (and (= :symbol/id (first identity))
@@ -503,11 +564,14 @@
   [db file entities]
   (let [all-entities (vec (cons file entities))
         asserted-identities (set (map entity-identity all-entities))
+        snapshot (replacement-snapshot db (:file/id file) all-entities)
         retractions
-        (replacement-retraction-tx db (:file/id file)
-                                   asserted-identities)
-        stale-attributes (stale-attribute-tx db all-entities)
-        assertions (entities->tx db all-entities #{})]
+        (replacement-retraction-tx snapshot asserted-identities)
+        stale-attributes
+        (stale-attribute-tx all-entities (:existing-eids snapshot)
+                            (:attributes snapshot))
+        assertions (entities->tx db all-entities #{}
+                                 (:existing-eids snapshot))]
     (vec (concat retractions stale-attributes assertions))))
 
 (defrecord DatalevinStore [connection path]
@@ -594,18 +658,18 @@
   (delete-file! [_ file-id]
     (let [db (d/db connection)
           owned (retract-owned-tx db file-id)
+          file (file-eid db file-id)
           tx (cond-> owned
-               (file-eid db file-id)
-               (conj [:db/retractEntity (file-eid db file-id)]))]
+               file (conj [:db/retractEntity file]))]
       (when (seq tx)
         (d/transact! connection tx))))
 
   (delete-file-and-mark! [_ file-id dirty-markers]
     (let [db (d/db connection)
           owned (retract-owned-tx db file-id)
+          file (file-eid db file-id)
           graph-tx (cond-> owned
-                     (file-eid db file-id)
-                     (conj [:db/retractEntity (file-eid db file-id)]))
+                     file (conj [:db/retractEntity file]))
           marker-tx (dirty-marker-tx db dirty-markers)
           tx (vec (concat graph-tx marker-tx))]
       (when (seq tx)
@@ -643,7 +707,7 @@
     (Files/createDirectories path (make-array java.nio.file.attribute.FileAttribute 0))
     (let [connection (d/get-conn (str path) schema/datalevin-schema)]
       (try
-        (backfill-symbol-search-text! connection)
+        (backfill-symbol-search-index! connection)
         (->DatalevinStore connection path)
         (catch Throwable error
           (d/close connection)

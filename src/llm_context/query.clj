@@ -1,6 +1,8 @@
 (ns llm-context.query
-  (:require [clojure.string :as str]
+  (:require [clojure.set :as set]
+            [clojure.string :as str]
             [llm-context.graph.read :as graph-read]
+            [llm-context.model.schema :as schema]
             [llm-context.semantic.hybrid :as hybrid]
             [llm-context.store :as store]))
 
@@ -34,17 +36,64 @@
      :ambiguous (get references :ambiguous 0)
      :unresolved (get references :unresolved 0)}))
 
+(defn lexical-candidates
+  "Select a bounded identifier candidate pool through the rarest indexed
+  character gram present in the query."
+  [graph term limit]
+  (let [grams (schema/symbol-search-grams
+               {:symbol/name term :symbol/qualified-name term})
+        frequencies
+        (when (seq grams)
+          (store/query
+           graph
+           '[:find ?gram (count ?symbol)
+             :in $ [?gram ...]
+             :where [?symbol :symbol/search-grams ?gram]]
+           [(vec grams)]))
+        rarest (some->> frequencies
+                        (sort-by (juxt second first))
+                        ffirst)]
+    (if-not rarest
+      []
+      (->> (store/query
+            graph
+            (conj
+             '[:find ?id ?name ?qualified ?platform
+               :in $ ?gram
+               :where
+               [?symbol :symbol/search-grams ?gram]
+               [?symbol :symbol/id ?id]
+               [?symbol :symbol/name ?name]
+               [?symbol :symbol/qualified-name ?qualified]
+               [?symbol :symbol/platform ?platform]
+               :order-by [?qualified :asc ?id :asc]
+               :limit]
+             (long limit))
+            [rarest])
+           (map (fn [[id name qualified platform]]
+                  {:id id :name name :qualified-name qualified
+                   :platform platform}))
+           (sort-by
+            (fn [{:keys [name qualified-name]}]
+              [(- (count
+                   (set/intersection
+                    grams
+                    (schema/symbol-search-grams
+                     {:symbol/name name
+                      :symbol/qualified-name qualified-name}))))
+               qualified-name]))
+           vec))))
+
 (defn symbols
   "Find symbols by exact name, case-insensitive substring, or Datalevin
   full-text relevance over identifiers, signatures, and documentation."
   ([graph term]
-   (symbols graph term nil))
+   (symbols graph term 128))
   ([graph term limit]
    (let [db (store/database graph)
         needle (str/lower-case term)
-        exact (if limit
-                (graph-read/exact-symbols db term limit)
-                (graph-read/exact-symbols db term))
+        candidate-limit (or limit 128)
+        exact (graph-read/exact-symbols db term candidate-limit)
         fulltext-query
         (cond-> '[:find ?id ?score
                   :in $ ?query
@@ -55,7 +104,7 @@
                    [[?symbol ?attribute ?value ?score]]]
                   [?symbol :symbol/id ?id]
                   :order-by [?score :desc ?id :asc]]
-          limit (conj :limit (long limit)))
+          true (conj :limit (long candidate-limit)))
         fulltext-rows
         (try
           (store/query graph fulltext-query [term])
@@ -72,17 +121,19 @@
         fulltext-ids (->> fulltext-scores
                           (sort-by (fn [[id score]] [(- score) id]))
                           (map first))
-        substring-ids (try
-                        (if limit
-                          (graph-read/substring-symbol-ids db needle limit)
-                          (graph-read/substring-symbol-ids db needle))
-                        (catch Exception _ []))
+        primary-ids (distinct (concat (map :id exact) fulltext-ids))
+        substring-ids
+        (when-not (seq primary-ids)
+          (->> (lexical-candidates graph term candidate-limit)
+               (keep (fn [{:keys [id name qualified-name]}]
+                       (when (or (str/includes? (str/lower-case name) needle)
+                                 (str/includes?
+                                  (str/lower-case qualified-name) needle))
+                         id)))))
         exact-ids (set (map :id exact))
         substring-set (set substring-ids)
-        candidate-ids (cond->> (distinct (concat (map :id exact)
-                                                 fulltext-ids
-                                                 substring-ids))
-                        limit (take limit))
+        candidate-ids (take candidate-limit
+                            (concat primary-ids substring-ids))
         candidates (graph-read/symbols-by-ids db candidate-ids)]
     (->> candidate-ids
          (keep (fn [id]
@@ -100,8 +151,8 @@
          (mapv #(dissoc % ::exact? ::substring? ::score))))))
 
 (defn edit-distance
-  "Small allocation-bounded Levenshtein distance used inside Datalevin query
-  predicates for missing-symbol suggestions."
+  "Small allocation-bounded Levenshtein distance used only after indexed
+  candidate selection for missing-symbol suggestions."
   [left right]
   (let [left (str/lower-case (str left))
         right (str/lower-case (str right))]
@@ -123,23 +174,15 @@
 
 (defn symbol-suggestions [graph term]
   (let [maximum (max 2 (min 5 (quot (inc (count term)) 3)))]
-    (->> (store/query
-          graph
-          '[:find ?distance ?id ?qualified ?platform
-            :in $ ?term ?maximum
-            :where
-            [?symbol :symbol/id ?id]
-            [?symbol :symbol/name ?name]
-            [?symbol :symbol/qualified-name ?qualified]
-            [?symbol :symbol/platform ?platform]
-            [(llm-context.query/edit-distance ?term ?name) ?distance]
-            [(<= ?distance ?maximum)]
-            :order-by [?distance :asc ?qualified :asc]
-            :limit 8]
-          [term maximum])
-         (mapv (fn [[distance id qualified platform]]
-                 {:id id :qualified-name qualified :platform platform
-                  :edit-distance distance})))))
+    (->> (lexical-candidates graph term 128)
+         (keep (fn [{:keys [id name qualified-name platform]}]
+                 (let [distance (edit-distance term name)]
+                   (when (<= distance maximum)
+                     {:id id :qualified-name qualified-name
+                      :platform platform :edit-distance distance}))))
+         (sort-by (juxt :edit-distance :qualified-name :id))
+         (take 8)
+         vec)))
 
 (defn find-symbol [graph term]
   (let [matches (symbols graph term)]
@@ -394,26 +437,99 @@
        (get topic-command-kinds subcommand)
        (assoc :edge-kind (get topic-command-kinds subcommand))))))
 
-(def reachability-rules
-  '[[(reachable ?from ?to)
-     [?edge :edge/from ?from]
-     [?edge :edge/to ?to]]
-    [(reachable ?from ?to)
-     [?edge :edge/from ?from]
-     [?edge :edge/to ?middle]
-     (reachable ?middle ?to)]])
+(defn transitive-callees
+  "Return a bounded, cycle-safe breadth-first trace over exact call edges."
+  ([graph source]
+   (transitive-callees graph source {:depth 4 :limit 200}))
+  ([graph source {:keys [depth limit] :or {depth 4 limit 200}}]
+   (when-not (pos-int? depth)
+     (throw (ex-info "Trace depth must be a positive integer"
+                     {:exit-code 2 :depth depth})))
+   (when-not (pos-int? limit)
+     (throw (ex-info "Trace limit must be a positive integer"
+                     {:exit-code 2 :limit limit})))
+   (let [db (store/database graph)]
+     (when-not (graph-read/symbol-by-id db source)
+       (throw (ex-info (str "Unknown trace source: " source)
+                       {:exit-code 2 :source source})))
+     (let [finish
+           (fn [results depth-truncated? limit-truncated?]
+             {:source source
+              :depth depth
+              :limit limit
+              :results (vec (sort-by (juxt :depth :name :id) results))
+              :truncated? (or depth-truncated? limit-truncated?)
+              :truncation {:depth? depth-truncated?
+                           :limit? limit-truncated?}})]
+       (loop [frontier [source]
+              visited #{source}
+              level 0
+              results []]
+         (cond
+           (empty? frontier)
+           (finish results false false)
 
-(defn transitive-callees [graph source]
-  (->> (store/query
-        graph
-        '[:find ?id ?name
-          :in $ % ?source-id
-          :where [?source :symbol/id ?source-id]
-                 (reachable ?source ?target)
-                 [?target :symbol/id ?id]
-                 [?target :symbol/qualified-name ?name]]
-        [reachability-rules source])
-       (mapv (fn [[id name]] {:id id :name name}))))
+           (>= level depth)
+           (finish results
+                   (boolean (seq (graph-read/outgoing-call-targets
+                                  db frontier visited 1)))
+                   false)
+
+           :else
+           (let [remaining (- limit (count results))
+                 candidates (graph-read/outgoing-call-targets
+                             db frontier visited (inc remaining))
+                 overflow? (> (count candidates) remaining)
+                 selected (vec (take remaining candidates))
+                 next-depth (inc level)
+                 layer (mapv (fn [{:keys [id qualified-name]}]
+                               {:id id :name qualified-name
+                                :depth next-depth})
+                             selected)
+                 next-frontier (mapv :id selected)
+                 visited (into visited next-frontier)
+                 results (into results layer)]
+             (cond
+               overflow?
+               (finish results false true)
+
+               (= (count results) limit)
+               (let [deeper? (boolean
+                              (seq (graph-read/outgoing-call-targets
+                                    db next-frontier visited 1)))]
+                 (finish results
+                         (and (= next-depth depth) deeper?)
+                         deeper?))
+
+               :else
+               (recur next-frontier visited next-depth results)))))))))
+
+(defn trace-command [graph settings args]
+  (let [source (first args)]
+    (when-not source
+      (throw (ex-info "query trace requires an argument" {:exit-code 2})))
+    (let [options (option-pairs (next args))
+          allowed #{"--depth" "--limit"}]
+      (when-let [unknown (first (remove allowed (keys options)))]
+        (throw (ex-info (str "Unknown query trace option: " unknown)
+                        {:exit-code 2})))
+      (let [parse-positive
+            (fn [option default]
+              (if-let [value (get options option)]
+                (let [parsed (parse-long value)]
+                  (when-not (pos-int? parsed)
+                    (throw (ex-info (str option " must be a positive integer")
+                                    {:exit-code 2 :option option
+                                     :value value})))
+                  parsed)
+                default))]
+        (transitive-callees
+         graph source
+         {:depth (parse-positive "--depth"
+                                 (get-in settings [:context :trace-depth] 4))
+          :limit (parse-positive "--limit"
+                                 (get-in settings [:context :trace-limit]
+                                         200))})))))
 
 (defn entry-points [graph]
   (graph-read/entry-points (store/database graph)))

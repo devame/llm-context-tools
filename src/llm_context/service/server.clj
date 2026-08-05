@@ -45,7 +45,7 @@
                                    (query-search-term args))
     "callers" (query/callers graph (argument))
     "callees" (query/callees-command graph args)
-    "trace" (query/transitive-callees graph (argument))
+    "trace" (query/trace-command graph settings args)
     "entry-points" (query/entry-points graph)
     "effects" (query/effects graph)
     "unresolved" (query/unresolved-command graph args)
@@ -77,31 +77,66 @@
            :timestamp (str (java.time.Instant/now)))))
   (flush))
 
-(defn- analyze! [graph project settings force-full?]
+(defn- with-graph-write [graph generation operation]
   (locking graph
-    (if (and (not force-full?)
-             (= :ready (store/graph-state graph))
-             (incremental/index-present? graph))
-      (incremental/analyze! graph project settings)
-      (full/analyze! graph project settings service-progress!))))
+    (swap! generation inc)
+    (try
+      (operation)
+      (finally
+        (swap! generation inc)))))
 
-(defn- dispatch [project settings graph runtime-state request]
+(defn- analyze! [graph generation project settings force-full?]
+  (with-graph-write
+    graph generation
+    #(if (and (not force-full?)
+              (= :ready (store/graph-state graph))
+              (incremental/index-present? graph))
+       (incremental/analyze! graph project settings)
+       (full/analyze! graph project settings service-progress!))))
+
+(defn- read-consistently
+  "Run a multi-query read without acquiring the graph monitor. A concurrent
+  graph write invalidates the result, which is discarded and retried."
+  [graph generation validate? operation]
+  (loop [attempt 0]
+    (let [before @generation]
+      (when (odd? before)
+        (throw (ex-info "The project graph is being updated; retry shortly"
+                        {:exit-code 1 :type :graph/update-in-progress})))
+      (let [outcome
+            (try
+              (when validate?
+                (store/assert-query-compatible! graph))
+              {:value (operation graph)}
+              (catch Throwable error {:error error}))
+            after @generation]
+        (if (= before after)
+          (if-let [error (:error outcome)]
+            (throw error)
+            (:value outcome))
+          (if (< attempt 2)
+            (recur (inc attempt))
+            (throw
+             (ex-info "The project graph changed repeatedly during the read"
+                      {:exit-code 1 :type :graph/read-retry-exhausted}))))))))
+
+(defn- dispatch [project settings graph generation runtime-state request]
   (let [runtime @runtime-state]
     (case (:op request)
     :ping :pong
-    :analyze (analyze! graph project settings (:full? request))
+    :analyze (analyze! graph generation project settings (:full? request))
     :query
     (if (= "search" (:subcommand request))
       (let [term (query-search-term (:args request))
             semantic-attempt
             (query/semantic-search-attempt (:client runtime) settings term)]
-        (locking graph
-          (store/assert-query-compatible! graph)
-          (query/search-explain-with-attempt
-           graph settings term semantic-attempt)))
-      (locking graph
-        (store/assert-query-compatible! graph)
-        (query-value graph (:client runtime) settings
+        (read-consistently
+         graph generation true
+         #(query/search-explain-with-attempt
+           % settings term semantic-attempt)))
+      (read-consistently
+       graph generation true
+       #(query-value % (:client runtime) settings
                      (:subcommand request) (:args request))))
     :context
     (let [options (:options request)
@@ -110,48 +145,56 @@
             (let [term (:focus options)
                   semantic-attempt
                   (query/semantic-search-attempt
-                   (:client runtime) settings term)]
-              (locking graph
-                (store/assert-query-compatible! graph)
-                (let [search
-                      (query/search-explain-with-attempt
-                       graph settings term semantic-attempt)
-                      resolution
-                      (context/resolve-intent-focus term search)]
-                  (context/build-from-seeds graph options resolution))))
-            (locking graph
-              (store/assert-query-compatible! graph)
-              (context/build graph options)))]
+                   (:client runtime) settings term)
+                  packet
+                  (read-consistently
+                   graph generation true
+                   (fn [view]
+                     (let [search
+                           (query/search-explain-with-attempt
+                            view settings term semantic-attempt)
+                           resolution
+                           (context/resolve-intent-focus term search)]
+                       (context/build-from-seeds view options resolution))))]
+              packet)
+            (read-consistently graph generation true
+                               #(context/build % options)))]
       (if (= :markdown (:format options))
         (context/markdown packet)
         packet))
-    :export (locking graph
-              (store/assert-query-compatible! graph)
-              (export/render graph (:format request)))
-    :semantic-status (locking graph (semantic-status graph runtime))
+    :export (read-consistently graph generation true
+                               #(export/render % (:format request)))
+    :semantic-status (read-consistently graph generation false
+                                        #(semantic-status % runtime))
     :semantic-failures
-    (locking graph
-      (semantic-state/failure-records graph semantic-reconcile/provider))
+    (read-consistently graph generation false
+                       #(semantic-state/failure-records
+                         % semantic-reconcile/provider))
     :semantic-dirty
-    (locking graph
-      (semantic-state/dirty-details graph semantic-reconcile/provider))
+    (read-consistently graph generation false
+                       #(semantic-state/dirty-details
+                         % semantic-reconcile/provider))
     :semantic-retry-failed
-    (locking graph
-      (semantic-reconcile/retry-failed! graph project settings)
-      (semantic-status graph runtime))
+    (with-graph-write
+      graph generation
+      #(do
+         (semantic-reconcile/retry-failed! graph project settings)
+         (semantic-status graph runtime)))
     :semantic-sync
-    (locking graph
+    (do
       ;; An explicit sync is also the operator's repair action for exhausted
-      ;; jobs. A full desired-state pass safely resets failed jobs while
-      ;; leaving already-current indexed symbols unchanged.
-      (semantic-reconcile/mark-full! graph)
+      ;; jobs. Marking is a short mutation; document planning and source reads
+      ;; remain outside the project graph monitor.
+      (with-graph-write graph generation
+                        #(semantic-reconcile/mark-full! graph))
       (semantic-reconcile/reconcile! graph project settings)
-      (semantic-status graph runtime))
+      (read-consistently graph generation false
+                         #(semantic-status % runtime)))
     :stop :stopping
     (throw (ex-info (str "Unknown service operation: " (:op request))
                     {:exit-code 2})))))
 
-(defn- handle! [socket token project settings graph runtime-state]
+(defn- handle! [socket token project settings graph generation runtime-state]
   (with-open [socket socket
               reader (PushbackReader. (java.io.InputStreamReader.
                                        (transport/input-stream socket)))
@@ -163,7 +206,7 @@
             (when-not (= token (:token request))
               (throw (ex-info "Invalid service token" {:exit-code 2})))
             {:ok true :value
-             (dispatch project settings graph runtime-state request)}
+             (dispatch project settings graph generation runtime-state request)}
             (catch Throwable error
               (cond-> {:ok false :error (.getMessage error)
                        :exit-code (or (:exit-code (ex-data error)) 1)}
@@ -233,6 +276,7 @@
           settings (config/load-config project)
           token (str (UUID/randomUUID))
           running (atom true)
+          graph-generation (atom 0)
           semantic-enabled? (semantic-reconcile/enabled? settings)
           runtime-state (atom {:status (if semantic-enabled?
                                          :starting :disabled)
@@ -303,7 +347,8 @@
                     project settings
                     (fn []
                       (try
-                        (let [result (analyze! graph project settings false)]
+                        (let [result (analyze! graph graph-generation
+                                               project settings false)]
                           (println
                            (format
                             "Watched analysis: %d files, %d changed, %d deleted"
@@ -330,7 +375,7 @@
                        ^Runnable
                        (fn []
                          (when (handle! socket token project settings
-                                        graph runtime-state)
+                                        graph graph-generation runtime-state)
                            (reset! running false)
                            (try
                              (.close server)

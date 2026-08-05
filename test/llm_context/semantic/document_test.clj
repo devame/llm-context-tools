@@ -6,7 +6,8 @@
             [llm-context.project :as project]
             [llm-context.semantic.document :as document]
             [llm-context.store :as store]
-            [llm-context.store-test :as fixture])
+            [llm-context.store-test :as fixture]
+            [llm-context.test-support.db :as db-support])
   (:import [java.nio.file Files]))
 
 (def lateon
@@ -160,6 +161,9 @@
       (let [result (document/build-file graph project lateon (:file/id file))]
         (is (= :ready (:status result)))
         (is (= ["symbol:useful"] (mapv :symbol-id (:documents result)))))
+      (is (db-support/completes-while-monitor-held?
+           graph #(document/build-file graph project lateon (:file/id file))
+           2000))
       (spit (str path) "(defn changed [] :new)")
       (let [result (document/build-file graph project lateon (:file/id file))]
         (is (= :source-changed (:status result)))
@@ -171,6 +175,44 @@
       (is (= {:status :deleted :file-id "file:missing"
               :documents [] :diagnostics []}
              (document/build-file graph project lateon "file:missing"))))))
+
+(defn document-build-operation-counts [symbol-count]
+  (let [root (Files/createTempDirectory
+              "llm-context-document-cardinality-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        project (project/context (str root))
+        lines (mapv #(str "(defn item-" % " [] " % ")")
+                    (range symbol-count))
+        source (str/join "\n" lines)
+        path (.resolve root "src/cardinality.clj")
+        file (file "src/cardinality.clj" source :language/clojure)
+        symbols
+        (mapv (fn [index line]
+                (symbol-entity file (str "symbol:item-" index)
+                               (str "item-" index) (inc index) 1
+                               (inc index) (inc (count line))))
+              (range symbol-count) lines)]
+    (Files/createDirectories (.getParent path)
+                             (make-array java.nio.file.attribute.FileAttribute 0))
+    (spit (str path) source)
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-file! graph file symbols)
+      (store/write-graph-metadata!
+       graph {:analyzer-name "fixture" :analyzer-version "1"
+              :janet-catalog-version "1" :semantic-document-version 3
+              :semantic-index-name "fixture"})
+      (:counts
+       (db-support/with-operation-counts
+         (document/build-file graph project lateon (:file/id file)))))))
+
+(deftest file-document-build-has-constant-database-cardinality
+  (let [small (document-build-operation-counts 10)
+        large (document-build-operation-counts 200)]
+    (is (= small large))
+    (is (= 4 (:query large)))
+    (is (= 1 (:pull large)))
+    (is (= 1 (:pull-many large)))
+    (is (zero? (:transact large)))))
 
 (deftest build-file-uses-the-same-replacement-decoding-as-analysis
   (let [root (Files/createTempDirectory
