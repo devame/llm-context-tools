@@ -260,9 +260,24 @@
        distinct
        (str/join "\n")))
 
+(defn symbol-search-grams
+  "Return deterministic one-, two-, and three-character grams for bounded
+  identifier substring and typo candidate selection."
+  [symbol]
+  (->> ((juxt :symbol/name :symbol/qualified-name) symbol)
+       (filter #(and (string? %) (seq %)))
+       (map str/lower-case)
+       (mapcat (fn [value]
+                 (for [width (range 1 (inc (min 3 (count value))))
+                       start (range (inc (- (count value) width)))]
+                   (subs value start (+ start width)))))
+       set))
+
 (defn with-symbol-search-text [entity]
   (if (= :entity.type/symbol (:entity/type entity))
-    (assoc entity :symbol/search-text (symbol-search-text entity))
+    (assoc entity
+           :symbol/search-text (symbol-search-text entity)
+           :symbol/search-grams (symbol-search-grams entity))
     entity))
 
 (defn with-derived-attributes [entity]
@@ -391,6 +406,9 @@
    :symbol/search-text {:db/valueType :db.type/string
                         :db/fulltext true
                         :db.fulltext/domains ["symbols"]}
+   :symbol/search-grams {:db/valueType :db.type/string
+                         :db/cardinality :db.cardinality/many
+                         :db/index true}
 
    :edge/id {:db/valueType :db.type/string
              :db/unique :db.unique/identity}

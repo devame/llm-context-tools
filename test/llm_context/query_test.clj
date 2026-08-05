@@ -205,3 +205,32 @@
                              graph settings ["symbol:source" "--depth" "0"])))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown trace source"
                             (query/transitive-callees graph "symbol:missing"))))))
+
+(deftest fuzzy-suggestions-evaluate-only-an-indexed-bounded-pool
+  (let [{:keys [project file entities]} (trace-fixture 500)]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-file! graph file entities)
+      (let [calls (atom 0)
+            original query/edit-distance
+            measured
+            (db-support/with-operation-counts
+              (with-redefs [query/edit-distance
+                            (fn [left right]
+                              (swap! calls inc)
+                              (original left right))]
+                (query/symbol-suggestions graph "sourve")))]
+        (is (some #{"trace/source"}
+                  (map :qualified-name (:value measured))))
+        (is (<= @calls 128))
+        (is (= 2 (get-in measured [:counts :query])))
+        (is (zero? (get-in measured [:counts :pull])))))))
+
+(deftest indexed-substring-selection-is-a-lazy-fallback
+  (let [{:keys [project file entities]} (fixture)]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-file! graph file entities)
+      (with-redefs [query/lexical-candidates
+                    (fn [& _]
+                      (throw (ex-info "fallback should not run" {})))]
+        (is (= "sample/caller"
+               (:qualified-name (first (query/symbols graph "caller")))))))))

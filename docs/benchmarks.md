@@ -8,11 +8,14 @@ clojure -M:bench 50
 
 It measures a full exact semantic graph, an unchanged incremental scan, a
 single-file incremental update, a Datalog statistics query, a bounded Markdown
-summary, and a bounded context query. Every non-root fixture function calls the
-root function, deliberately creating a high-degree graph. The benchmark fails
-if incremental analysis does not remain single-file or if context construction
-violates its token-derived symbol ceiling. The fixture consists only of
-Clojure namespaces with exact cross-namespace calls.
+summary, a bounded context query, bounded call tracing and fuzzy suggestions,
+semantic document construction, and a full semantic reconciliation plan.
+Every non-root fixture function calls the root function, deliberately creating
+a high-degree graph. The benchmark fails if incremental analysis does not
+remain single-file, focused results exceed their bounds, semantic planning is
+not ready, or context construction violates its token-derived symbol ceiling.
+The fixture consists only of Clojure namespaces with exact cross-namespace
+calls.
 
 Run at two sizes when reviewing graph-read changes:
 

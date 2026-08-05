@@ -150,43 +150,6 @@
            (into {})))
     {}))
 
-(defn substring-symbol-ids
-  "Evaluate the compatibility substring predicate inside Datalevin so symbol
-  rows that do not match are never materialized in application memory."
-  ([db needle]
-   (if (empty? needle)
-     []
-     (d/q '[:find [?id ...]
-            :in $ ?needle
-            :where
-            [?symbol :symbol/id ?id]
-            [?symbol :symbol/name ?name]
-            [?symbol :symbol/qualified-name ?qualified]
-            [(clojure.string/lower-case ?name) ?lower-name]
-            [(clojure.string/lower-case ?qualified) ?lower-qualified]
-            (or [(clojure.string/includes? ?lower-name ?needle)]
-                [(clojure.string/includes? ?lower-qualified ?needle)])]
-          db needle)))
-  ([db needle limit]
-   (if (empty? needle)
-     []
-     (d/q
-      (conj
-       '[:find [?id ...]
-         :in $ ?needle
-         :where
-         [?symbol :symbol/id ?id]
-         [?symbol :symbol/name ?name]
-         [?symbol :symbol/qualified-name ?qualified]
-         [(clojure.string/lower-case ?name) ?lower-name]
-         [(clojure.string/lower-case ?qualified) ?lower-qualified]
-         (or [(clojure.string/includes? ?lower-name ?needle)]
-             [(clojure.string/includes? ?lower-qualified ?needle)])
-         :order-by ?id
-         :limit]
-       (long limit))
-      db needle))))
-
 (defn adjacent-exact
   "Return a bounded exact-edge frontier over symbol and topic IDs. Filtering
   uses Datalevin's indexed reverse references so traversal does not repeatedly
@@ -429,61 +392,42 @@
       {:indexed indexed :jobs jobs :dirty-files dirty-files})))
 
 (defn semantic-counts [db provider]
-  (let [symbol-count
+  (let [desired
         (or (d/q '[:find (count ?symbol) .
-                   :where [?symbol :symbol/id _]]
+                   :where
+                   [?symbol :symbol/id _]
+                   [?symbol :symbol/indexable? true]]
                  db)
             0)
-        wrapper-count
-        (or (d/q '[:find (count ?symbol) .
-                   :in $ [?kind ...]
-                   :where [?symbol :symbol/kind ?kind]]
-                 db [:symbol.kind/module :symbol.kind/namespace])
-            0)
-        desired (max 0 (- symbol-count wrapper-count))
-        indexed-present
+        indexed-current
         (or (d/q '[:find (count ?record) .
                    :in $ ?provider
                    :where
                    [?record :semantic.indexed/provider ?provider]
                    [?record :semantic.indexed/symbol-id ?symbol-id]
-                   [?symbol :symbol/id ?symbol-id]]
+                   [?symbol :symbol/id ?symbol-id]
+                   [?symbol :symbol/indexable? true]]
                  db provider)
             0)
-        indexed-wrappers
-        (or (d/q '[:find (count ?record) .
-                   :in $ ?provider [?kind ...]
-                   :where
-                   [?record :semantic.indexed/provider ?provider]
-                   [?record :semantic.indexed/symbol-id ?symbol-id]
-                   [?symbol :symbol/id ?symbol-id]
-                   [?symbol :symbol/kind ?kind]]
-                 db provider
-                 [:symbol.kind/module :symbol.kind/namespace])
-            0)
-        indexed-current (max 0 (- indexed-present indexed-wrappers))
         indexed
         (or (d/q '[:find (count ?record) .
                    :in $ ?provider
                    :where [?record :semantic.indexed/provider ?provider]]
                  db provider)
             0)
-        by-status
-        (into {}
-              (d/q '[:find ?status (count ?job)
-                     :in $ ?provider
-                     :where
-                     [?job :semantic.job/provider ?provider]
-                     [?job :semantic.job/status ?status]]
-                   db provider))
-        oldest
-        (d/q '[:find (min ?updated) .
+        status-rows
+        (d/q '[:find ?status (count ?job) (min ?updated)
                :in $ ?provider
                :where
                [?job :semantic.job/provider ?provider]
-               [?job :semantic.job/status :pending]
+               [?job :semantic.job/status ?status]
                [?job :semantic.job/updated-at ?updated]]
              db provider)
+        by-status (into {} (map (fn [[status count _]] [status count]))
+                        status-rows)
+        oldest (some (fn [[status _ updated]]
+                       (when (= :pending status) updated))
+                     status-rows)
         dirty
         (or (d/q '[:find (count ?marker) .
                    :in $ ?provider

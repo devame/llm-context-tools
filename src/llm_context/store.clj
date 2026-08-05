@@ -31,12 +31,6 @@
     (:reference/id entity) [:reference/id (:reference/id entity)]
     (:effect/id entity) [:effect/id (:effect/id entity)]))
 
-(defn- existing-eid [db [attribute value]]
-  (d/q '[:find ?entity .
-         :in $ ?attribute ?value
-         :where [?entity ?attribute ?value]]
-       db attribute value))
-
 (def ^:private canonical-identity-attributes
   [:file/id :symbol/id :topic/id :edge/id :reference/id :effect/id])
 
@@ -253,9 +247,9 @@
           (:effect/symbol entity) (update :effect/symbol #(ref :symbol/id %))))
       entities))))
 
-(defn- backfill-symbol-search-text!
-  "Populate the derived full-text attribute once for databases created before
-  it existed. Missing-attribute detection makes interrupted batches resumable;
+(defn- backfill-symbol-search-index!
+  "Populate derived full-text and character-gram attributes for older
+  databases. Missing-attribute detection makes interrupted batches resumable;
   a version marker keeps normal database opens constant-time."
   [connection]
   (let [db (d/db connection)
@@ -264,35 +258,45 @@
                :where [?meta :llm-context/meta-key "search-index"]
                       [?meta :llm-context/search-schema-version ?version]]
              db)]
-    (when-not (= 1 current-version)
+    (when (or (nil? current-version) (< (long current-version) 2))
       (let [symbols (d/q '[:find ?symbol ?name ?qualified
                            :where [?symbol :symbol/name ?name]
                                   [?symbol :symbol/qualified-name ?qualified]]
                          db)
-            indexed (set (d/q '[:find [?symbol ...]
-                                :where [?symbol :symbol/search-text _]]
-                              db))
+            text-indexed (set (d/q '[:find [?symbol ...]
+                                     :where [?symbol :symbol/search-text _]]
+                                   db))
+            grams-indexed (set (d/q '[:find [?symbol ...]
+                                      :where [?symbol :symbol/search-grams _]]
+                                    db))
             signatures (into {} (d/q '[:find ?symbol ?signature
                                         :where [?symbol :symbol/signature ?signature]]
                                       db))
             docs (into {} (d/q '[:find ?symbol ?doc
                                   :where [?symbol :symbol/doc ?doc]]
                                 db))
-            missing (keep (fn [[symbol name qualified]]
-                            (when-not (contains? indexed symbol)
-                              {:db/id symbol
-                               :symbol/search-text
-                               (schema/symbol-search-text
-                                {:symbol/name name
-                                 :symbol/qualified-name qualified
-                                 :symbol/signature (get signatures symbol)
-                                 :symbol/doc (get docs symbol)})}))
-                          symbols)]
+            missing
+            (keep
+             (fn [[symbol name qualified]]
+               (let [source {:symbol/name name
+                             :symbol/qualified-name qualified
+                             :symbol/signature (get signatures symbol)
+                             :symbol/doc (get docs symbol)}
+                     entity
+                     (cond-> {:db/id symbol}
+                       (not (contains? text-indexed symbol))
+                       (assoc :symbol/search-text
+                              (schema/symbol-search-text source))
+                       (not (contains? grams-indexed symbol))
+                       (assoc :symbol/search-grams
+                              (schema/symbol-search-grams source)))]
+                 (when (< 1 (count entity)) entity)))
+             symbols)]
         (doseq [batch (partition-all 100 missing)]
           (d/transact! connection (vec batch)))
         (d/transact! connection
                      [{:llm-context/meta-key "search-index"
-                       :llm-context/search-schema-version 1}])))))
+                       :llm-context/search-schema-version 2}])))))
 
 (def graph-metadata-key "analysis-format")
 (def ^:private graph-update-analyzer-name "update-in-progress")
@@ -500,7 +504,11 @@
        (let [desired (schema/with-derived-attributes entity)
              desired-attributes (set (keys desired))]
          (keep (fn [[attribute value]]
-                 (when-not (contains? desired-attributes attribute)
+                 (when (or (not (contains? desired-attributes attribute))
+                           (and (= :symbol/search-grams attribute)
+                                (not (contains?
+                                      (:symbol/search-grams desired)
+                                      value))))
                    [:db/retract eid attribute value]))
                (get attributes eid)))))
    entities))
@@ -699,7 +707,7 @@
     (Files/createDirectories path (make-array java.nio.file.attribute.FileAttribute 0))
     (let [connection (d/get-conn (str path) schema/datalevin-schema)]
       (try
-        (backfill-symbol-search-text! connection)
+        (backfill-symbol-search-index! connection)
         (->DatalevinStore connection path)
         (catch Throwable error
           (d/close connection)

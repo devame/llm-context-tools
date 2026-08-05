@@ -90,19 +90,23 @@
       (is (= schema/graph-format-version
              (:llm-context/graph-format (store/graph-metadata graph)))))))
 
-(deftest existing-symbols-are-backfilled-into-full-text-search
+(deftest version-one-search-index-is-resumably-backfilled-with-grams
   (let [project (temp-project)
         file (file-entity "src/legacy.clj" "legacy")
         symbol (assoc (symbol-entity file "sample/legacy-loader" 1)
                       :symbol/doc "Hydrate historical project state")
-        legacy-schema (dissoc schema/datalevin-schema :symbol/search-text)
+        legacy-schema (dissoc schema/datalevin-schema :symbol/search-grams)
         path (.normalize (.resolve (:root project) ".llm-context/db"))]
     (Files/createDirectories path
                              (make-array java.nio.file.attribute.FileAttribute 0))
     (with-open [connection (d/get-conn (str path) legacy-schema)]
       (d/transact! connection
                    [(assoc file :db/id -1)
-                    (assoc symbol :db/id -2 :symbol/file -1)]))
+                    (assoc symbol :db/id -2 :symbol/file -1
+                           :symbol/search-text
+                           (schema/symbol-search-text symbol))
+                    {:llm-context/meta-key "search-index"
+                     :llm-context/search-schema-version 1}]))
     (store/with-store [graph project (config/defaults)]
       (is (= #{["sample/legacy-loader"]}
              (store/query
@@ -114,13 +118,19 @@
                  [[?symbol ?attribute ?value]]]
                 [?symbol :symbol/qualified-name ?qualified]]
               [])))
-      (is (= 1
+      (is (= 2
              (store/query
               graph
               '[:find ?version .
                 :where [?meta :llm-context/meta-key "search-index"]
                        [?meta :llm-context/search-schema-version ?version]]
-              []))))))
+              [])))
+      (is (seq (store/query
+                graph
+                '[:find [?gram ...]
+                  :where
+                  [?symbol :symbol/qualified-name "sample/legacy-loader"]
+                  [?symbol :symbol/search-grams ?gram]] []))))))
 
 (deftest replacement-and-deletion-are-cascading
   (let [project (temp-project)
@@ -215,6 +225,30 @@
               graph
               '[:find ?detail :where [_ :effect/detail ?detail]]
               []))))))
+
+(deftest retained-symbols-retract-obsolete-search-grams
+  (let [project (temp-project)
+        file (file-entity "src/grams.clj" "old")
+        symbol (assoc (symbol-entity file "sample/stable" 1)
+                      :symbol/name "obsolete")
+        changed (file-entity "src/grams.clj" "new")
+        updated (assoc symbol :symbol/name "fresh")]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-file! graph file [symbol])
+      (store/replace-file! graph changed [updated])
+      (is (empty? (store/query
+                   graph
+                   '[:find ?id
+                     :where
+                     [?symbol :symbol/id ?id]
+                     [?symbol :symbol/search-grams "obs"]] [])))
+      (is (= #{[(:symbol/id symbol)]}
+             (store/query
+              graph
+              '[:find ?id
+                :where
+                [?symbol :symbol/id ?id]
+                [?symbol :symbol/search-grams "fre"]] []))))))
 
 (defn replacement-operation-counts [symbol-count]
   (let [project (temp-project)
