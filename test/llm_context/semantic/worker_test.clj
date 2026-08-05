@@ -4,6 +4,7 @@
             [llm-context.analysis.incremental :as incremental]
             [llm-context.config :as config]
             [llm-context.project :as project]
+            [llm-context.semantic.document :as document]
             [llm-context.semantic.fake-index :as fake]
             [llm-context.semantic.index :as index]
             [llm-context.semantic.reconcile :as reconcile]
@@ -15,17 +16,20 @@
 (def settings
   (assoc-in (config/defaults) [:semantic :providers] [:lateon-code]))
 
-(defn fixture []
-  (let [root (Files/createTempDirectory
-              "llm-context-worker-"
-              (make-array java.nio.file.attribute.FileAttribute 0))
-        path (.resolve root "src/app.clj")
-        project (project/context (str root))]
-    (Files/createDirectories (.getParent path)
-                             (make-array java.nio.file.attribute.FileAttribute 0))
-    (spit (str path) "(ns sample.app)\n(defn useful [] :ok)")
-    (full/analyze! project settings)
-    {:project project :path path}))
+(defn fixture
+  ([] (fixture "(ns sample.app)\n(defn useful [] :ok)"))
+  ([source]
+   (let [root (Files/createTempDirectory
+               "llm-context-worker-"
+               (make-array java.nio.file.attribute.FileAttribute 0))
+         path (.resolve root "src/app.clj")
+         project (project/context (str root))]
+     (Files/createDirectories
+      (.getParent path)
+      (make-array java.nio.file.attribute.FileAttribute 0))
+     (spit (str path) source)
+     (full/analyze! project settings)
+     {:project project :path path})))
 
 (defn test-worker [graph project client]
   (worker/create graph project settings client
@@ -58,6 +62,45 @@
                       graph reconcile/provider (System/currentTimeMillis))
                      [:watermark
                       :semantic.watermark/graph-revision])))))))
+
+(deftest worker-builds-each-file-once-and-submits-fresh-documents-together
+  (let [{:keys [project]}
+        (fixture "(ns sample.app)\n(defn useful [] :ok)\n(defn other [] :ok)")
+        client (fake/create)
+        builds (atom 0)
+        original document/build-symbols]
+    (store/with-store [graph project settings]
+      (let [worker (test-worker graph project client)
+            result
+            (with-redefs [document/build-symbols
+                          (fn [& args]
+                            (swap! builds inc)
+                            (apply original args))]
+              (worker/prepare! worker)
+              (worker/process-once! worker))
+            additions (filter #(= :add (:operation %))
+                              (:operations (fake/snapshot client)))]
+        (is (= 2 (:completed result)))
+        (is (= 1 @builds))
+        (is (= 1 (count additions)))
+        (is (= 2 (count (:document-ids (first additions)))))))))
+
+(deftest worker-recovers-leases-that-expire-after-startup
+  (let [{:keys [project]} (fixture)
+        client (fake/create)
+        clock (atom (System/currentTimeMillis))]
+    (store/with-store [graph project settings]
+      (is (= 1 (count (state/lease-jobs!
+                       graph reconcile/provider "stopped-worker"
+                       @clock 10 1))))
+      (swap! clock + 11)
+      (let [worker (worker/create
+                    graph project settings client
+                    {:owner "replacement-worker"
+                     :now-fn #(swap! clock inc)
+                     :sleep-fn (fn [_])})]
+        (is (= 1 (:completed (worker/process-once! worker))))
+        (is (empty? (state/job-records graph reconcile/provider)))))))
 
 (deftest worker-deletes-all-chunks-for-removed-symbol
   (let [{:keys [project path]} (fixture)

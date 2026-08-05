@@ -420,6 +420,22 @@
           (build-selected db lateon file source-state
                           (symbols-for-file db (:db/id file))))))))
 
+(defn build-symbols
+  "Build selected symbol documents while reading and indexing their file once."
+  [graph project lateon file-id symbol-ids]
+  (let [db (store/database graph)
+        file (entity-by db :file/id file-id)
+        wanted (set symbol-ids)]
+    (if-not file
+      {:status :deleted :file-id file-id :documents [] :diagnostics []}
+      (let [source-state (validated-source project file-id file)]
+        (if-not (= :ready (:status source-state))
+          (assoc source-state :documents [])
+          (build-selected
+           db lateon file source-state
+           (filterv #(contains? wanted (:symbol/id %))
+                    (symbols-for-file db (:db/id file)))))))))
+
 (defn build-symbol
   "Build one exact symbol document without materializing its sibling symbols."
   [graph project lateon file-id symbol-id]

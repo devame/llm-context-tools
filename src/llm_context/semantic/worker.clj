@@ -58,26 +58,19 @@
             (sleep! worker (:visibility-poll-ms settings))
             (recur)))))))
 
-(defn- document-for-job [worker job]
-  (let [built (document/build-symbol
+(defn- documents-for-jobs [worker jobs]
+  (let [built (document/build-symbols
                (:graph worker) (:project worker) (:settings worker)
-               (:semantic.job/file-id job)
-               (:semantic.job/symbol-id job))]
+               (:semantic.job/file-id (first jobs))
+               (mapv :semantic.job/symbol-id jobs))]
     (when-not (= :ready (:status built))
       (throw
        (ex-info "Source changed before semantic ingestion"
                 {:type :semantic/source-not-ready
                  :retriable? true
-                 :file-id (:semantic.job/file-id job)
+                 :file-id (:semantic.job/file-id (first jobs))
                  :status (:status built)})))
-    (or (first (filter #(= (:semantic.job/symbol-id job)
-                           (:symbol-id %))
-                       (:documents built)))
-        (throw
-         (ex-info "Semantic symbol no longer exists in its committed file"
-                  {:type :semantic/symbol-missing
-                   :retriable? true
-                   :symbol-id (:semantic.job/symbol-id job)})))))
+    (into {} (map (juxt :symbol-id identity)) (:documents built))))
 
 (defn- remove-visible-symbol! [worker job symbol-id]
   (when (pos? (index/indexed-chunk-count
@@ -85,9 +78,14 @@
     (index/delete-symbols! (:client worker) [symbol-id])
     (await-count! worker job symbol-id nil zero? "deletion")))
 
-(defn- process-upsert! [worker job]
-  (let [desired (document-for-job worker job)
-        expected (:semantic.job/document-hash job)]
+(defn- validate-desired! [job desired]
+  (when-not desired
+    (throw
+     (ex-info "Semantic symbol no longer exists in its committed file"
+              {:type :semantic/symbol-missing
+               :retriable? true
+               :symbol-id (:semantic.job/symbol-id job)})))
+  (let [expected (:semantic.job/document-hash job)]
     (when-not (= expected (:document-hash desired))
       (throw
        (ex-info "Semantic job was superseded by current graph content"
@@ -95,50 +93,37 @@
                  :retriable? true
                  :symbol-id (:semantic.job/symbol-id job)
                  :expected expected
-                 :actual (:document-hash desired)})))
-    ;; NextPlaid additions are append-only. Delete old chunks and wait for
-    ;; visibility before adding replacements so asynchronous queues cannot
-    ;; reorder an upsert into duplicate live documents.
-    (remove-visible-symbol! worker job (:symbol-id desired))
-    (doseq [batch (partition-all (:update-batch-size (:settings worker))
-                                 (:chunks desired))]
-      (when-not
-       (with-graph-lock
-        worker
-        #(state/renew-job-lease!
-          (:graph worker) (:semantic.job/id job) (:owner worker)
-          (now worker) (:lease-ms (:settings worker))))
-        (throw
-         (ex-info "Semantic job lease was superseded"
-                  {:type :semantic/lease-lost :retriable? false
-                   :job-id (:semantic.job/id job)})))
-      (index/add-documents! (:client worker) (vec batch)))
-    (await-count! worker job (:symbol-id desired) (:document-hash desired)
-                  #(= (count (:chunks desired)) %)
-                  "upsert visibility")
-    {:provider reconcile/provider
-     :symbol-id (:symbol-id desired)
-     :file-id (:file-id desired)
-     :document-hash (:document-hash desired)
-     :model-revision (:model-revision desired)
-     :document-version (:document-version desired)
-     :chunk-count (count (:chunks desired))
-     :updated-at (now worker)}))
+                 :actual (:document-hash desired)}))))
+  desired)
+
+(defn- renew-lease! [worker job]
+  (when-not
+   (with-graph-lock
+    worker
+    #(state/renew-job-lease!
+      (:graph worker) (:semantic.job/id job) (:owner worker)
+      (now worker) (:lease-ms (:settings worker))))
+    (throw
+     (ex-info "Semantic job lease was superseded"
+              {:type :semantic/lease-lost :retriable? false
+               :job-id (:semantic.job/id job)}))))
+
+(defn- indexed-record [worker desired]
+  {:provider reconcile/provider
+   :symbol-id (:symbol-id desired)
+   :file-id (:file-id desired)
+   :document-hash (:document-hash desired)
+   :model-revision (:model-revision desired)
+   :document-version (:document-version desired)
+   :chunk-count (count (:chunks desired))
+   :updated-at (now worker)})
 
 (defn- process-delete! [worker job]
   (remove-visible-symbol! worker job (:semantic.job/symbol-id job))
   nil)
 
-(defn- process-job! [worker job]
+(defn- complete-job! [worker job indexed]
   (let [operation (:semantic.job/operation job)
-        indexed (case operation
-                  :upsert (process-upsert! worker job)
-                  :delete (process-delete! worker job)
-                  (throw
-                   (ex-info "Unknown semantic job operation"
-                            {:type :semantic/invalid-job
-                             :retriable? false
-                             :operation operation})))
         completed-at (now worker)]
     (if (with-graph-lock
           worker
@@ -150,6 +135,10 @@
              :completed-at completed-at}))
       {:status :completed :operation operation}
       {:status :superseded :operation operation})))
+
+(defn- process-delete-job! [worker job]
+  (process-delete! worker job)
+  (complete-job! worker job nil))
 
 (defn- retry-job! [worker job error]
   (let [settings (:settings worker)
@@ -182,6 +171,62 @@
     {:status (or (:status result) :superseded)
      :operation (:semantic.job/operation job)
      :error error}))
+
+(defn- safely [worker job f]
+  (try
+    (f)
+    (catch Throwable error
+      (retry-job! worker job error))))
+
+(defn- prepare-upsert-group [worker jobs]
+  (try
+    (let [documents (documents-for-jobs worker jobs)]
+      (mapv
+       (fn [job]
+         (safely
+          worker job
+          #(let [desired (validate-desired!
+                          job (get documents (:semantic.job/symbol-id job)))]
+             ;; NextPlaid additions are append-only. Every replacement is
+             ;; fully deleted before any member of this batch is submitted.
+             (remove-visible-symbol! worker job (:symbol-id desired))
+             (renew-lease! worker job)
+             {:job job :desired desired})))
+       jobs))
+    (catch Throwable error
+      (mapv #(retry-job! worker % error) jobs))))
+
+(defn- process-upsert-batch! [worker jobs]
+  (let [prepared-results
+        (mapcat #(prepare-upsert-group worker %)
+                (partition-by
+                 :semantic.job/file-id
+                 (sort-by (juxt :semantic.job/file-id :semantic.job/id) jobs)))
+        prepared (filterv :desired prepared-results)
+        immediate (filterv :status prepared-results)]
+    (if (empty? prepared)
+      immediate
+      (try
+        (doseq [batch (partition-all (:update-batch-size (:settings worker))
+                                     (mapcat (comp :chunks :desired) prepared))]
+          (index/add-documents! (:client worker) (vec batch)))
+        (into immediate
+              (mapv
+               (fn [{:keys [job desired]}]
+                 (safely
+                  worker job
+                  #(do
+                     (await-count!
+                      worker job (:symbol-id desired) (:document-hash desired)
+                      (fn [observed]
+                        (= (count (:chunks desired)) observed))
+                      "upsert visibility")
+                     (complete-job! worker job
+                                    (indexed-record worker desired)))))
+               prepared))
+        (catch Throwable error
+          (into immediate
+                (mapv #(retry-job! worker (:job %) error) prepared)))))))
 
 (defn prepare!
   "Recover state, reconcile graph changes, verify the exact model, and declare
@@ -225,6 +270,10 @@
   [worker]
   (let [time (now worker)
         settings (:settings worker)
+        _ (with-graph-lock
+            worker
+            #(state/recover-expired-leases!
+              (:graph worker) reconcile/provider time))
         jobs (with-graph-lock
                worker
                #(state/lease-jobs!
@@ -238,13 +287,26 @@
           #(state/record-watermark!
             (:graph worker)
             {:provider reconcile/provider :state :indexing}))
-        (let [results
-              (mapv (fn [job]
-                      (try
-                        (process-job! worker job)
-                        (catch Throwable error
-                          (retry-job! worker job error))))
-                    jobs)
+        (let [upserts (filterv #(= :upsert (:semantic.job/operation %)) jobs)
+              deletes (filterv #(= :delete (:semantic.job/operation %)) jobs)
+              invalid (remove #(#{:upsert :delete}
+                                 (:semantic.job/operation %)) jobs)
+              results
+              (into (process-upsert-batch! worker upserts)
+                    (concat
+                     (map (fn [job]
+                            (safely worker job
+                                    #(process-delete-job! worker job)))
+                          deletes)
+                     (map (fn [job]
+                            (retry-job!
+                             worker job
+                             (ex-info "Unknown semantic job operation"
+                                      {:type :semantic/invalid-job
+                                       :retriable? false
+                                       :operation
+                                       (:semantic.job/operation job)})))
+                          invalid)))
               frequencies (frequencies (map :status results))
               summary {:leased (count jobs)
                        :completed (get frequencies :completed 0)
