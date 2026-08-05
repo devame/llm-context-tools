@@ -24,39 +24,47 @@
                       (bit-shift-left 1 shift))]
     (min (:retry-max-ms settings) calculated)))
 
-(defn- await-count!
-  [worker job symbol-id document-hash predicate description]
+(defn- renew-leases! [worker jobs]
   (let [settings (:settings worker)
-        deadline (+ (now worker) (:visibility-timeout-ms settings))]
-    (loop []
-      (let [time (now worker)
-            renewed? (with-graph-lock
-                       worker
-                       #(state/renew-job-lease!
-                         (:graph worker) (:semantic.job/id job)
-                         (:owner worker) time (:lease-ms settings)))
-            _ (when-not renewed?
-                (throw
-                 (ex-info "Semantic job lease was superseded"
-                          {:type :semantic/lease-lost
-                           :retriable? false
-                           :job-id (:semantic.job/id job)})))
+        time (now worker)]
+    (doseq [job jobs]
+      (when-not
+       (with-graph-lock
+        worker
+        #(state/renew-job-lease!
+          (:graph worker) (:semantic.job/id job)
+          (:owner worker) time (:lease-ms settings)))
+        (throw
+         (ex-info "Semantic job lease was superseded"
+                  {:type :semantic/lease-lost
+                   :retriable? false
+                   :job-id (:semantic.job/id job)}))))))
+
+(defn- await-count!
+  ([worker job symbol-id document-hash predicate description]
+   (await-count! worker [job] job symbol-id document-hash
+                 predicate description))
+  ([worker lease-jobs job symbol-id document-hash predicate description]
+   (let [settings (:settings worker)
+         deadline (+ (now worker) (:visibility-timeout-ms settings))]
+     (loop []
+       (let [_ (renew-leases! worker lease-jobs)
             count (index/indexed-chunk-count
                    (:client worker) symbol-id document-hash)]
-        (cond
-          (predicate count) count
-          (>= (now worker) deadline)
-          (throw
-           (ex-info (str "Timed out waiting for NextPlaid " description)
-                    {:type :semantic/visibility-timeout
-                     :retriable? true
-                     :symbol-id symbol-id
-                     :document-hash document-hash
-                     :observed-count count}))
-          :else
-          (do
-            (sleep! worker (:visibility-poll-ms settings))
-            (recur)))))))
+         (cond
+           (predicate count) count
+           (>= (now worker) deadline)
+           (throw
+            (ex-info (str "Timed out waiting for NextPlaid " description)
+                     {:type :semantic/visibility-timeout
+                      :retriable? true
+                      :symbol-id symbol-id
+                      :document-hash document-hash
+                      :observed-count count}))
+           :else
+           (do
+             (sleep! worker (:visibility-poll-ms settings))
+             (recur))))))))
 
 (defn- documents-for-jobs [worker jobs]
   (let [built (document/build-symbols
@@ -97,16 +105,7 @@
   desired)
 
 (defn- renew-lease! [worker job]
-  (when-not
-   (with-graph-lock
-    worker
-    #(state/renew-job-lease!
-      (:graph worker) (:semantic.job/id job) (:owner worker)
-      (now worker) (:lease-ms (:settings worker))))
-    (throw
-     (ex-info "Semantic job lease was superseded"
-              {:type :semantic/lease-lost :retriable? false
-               :job-id (:semantic.job/id job)}))))
+  (renew-leases! worker [job]))
 
 (defn- indexed-record [worker desired]
   {:provider reconcile/provider
@@ -209,21 +208,25 @@
       (try
         (doseq [batch (partition-all (:update-batch-size (:settings worker))
                                      (mapcat (comp :chunks :desired) prepared))]
+          (renew-leases! worker (mapv :job prepared))
           (index/add-documents! (:client worker) (vec batch)))
-        (into immediate
-              (mapv
-               (fn [{:keys [job desired]}]
-                 (safely
-                  worker job
-                  #(do
-                     (await-count!
-                      worker job (:symbol-id desired) (:document-hash desired)
-                      (fn [observed]
-                        (= (count (:chunks desired)) observed))
-                      "upsert visibility")
-                     (complete-job! worker job
-                                    (indexed-record worker desired)))))
-               prepared))
+        (loop [remaining prepared
+               results (vec immediate)]
+          (if-let [{:keys [job desired]} (first remaining)]
+            (let [result
+                  (safely
+                   worker job
+                   #(do
+                      (await-count!
+                       worker (mapv :job remaining) job
+                       (:symbol-id desired) (:document-hash desired)
+                       (fn [observed]
+                         (= (count (:chunks desired)) observed))
+                       "upsert visibility")
+                      (complete-job! worker job
+                                     (indexed-record worker desired))))]
+              (recur (next remaining) (conj results result)))
+            results))
         (catch Throwable error
           (into immediate
                 (mapv #(retry-job! worker (:job %) error) prepared)))))))

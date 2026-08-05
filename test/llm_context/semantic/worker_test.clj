@@ -68,14 +68,20 @@
         (fixture "(ns sample.app)\n(defn useful [] :ok)\n(defn other [] :ok)")
         client (fake/create)
         builds (atom 0)
-        original document/build-symbols]
+        renewals (atom 0)
+        original-build document/build-symbols
+        original-renew state/renew-job-lease!]
     (store/with-store [graph project settings]
       (let [worker (test-worker graph project client)
             result
             (with-redefs [document/build-symbols
                           (fn [& args]
                             (swap! builds inc)
-                            (apply original args))]
+                            (apply original-build args))
+                          state/renew-job-lease!
+                          (fn [& args]
+                            (swap! renewals inc)
+                            (apply original-renew args))]
               (worker/prepare! worker)
               (worker/process-once! worker))
             additions (filter #(= :add (:operation %))
@@ -83,7 +89,8 @@
         (is (= 2 (:completed result)))
         (is (= 1 @builds))
         (is (= 1 (count additions)))
-        (is (= 2 (count (:document-ids (first additions)))))))))
+        (is (= 2 (count (:document-ids (first additions)))))
+        (is (<= 7 @renewals))))))
 
 (deftest worker-recovers-leases-that-expire-after-startup
   (let [{:keys [project]} (fixture)
