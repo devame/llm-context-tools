@@ -106,39 +106,4 @@
                 :platform :cljs :file "src/re_frame/router.cljc" :grade 3}]
    :hard-negatives [{:qualified-name "re-frame.router/dispatch-sync"
                      :platform :cljs :file "src/re_frame/router.cljc"}]}
-  {:id :re-frame/router-settle
-   :language :clojurescript :query-type :state-flow :domain :events
-   :query "which router operation reports completion after child work drains?"
-   :relevance [{:qualified-name "re-frame.router/dispatch-and-settle"
-                :platform :cljs :file "src/re_frame/router.cljc" :grade 3}]
-   :hard-negatives [{:qualified-name "re-frame.router/dispatch"
-                     :platform :cljs :file "src/re_frame/router.cljc"}]}
-  {:id :re-frame/execute-interceptors
-   :language :clojurescript :query-type :behavior :domain :interceptors
-   :query "where is the ordered interceptor chain applied in both directions?"
-   :relevance [{:qualified-name "re-frame.interceptor/execute"
-                :platform :cljs :file "src/re_frame/interceptor.cljc" :grade 3}]
-   :hard-negatives [{:qualified-name "re-frame.interceptor/enqueue"
-                     :platform :cljs :file "src/re_frame/interceptor.cljc"}]}
-  {:id :re-frame/start-trace
-   :language :clojurescript :query-type :behavior :domain :tracing
-   :query "which function opens a trace span for an operation and its metadata?"
-   :relevance [{:qualified-name "re-frame.trace/start-trace"
-                :platform :cljs :file "src/re_frame/trace.cljc" :grade 3}]
-   :hard-negatives [{:qualified-name "re-frame.trace/assemble-epochs"
-                     :platform :cljs :file "src/re_frame/trace.cljc"}]}
-  {:id :re-frame/assemble-trace-epochs
-   :language :clojurescript :query-type :data-flow :domain :tracing
-   :query "where are trace callback events assembled into ordered epochs?"
-   :relevance [{:qualified-name "re-frame.trace/assemble-epochs"
-                :platform :cljs :file "src/re_frame/trace.cljc" :grade 3}]
-   :hard-negatives [{:qualified-name "re-frame.trace/start-trace"
-                     :platform :cljs :file "src/re_frame/trace.cljc"}]}
-  {:id :re-frame/global-interceptor
-   :language :clojurescript :query-type :registration :domain :interceptors
-   :query "which setting API adds an interceptor to the application-wide chain?"
-   :relevance [{:qualified-name "re-frame.core/reg-global-interceptor"
-                :platform :cljs :file "src/re_frame/core.cljc" :grade 3}]
-   :hard-negatives [{:qualified-name "re-frame.core/clear-global-interceptor"
-                     :platform :cljs :file "src/re_frame/core.cljc"}]}
  ]}

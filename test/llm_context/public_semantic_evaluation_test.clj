@@ -1,5 +1,6 @@
 (ns llm-context.public-semantic-evaluation-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.edn :as edn]
+            [clojure.test :refer [deftest is testing]]
             [llm-context.public-semantic-evaluation :as suite]
             [llm-context.retrieval-corpus :as corpus])
   (:import [java.nio.file Files LinkOption]))
@@ -17,6 +18,23 @@
            (reduce + (map #(reduce + (vals (:expected-queries %)))
                           (:repositories manifest)))))
     (is (identical? manifest (suite/validate-manifest! manifest)))))
+
+(deftest checked-in-corpus-files-match-every-manifest-count
+  (let [manifest (suite/read-manifest
+                  "bench/public-semantic-evaluation/manifest.edn")
+        directory (::suite/manifest-directory (meta manifest))
+        counts
+        (for [repository (:repositories manifest)
+              split suite/splits
+              :let [path (#'suite/corpus-path directory repository split)
+                    actual (count (:queries (edn/read-string
+                                             (Files/readString path))))
+                    expected (get-in repository [:expected-queries split])]]
+          (do
+            (is (= expected actual)
+                (str (:id repository) " " split))
+            actual))]
+    (is (= 120 (reduce + counts)))))
 
 (deftest corpus-paths-are-anchored-to-the-manifest-directory
   (let [manifest (suite/read-manifest
