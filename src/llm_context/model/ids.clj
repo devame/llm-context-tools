@@ -3,10 +3,22 @@
   (:import [java.nio.charset StandardCharsets]
            [java.security MessageDigest]))
 
+(def ^:private ^"[C" hex-digits
+  (.toCharArray "0123456789abcdef"))
+
+(defn- hex-string [^bytes bytes]
+  (let [result (char-array (* 2 (alength bytes)))]
+    (dotimes [index (alength bytes)]
+      (let [value (bit-and 0xff (aget bytes index))
+            offset (* 2 index)]
+        (aset-char result offset (aget hex-digits (unsigned-bit-shift-right value 4)))
+        (aset-char result (inc offset) (aget hex-digits (bit-and value 0x0f)))))
+    (String. result)))
+
 (defn sha256 [value]
   (let [digest (.digest (MessageDigest/getInstance "SHA-256")
                         (.getBytes (str value) StandardCharsets/UTF_8))]
-    (apply str (map #(format "%02x" (bit-and % 0xff)) digest))))
+    (hex-string digest)))
 
 (defn content-hash [content]
   (str "sha256:" (sha256 content)))
