@@ -10,7 +10,6 @@
 
 (def ^:private context-depth 4)
 (def ^:private context-max-tokens 2000)
-(def ^:private request-timeout-ms 120000)
 
 (defn- percentile [values fraction]
   (when (seq values)
@@ -29,8 +28,7 @@
         search-response
         (client/request project
                         {:op :query :subcommand "search"
-                         :args [query]}
-                        {:request-timeout request-timeout-ms})
+                         :args [query]})
         search-ms (elapsed-ms search-started)]
     (when-not (:ok search-response)
       (throw (ex-info (or (:error search-response)
@@ -48,8 +46,7 @@
                                      :intent? true
                                      :format :edn
                                      :depth context-depth
-                                     :max-tokens context-max-tokens}}
-                          {:request-timeout request-timeout-ms})
+                                     :max-tokens context-max-tokens}})
           context-ms (elapsed-ms context-started)
           packet (when (:ok context-response) (:value context-response))
           selected (get-in packet [:focus-resolution :selected])
@@ -118,8 +115,7 @@
      :document-version (:document-version lateon)
      :candidate-count (:candidate-count lateon)
      :context-depth context-depth
-     :context-max-tokens context-max-tokens
-     :request-timeout-ms request-timeout-ms}))
+     :context-max-tokens context-max-tokens}))
 
 (defn- benchmark-result [project corpus settings]
   (let [queries (:queries corpus)

@@ -220,6 +220,10 @@
           (is (= {:ok true :value :pong}
                  (client/request project {:op :ping}
                                  {:request-timeout 1000})))
+          (is (= true
+                 (get-in (client/request project {:op :semantic-status}
+                                         {:request-timeout 1000})
+                         [:ok])))
           (deliver release true)
           (is (= 0 (get-in (deref slow 2000 ::timeout)
                            [:value :entities]))))
@@ -227,11 +231,11 @@
                (client/request project {:op :stop})))
         (is (not= ::timeout (deref running 5000 ::timeout)))))))
 
-(deftest graph-reads-wait-for-analysis-activation
+(deftest graph-reads-reject-an-active-write-without-waiting
   (let [graph (Object.)
+        generation (atom 0)
         entered-analysis (promise)
         release-analysis (promise)
-        entered-query (promise)
         runtime-state (atom {})]
     (with-redefs [incremental/index-present? (constantly false)
                   full/analyze!
@@ -240,27 +244,53 @@
                     @release-analysis
                     {:mode :full})
                   store/assert-query-compatible! identity
-                  query/stats
-                  (fn [_]
-                    (deliver entered-query true)
-                    {:entities 0})]
+                  query/stats (constantly {:entities 0})]
       (let [analysis
             (future
-              (#'server/dispatch nil {} graph runtime-state
+              (#'server/dispatch nil {} graph generation runtime-state
                                  {:op :analyze :full? true}))]
         (is (= true (deref entered-analysis 1000 false)))
         (let [read
               (future
-                (#'server/dispatch nil {} graph runtime-state
-                                   {:op :query :subcommand "stats" :args []}))]
-          (is (= ::blocked (deref entered-query 100 ::blocked)))
+                (try
+                  (#'server/dispatch nil {} graph generation runtime-state
+                                     {:op :query :subcommand "stats" :args []})
+                  (catch clojure.lang.ExceptionInfo error
+                    (ex-data error))))]
+          (is (= :graph/update-in-progress
+                 (:type (deref read 1000 ::timeout))))
           (deliver release-analysis true)
-          (is (= {:mode :full} (deref analysis 1000 ::timeout)))
-          (is (= true (deref entered-query 1000 false)))
-          (is (= {:entities 0} (deref read 1000 ::timeout))))))))
+          (is (= {:mode :full} (deref analysis 1000 ::timeout))))))))
+
+(deftest graph-read-discards-work-overlapped-by-a-write
+  (let [graph (Object.)
+        generation (atom 0)
+        entered-read (promise)
+        release-read (promise)
+        calls (atom 0)
+        runtime-state (atom {})]
+    (with-redefs [store/assert-query-compatible! identity
+                  query/stats
+                  (fn [_]
+                    (when (= 1 (swap! calls inc))
+                      (deliver entered-read true)
+                      @release-read)
+                    {:entities @calls})]
+      (let [read (future
+                   (#'server/dispatch nil {} graph generation runtime-state
+                                      {:op :query :subcommand "stats"
+                                       :args []}))]
+        (is (= true (deref entered-read 1000 false)))
+        (is (= :written
+               (#'server/with-graph-write graph generation
+                                          (constantly :written))))
+        (deliver release-read true)
+        (is (= {:entities 2} (deref read 1000 ::timeout)))
+        (is (= 2 @calls))))))
 
 (deftest semantic-retrieval-does-not-hold-the-graph-lock
   (let [graph (Object.)
+        generation (atom 0)
         entered-retrieval (promise)
         release-retrieval (promise)
         acquired-graph (promise)
@@ -275,7 +305,7 @@
                   (fn [& _] {:results []})]
       (let [search
             (future
-              (#'server/dispatch nil {} graph runtime-state
+              (#'server/dispatch nil {} graph generation runtime-state
                                  {:op :query :subcommand "search"
                                   :args ["semantic intent"]}))]
         (is (= true (deref entered-retrieval 1000 false)))
@@ -288,6 +318,7 @@
 
 (deftest intent-context-resolves-a-hybrid-seed-before-traversal
   (let [graph (Object.)
+        generation (atom 0)
         runtime-state (atom {:client :semantic-client})
         seen (atom nil)
         attempt {:status :ok :candidates [:candidate] :latency-ms 4}
@@ -318,7 +349,7 @@
                   store/assert-query-compatible! identity]
       (is (= {:packet/version 3}
              (#'server/dispatch
-              nil {} graph runtime-state
+              nil {} graph generation runtime-state
               {:op :context
                :options {:focus "where is selection handled?"
                          :intent? true :format :edn}})))

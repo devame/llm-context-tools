@@ -116,8 +116,6 @@ quality metrics, slice metrics, latency summaries, and diagnostic counts. When
 `--output` is absent, the existing full standard-output behavior is preserved.
 Every run records the scorer version, retrieval model and revision, document
 version, candidate count, context depth, and context token budget.
-The benchmark also records its service-request timeout so context latency runs
-made with different execution envelopes are not treated as directly comparable.
 
 Benchmark output is descriptive rather than a universal release gate because
 filesystem location, JDK, native architecture, and project language mix have
