@@ -421,23 +421,82 @@
    (if (= :symbol.kind/type (:symbol/kind entity)) 0 1)
    (:symbol/id entity)])
 
+(defn- source-start [entity]
+  [(:source/start-line entity) (:source/start-column entity)])
+
+(defn- source-end [entity]
+  [(:source/end-line entity) (:source/end-column entity)])
+
+(defn- complete-range? [entity]
+  (every? some? (concat (source-start entity) (source-end entity))))
+
+(defn- later-position [left right]
+  (cond
+    (nil? left) right
+    (nil? right) left
+    (pos? (compare left right)) left
+    :else right))
+
+(defn- build-interval-tree
+  "Build a balanced positional index augmented with the latest end position in
+  each subtree. Point lookup visits only branches that can still contain the
+  requested source position."
+  [entities]
+  (let [ordered (vec (sort-by (juxt source-start source-end :symbol/id)
+                              (filter complete-range? entities)))]
+    (letfn [(build [start end]
+              (when (< start end)
+                (let [middle (quot (+ start end) 2)
+                      entity (nth ordered middle)
+                      left (build start middle)
+                      right (build (inc middle) end)]
+                  {:entity entity
+                   :left left
+                   :right right
+                   :max-end (reduce later-position
+                                    (source-end entity)
+                                    (keep :max-end [left right]))})))]
+      (build 0 (count ordered)))))
+
+(defn- interval-matches [tree position stats]
+  (letfn [(visit [node result]
+            (if-not node
+              result
+              (let [_ (when stats
+                        (swap! stats update :positional-candidates-examined
+                               (fnil inc 0)))
+                    {:keys [entity left right]} node
+                    start (source-start entity)
+                    end (source-end entity)
+                    result
+                    (if (and left (pos? (compare (:max-end left) position)))
+                      (visit left result)
+                      result)
+                    result (if (and (not (pos? (compare start position)))
+                                    (pos? (compare end position)))
+                             (conj result entity)
+                             result)]
+                (if (and right (not (pos? (compare start position))))
+                  (visit right result)
+                  result))))]
+    (visit tree [])))
+
+(defn- positional-index [symbols]
+  (into {}
+        (map (fn [[key entities]] [key (build-interval-tree entities)]))
+        (group-by (juxt :symbol/file :symbol/platform) symbols)))
+
 (defn- local-reference
-  [symbols namespaces files-by-path record]
+  [owners namespaces-by-file-platform files-by-path record stats]
   (let [platform (:platform record)
-        owner (->> symbols
-                   (filter #(and (= platform (:symbol/platform %))
-                                 (= (str "file:" (:filename record))
-                                    (:symbol/file %))
-                                 (contains-position?
-                                  % (:row record) (:col record))))
+        file-id (str "file:" (:filename record))
+        _ (when stats (swap! stats update :ownership-lookups (fnil inc 0)))
+        owner (->> (interval-matches (get owners [file-id platform])
+                                     [(:row record) (:col record)] stats)
                    (sort-by owner-order)
                    first)
         owner (or owner
-                  (some #(when (and (= platform (:symbol/platform %))
-                                    (= (str "file:" (:filename record))
-                                       (:symbol/file %)))
-                           %)
-                        namespaces))
+                  (get namespaces-by-file-platform [file-id platform]))
         content (:content (get files-by-path (:filename record)))]
     (when (and owner (local-call? content record))
       (when-let [target (local-name content record)]
@@ -445,22 +504,21 @@
          :edge.kind/calls owner record target :dynamic
          :clj-kondo-local-usage nil)))))
 
-(defn- positional-owner [symbols namespaces platform record]
-  (or (->> symbols
-           (filter #(and (= platform (:symbol/platform %))
-                         (same-record-file? % record)
-                         (contains-position? % (:row record) (:col record))))
-           (sort-by owner-order)
-           first)
-      (some #(when (and (= platform (:symbol/platform %))
-                        (same-record-file? % record))
-               %)
-            namespaces)))
+(defn- positional-owner
+  [owners namespaces-by-file-platform platform record stats]
+  (let [file-id (str "file:" (:filename record))
+        _ (when stats (swap! stats update :ownership-lookups (fnil inc 0)))]
+    (or (->> (interval-matches (get owners [file-id platform])
+                               [(:row record) (:col record)] stats)
+             (sort-by owner-order)
+             first)
+        (get namespaces-by-file-platform [file-id platform]))))
 
 (defn- protocol-relationship
-  [symbols namespaces definitions-by-key platform record]
+  [owners namespaces-by-file-platform definitions-by-key platform record stats]
   (when (located? record)
-    (when-let [owner (positional-owner symbols namespaces platform record)]
+    (when-let [owner (positional-owner owners namespaces-by-file-platform
+                                      platform record stats)]
       (let [target (qualified (:protocol-ns record) (:method-name record))
             candidates
             (filter #(= (str (:protocol-name record))
@@ -485,9 +543,10 @@
                                 :clj-kondo-protocol-impl target))))))
 
 (defn- java-relationship
-  [symbols namespaces platform record evidence]
+  [owners namespaces-by-file-platform platform record evidence stats]
   (when (located? record)
-    (when-let [owner (positional-owner symbols namespaces platform record)]
+    (when-let [owner (positional-owner owners namespaces-by-file-platform
+                                      platform record stats)]
       (let [class-name (some-> (:class record) str)
             member-name (some-> (or (:method-name record)
                                     (:member-name record)
@@ -506,9 +565,8 @@
                                 evidence
                                 (when class-name target)))))))
 
-(defn materialize
-  "Convert a clj-kondo snapshot into file-owned canonical entities."
-  [files snapshot]
+(defn- materialize*
+  [files snapshot stats]
   (let [files (vec files)
         files-by-path (into {} (map (juxt :relative-path identity) files))
         file-entities (into {} (map (fn [file]
@@ -523,15 +581,25 @@
         (effective-definitions
          (vec (expand-platforms (:var-definitions analysis))))
         namespaces
-        (keep (fn [record]
-                (when-let [file (get file-entities (:filename record))]
-                  (namespace-symbol file (:platform record) record)))
+        (into []
+              (keep (fn [record]
+                      (when-let [file (get file-entities (:filename record))]
+                        (namespace-symbol file (:platform record) record))))
               namespace-definitions)
         symbols
-        (keep (fn [record]
-                (when-let [file (get file-entities (:filename record))]
-                  (var-symbol file (:platform record) record)))
+        (into []
+              (keep (fn [record]
+                      (when-let [file (get file-entities (:filename record))]
+                        (var-symbol file (:platform record) record))))
               var-definitions)
+        symbols-by-position (positional-index symbols)
+        namespaces-by-file-platform
+        (into {}
+              (map (fn [entity]
+                     [[(:symbol/file entity) (:symbol/platform entity)] entity]))
+              namespaces)
+        symbol-by-id
+        (into {} (map (juxt :symbol/id identity)) (concat namespaces symbols))
         namespace-by-key
         (reduce (fn [result entity]
                   (update result
@@ -562,28 +630,35 @@
                                         (:platform record) record))
               (distinct (expand-platforms (:namespace-usages analysis))))
         local-links
-        (keep #(local-reference symbols namespaces files-by-path %)
+        (keep #(local-reference symbols-by-position namespaces-by-file-platform
+                                files-by-path % stats)
               (distinct (expand-platforms (:local-usages analysis))))
         protocol-links
         (keep (fn [record]
                 (protocol-relationship
-                 symbols namespaces definitions-by-key
-                 (:platform record) record))
+                 symbols-by-position namespaces-by-file-platform
+                 definitions-by-key (:platform record) record stats))
               (distinct (expand-platforms (:protocol-impls analysis))))
         java-class-links
         (keep (fn [record]
-                (java-relationship symbols namespaces (:platform record)
-                                   record :clj-kondo-java-class-usage))
+                (java-relationship symbols-by-position
+                                   namespaces-by-file-platform
+                                   (:platform record) record
+                                   :clj-kondo-java-class-usage stats))
               (distinct (expand-platforms (:java-class-usages analysis))))
         java-member-links
         (keep (fn [record]
-                (java-relationship symbols namespaces (:platform record)
-                                   record :clj-kondo-java-member-usage))
+                (java-relationship symbols-by-position
+                                   namespaces-by-file-platform
+                                   (:platform record) record
+                                   :clj-kondo-java-member-usage stats))
               (distinct (expand-platforms (:java-member-usages analysis))))
         instance-links
         (keep (fn [record]
-                (java-relationship symbols namespaces (:platform record)
-                                   record :clj-kondo-instance-invocation))
+                (java-relationship symbols-by-position
+                                   namespaces-by-file-platform
+                                   (:platform record) record
+                                   :clj-kondo-instance-invocation stats))
               (distinct (expand-platforms (:instance-invocations analysis))))
         containment-links
         (keep (fn [entity]
@@ -609,8 +684,9 @@
            (or (some-> (:symbol/file entity) (subs 5))
                (let [owner-id (or (:edge/from entity)
                                   (:reference/symbol entity))
-                     owner (some #(when (= owner-id (:symbol/id %)) %) 
-                                 (concat namespaces symbols))]
+                     _ (when stats
+                         (swap! stats update :fact-owner-lookups (fnil inc 0)))
+                     owner (get symbol-by-id owner-id)]
                  (some-> (:symbol/file owner) (subs 5)))))
          facts)
         diagnostics-by-file (group-by :file (:diagnostics snapshot))]
@@ -653,3 +729,29 @@
           :status (if malformed? :malformed :ok)
           :preserve? malformed?}))
      files)))
+
+(defn materialize-with-metrics
+  "Convert a clj-kondo snapshot into file-owned canonical entities and return
+  deterministic operation counts for scale regression checks."
+  [files snapshot]
+  (let [stats (atom {:ownership-lookups 0
+                     :positional-candidates-examined 0
+                     :fact-owner-lookups 0})
+        outputs (materialize* files snapshot stats)]
+    {:outputs outputs
+     :metrics (assoc @stats
+                     :namespace-definitions
+                     (count (get-in snapshot [:analysis :namespace-definitions]))
+                     :var-definitions
+                     (count (get-in snapshot [:analysis :var-definitions]))
+                     :local-usages
+                     (count (get-in snapshot [:analysis :local-usages]))
+                     :var-usages
+                     (count (get-in snapshot [:analysis :var-usages]))
+                     :generated-facts
+                     (reduce + 0 (map (comp count :entities) outputs)))}))
+
+(defn materialize
+  "Convert a clj-kondo snapshot into file-owned canonical entities."
+  [files snapshot]
+  (:outputs (materialize-with-metrics files snapshot)))

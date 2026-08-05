@@ -194,14 +194,19 @@
         janet-outputs (:outputs janet-snapshot)
         materialize-phase
         (run-phase progress :relationship-materialization
-                   #(mapv ir/normalize-output
-                          (concat
-                           (clojure-analysis/materialize
-                            clojure-files clojure-snapshot)
-                           janet-outputs
-                           (map edn-output edn-files)))
-                   output-counts)
-        raw-outputs (:value materialize-phase)
+                   #(let [clojure-result
+                          (clojure-analysis/materialize-with-metrics
+                           clojure-files clojure-snapshot)]
+                      {:outputs
+                       (mapv ir/normalize-output
+                             (concat (:outputs clojure-result)
+                                     janet-outputs
+                                     (map edn-output edn-files)))
+                       :clojure-metrics (:metrics clojure-result)})
+                   (fn [{:keys [outputs clojure-metrics]}]
+                     (merge (output-counts outputs) clojure-metrics)))
+        materialized (:value materialize-phase)
+        raw-outputs (:outputs materialized)
         canonical-phase
         (run-phase progress :canonicalization
                    #(canonicalize-outputs files raw-outputs)
@@ -228,6 +233,7 @@
      :analysis-metrics
      {:timings timings
       :clojure-records (analysis-counts clojure-snapshot)
+      :clojure-materialization (:clojure-metrics materialized)
       :output (output-counts outputs)}
      ;; File-scoped clj-kondo integrity diagnostics live on their output so
      ;; preservation decisions and user reporting share one source of truth.

@@ -68,12 +68,14 @@
                 :name-end-row 2 :name-end-col 8}
         reference
         (#'clojure-analysis/local-reference
-         [owner] [] {"src/sample.cljs" {:content content}} record)]
+         (#'clojure-analysis/positional-index [owner]) {}
+         {"src/sample.cljs" {:content content}} record nil)]
     (is (= "done" (:reference/target-text reference)))
     (is (= :dynamic (:reference/classification reference)))
     (is (nil?
          (#'clojure-analysis/local-reference
-          [owner] [] {"src/sample.cljs" {:content ""}} record)))))
+          (#'clojure-analysis/positional-index [owner]) {}
+          {"src/sample.cljs" {:content ""}} record nil)))))
 
 (deftest cljs-async-callback-with-omitted-kondo-name-remains-valid
   (let [root (Files/createTempDirectory
@@ -356,11 +358,34 @@
                :source/end-line 5 :source/end-column 20}
         reference
         (#'clojure-analysis/local-reference
-         [outer inner] []
+         (#'clojure-analysis/positional-index [outer inner]) {}
          {"src/nested.clj" {:content "\n\n\n    (callback)\n"}}
          {:filename "src/nested.clj" :platform :clj
-          :row 4 :col 6 :end-row 4 :end-col 14 :name 'callback})]
+          :row 4 :col 6 :end-row 4 :end-col 14 :name 'callback}
+         nil)]
     (is (= "symbol:inner" (:reference/symbol reference)))))
+
+(deftest positional-owner-index-does-not-scan-other-files
+  (let [target {:symbol/id "symbol:target"
+                :symbol/file "file:src/target.clj"
+                :symbol/platform :clj
+                :source/start-line 1 :source/start-column 1
+                :source/end-line 10 :source/end-column 1}
+        unrelated
+        (mapv (fn [index]
+                {:symbol/id (str "symbol:unrelated-" index)
+                 :symbol/file (str "file:src/unrelated-" index ".clj")
+                 :symbol/platform :clj
+                 :source/start-line 1 :source/start-column 1
+                 :source/end-line 10 :source/end-column 1})
+              (range 1000))
+        index (#'clojure-analysis/positional-index
+               (into [target] unrelated))
+        stats (atom {:positional-candidates-examined 0})
+        matches (#'clojure-analysis/interval-matches
+                 (get index ["file:src/target.clj" :clj]) [5 1] stats)]
+    (is (= ["symbol:target"] (mapv :symbol/id matches)))
+    (is (= 1 (:positional-candidates-examined @stats)))))
 
 (deftest ambiguous-cross-file-definition-is-not-resolved-by-order
   (let [owner {:symbol/id "symbol:owner" :symbol/platform :clj}
