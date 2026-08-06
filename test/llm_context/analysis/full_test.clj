@@ -28,6 +28,37 @@
            (#'full/persist! :graph {} invalid nil)))
       (is (false? @reset-called?)))))
 
+(deftest full-replacement-preserves-only-compatible-semantic-state
+  (let [settings (config/defaults)
+        analyzers {:clj-kondo {:configuration-fingerprint "config:a"}}
+        active {:llm-context/graph-format 3
+                :llm-context/analyzer-version "2025.10.23"
+                :llm-context/analyzer-configuration-fingerprint "config:a"
+                :llm-context/semantic-fingerprint-version 1
+                :llm-context/janet-catalog-version 1
+                :llm-context/semantic-document-version 3
+                :llm-context/semantic-index-name "llm-context-v3"}
+        reset-count (atom 0)
+        persist! (fn [metadata]
+                   (with-redefs [store/graph-metadata (constantly metadata)
+                                 store/graph-state (constantly :ready)
+                                 store/validate-replacement! (fn [& _])
+                                 store/begin-full-replacement! (fn [& _])
+                                 store/replace-all! (fn [& _])
+                                 store/reset-semantic-state!
+                                 (fn [& _] (swap! reset-count inc))
+                                 llm-context.semantic.reconcile/mark-full!
+                                 (fn [& _])
+                                 store/write-graph-metadata! (fn [& _])]
+                     (#'full/persist! :graph settings [] analyzers nil)))]
+    (with-redefs [llm-context.analysis.clj-kondo/analyzer-version "2025.10.23"
+                  llm-context.analysis.janet/catalog-version 1
+                  llm-context.model.canonical-hash/contract-version 1]
+      (persist! active)
+      (is (zero? @reset-count))
+      (persist! (assoc active :llm-context/semantic-document-version 2))
+      (is (= 1 @reset-count)))))
+
 (deftest failed-graph-replacement-keeps-semantic-state-and-unavailable-marker
   (let [project (project/context
                  (str (Files/createTempDirectory

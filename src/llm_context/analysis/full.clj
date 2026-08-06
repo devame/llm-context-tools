@@ -6,6 +6,7 @@
             [llm-context.analysis.project-analyzer :as project-analyzer]
             [llm-context.model.canonical-hash :as canonical-hash]
             [llm-context.model.ids :as ids]
+            [llm-context.model.schema :as schema]
             [llm-context.query :as query]
             [llm-context.semantic.reconcile :as semantic-reconcile]
             [llm-context.semantic.document :as semantic-document]
@@ -16,6 +17,27 @@
 (def supported-languages
   #{:language/clojure :language/clojurescript :language/clojure-common
     :language/janet :language/edn-data})
+
+(defn- semantic-contract
+  [config analyzers]
+  (let [lateon (get-in config [:semantic :lateon-code])]
+    {:llm-context/graph-format schema/graph-format-version
+     :llm-context/analyzer-version clj-kondo/analyzer-version
+     :llm-context/analyzer-configuration-fingerprint
+     (get-in analyzers [:clj-kondo :configuration-fingerprint])
+     :llm-context/semantic-fingerprint-version canonical-hash/contract-version
+     :llm-context/janet-catalog-version janet/catalog-version
+     :llm-context/semantic-document-version (:document-version lateon)
+     :llm-context/semantic-index-name (:index-name lateon)}))
+
+(defn- compatible-semantic-state?
+  [graph config analyzers]
+  (let [active (store/graph-metadata graph)
+        expected (semantic-contract config analyzers)]
+    (and (= :ready (store/graph-state graph))
+         (every? (fn [[attribute value]]
+                   (= value (get active attribute)))
+                 expected))))
 
 (defn- emit! [progress stage data]
   (when progress
@@ -30,30 +52,36 @@
   ;; new graph appear complete merely because an older index was complete.
   ;; Preflight the entire replacement before changing either state domain.
   (store/validate-replacement! graph entities)
-  (store/begin-full-replacement! graph)
-  (store/replace-all! graph entities
-                      {:batch-size persistence-batch-size
-                       :on-progress
-                       (when progress
-                         #(emit! progress :persist-progress %))})
-  ;; Only reset versioned semantic state after the canonical graph has
-  ;; completely landed. If graph persistence fails, the unavailable marker is
-  ;; durable and the previous semantic recovery records remain intact.
-  (store/reset-semantic-state! graph)
-  (when (semantic-reconcile/enabled? config)
-    (semantic-reconcile/mark-full! graph))
-  (let [lateon (get-in config [:semantic :lateon-code])]
-    (store/write-graph-metadata!
-     graph
-     {:analyzer-name analyzer-name
-      :analyzer-version clj-kondo/analyzer-version
-      :analyzer-configuration-fingerprint
-      (get-in analyzers [:clj-kondo :configuration-fingerprint])
-      :semantic-fingerprint-version canonical-hash/contract-version
-      :janet-catalog-version janet/catalog-version
-      :semantic-document-version (:document-version lateon)
-      :semantic-index-name (:index-name lateon)}))
-  nil))
+  (let [preserve-semantic? (compatible-semantic-state? graph config analyzers)]
+    (store/begin-full-replacement! graph)
+    (store/replace-all! graph entities
+                        {:batch-size persistence-batch-size
+                         :on-progress
+                         (when progress
+                           #(emit! progress :persist-progress %))})
+    ;; Only reset versioned semantic state after the canonical graph has
+    ;; completely landed. If graph persistence fails, the unavailable marker is
+    ;; durable and the previous semantic recovery records remain intact.
+    ;; A forced full graph rebuild is not itself a semantic compatibility
+    ;; boundary. Retain durable document hashes when every producer, document,
+    ;; and index contract is unchanged; full reconciliation below will compare
+    ;; them with the newly committed graph and queue only actual differences.
+    (when-not preserve-semantic?
+      (store/reset-semantic-state! graph))
+    (when (semantic-reconcile/enabled? config)
+      (semantic-reconcile/mark-full! graph))
+    (let [lateon (get-in config [:semantic :lateon-code])]
+      (store/write-graph-metadata!
+       graph
+       {:analyzer-name analyzer-name
+        :analyzer-version clj-kondo/analyzer-version
+        :analyzer-configuration-fingerprint
+        (get-in analyzers [:clj-kondo :configuration-fingerprint])
+        :semantic-fingerprint-version canonical-hash/contract-version
+        :janet-catalog-version janet/catalog-version
+        :semantic-document-version (:document-version lateon)
+        :semantic-index-name (:index-name lateon)}))
+    nil)))
 
 (defn source-inventory [files]
   (mapv (fn [{:keys [relative-path content]}]

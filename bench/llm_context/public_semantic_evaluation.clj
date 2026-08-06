@@ -285,7 +285,7 @@
   (run-and-log! checkout ".llm-context/public-semantic-evaluation/preflight/doctor.edn"
                 :doctor ["doctor"] timeouts)
   (run-and-log! checkout ".llm-context/public-semantic-evaluation/preflight/analyze.edn"
-                :analysis ["analyze" "--full"] timeouts)
+                :analysis ["analyze"] timeouts)
   (run-and-log! checkout ".llm-context/public-semantic-evaluation/preflight/service-start.edn"
                 :service-start ["service" "start"] timeouts)
   (let [stage-timeout (:semantic-sync timeouts)
