@@ -151,6 +151,9 @@
     (not (pos-int? (:update-batch-size lateon)))
     (conj ":semantic/:lateon-code/:update-batch-size must be a positive integer")
 
+    (not (pos-int? (:update-concurrency lateon)))
+    (conj ":semantic/:lateon-code/:update-concurrency must be a positive integer")
+
     (not (pos-int? (:health-timeout-ms lateon)))
     (conj ":semantic/:lateon-code/:health-timeout-ms must be a positive integer")
 

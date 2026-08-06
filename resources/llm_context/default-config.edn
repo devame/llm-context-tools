@@ -37,6 +37,7 @@
    :encoding-batch-size 1
    :model-document-length 2048
    :update-batch-size 32
+   :update-concurrency 4
    :startup-timeout-ms 120000
    :health-timeout-ms 2000
    :update-timeout-ms 120000

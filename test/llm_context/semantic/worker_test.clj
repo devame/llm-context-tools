@@ -52,7 +52,9 @@
         (worker/prepare! worker)
         (is (= {:leased 1 :completed 1 :retried 0
                 :failed 0 :superseded 0}
-               (worker/process-once! worker)))
+               (select-keys
+                (worker/process-once! worker)
+                [:leased :completed :retried :failed :superseded])))
         (is (empty? (state/job-records graph reconcile/provider)))
         (let [indexed (first (state/indexed-records
                               graph reconcile/provider))]
@@ -126,7 +128,49 @@
         (is (= 1 @builds))
         (is (= 1 (count additions)))
         (is (= 2 (count (:document-ids (first additions)))))
-        (is (<= 7 @renewals))))))
+        (is (<= 4 @renewals 6))))))
+
+(deftest worker-keeps-multiple-update-requests-in-flight
+  (let [definitions (apply str (for [index (range 40)]
+                                 (format "(defn f%d [] %d)\n" index index)))
+        {:keys [project]} (fixture (str "(ns sample.app)\n" definitions))
+        base (fake/create)
+        active (atom 0)
+        maximum (atom 0)
+        concurrent
+        (reify index/SemanticIndex
+          (index-health [_] (index/index-health base))
+          (ensure-index! [_] (index/ensure-index! base))
+          (add-documents! [_ documents]
+            (let [current (swap! active inc)]
+              (swap! maximum max current)
+              (try
+                (Thread/sleep 25)
+                (index/add-documents! base documents)
+                (finally
+                  (swap! active dec)))))
+          (delete-symbols! [_ symbols]
+            (index/delete-symbols! base symbols))
+          (indexed-documents [_ symbols]
+            (index/indexed-documents base symbols))
+          (indexed-chunk-count [_ symbol hash]
+            (index/indexed-chunk-count base symbol hash))
+          (search-text [_ query options]
+            (index/search-text base query options))
+          (close-index! [_] nil))
+        concurrent-settings
+        (-> settings
+            (assoc-in [:semantic :lateon-code :update-batch-size] 10)
+            (assoc-in [:semantic :lateon-code :update-concurrency] 4))]
+    (store/with-store [graph project concurrent-settings]
+      (let [semantic-worker
+            (worker/create graph project concurrent-settings concurrent
+                           {:owner "concurrency-worker"})]
+        (worker/prepare! semantic-worker)
+        (let [result (worker/process-once! semantic-worker)]
+          (is (= 40 (:completed result)))
+          (is (= 4 (:upload-batches result)))
+          (is (<= 2 @maximum 4)))))))
 
 (deftest worker-recovers-leases-that-expire-after-startup
   (let [{:keys [project]} (fixture)
@@ -202,6 +246,7 @@
             (index/add-documents! base documents))
           (delete-symbols! [_ symbols]
             (index/delete-symbols! base symbols))
+          (indexed-documents [_ _] [])
           (indexed-chunk-count [_ _ _] 0)
           (search-text [_ query options]
             (index/search-text base query options))
@@ -233,6 +278,7 @@
             (throw (ex-info "invalid model input"
                             {:retriable? false})))
           (delete-symbols! [_ _] nil)
+          (indexed-documents [_ _] [])
           (indexed-chunk-count [_ _ _] 0)
           (search-text [_ _ _] [])
           (close-index! [_] nil))]

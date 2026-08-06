@@ -177,8 +177,8 @@ The default model is `lightonai/LateOn-Code` at immutable revision
 default retrieval and ingestion settings reflect the repository benchmark:
 
 - pool factor 2;
-- one encoding session and batch size 1;
-- update batches of 10 documents;
+- four encoding sessions with per-session batch size 1;
+- four concurrent update requests of up to 32 chunks each;
 - 8 IVF probes;
 - centroid score threshold disabled;
 - 4096 full-score candidates;

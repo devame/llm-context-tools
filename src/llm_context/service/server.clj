@@ -54,7 +54,7 @@
 (defn- semantic-status [graph runtime-state]
   (let [runtime (select-keys runtime-state
                              [:status :reason :detail :endpoint :log-path
-                              :worker-status :worker-detail])]
+                              :worker-status :worker-detail :worker-progress])]
     (let [summary (semantic-state/semantic-summary
                    graph semantic-reconcile/provider
                    (System/currentTimeMillis))
@@ -366,7 +366,10 @@
                       (let [worker
                             (semantic-worker/create
                              graph project settings
-                             (:client @runtime-state))]
+                             (:client @runtime-state)
+                             {:progress-fn
+                              #(swap! runtime-state assoc
+                                      :worker-progress %)})]
                         (reset! worker-state worker)
                         (swap! runtime-state assoc :worker-status :running)
                         (try

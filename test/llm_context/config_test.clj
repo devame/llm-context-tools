@@ -20,6 +20,8 @@
            (get-in loaded [:semantic :lateon-code :next-plaid-command])))
     (is (= 2048
            (get-in loaded [:semantic :lateon-code :model-document-length])))
+    (is (= 4
+           (get-in loaded [:semantic :lateon-code :update-concurrency])))
     (is (= 120000
            (get-in loaded [:semantic :lateon-code :startup-timeout-ms])))
     (is (= 4 (get-in loaded [:context :trace-depth])))

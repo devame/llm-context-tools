@@ -6,7 +6,9 @@
             [llm-context.semantic.reconcile :as reconcile]
             [llm-context.semantic.state :as state]
             [llm-context.store :as store])
-  (:import [java.util UUID]))
+  (:import [java.util UUID]
+           [java.util.concurrent Callable ExecutionException Executors
+            TimeUnit]))
 
 (defn- now [worker]
   ((:now-fn worker)))
@@ -305,14 +307,80 @@
           worker job
           #(let [desired (validate-desired!
                           job (get documents (:semantic.job/symbol-id job)))]
-             ;; NextPlaid additions are append-only. Every replacement is
-             ;; fully deleted before any member of this batch is submitted.
-             (remove-visible-symbol! worker job (:symbol-id desired))
              (renew-lease! worker job)
              {:job job :desired desired})))
        jobs))
     (catch Throwable error
       (mapv #(retry-job! worker % error) jobs))))
+
+(def ^:private visible-attributes
+  [:id :symbol-id :file-id :document-hash :model-revision
+   :document-version :chunk-index :chunk-count])
+
+(defn- desired-visible?
+  [visible desired]
+  (let [expected (mapv #(select-keys % visible-attributes)
+                       (:chunks desired))
+        actual (mapv #(select-keys % visible-attributes)
+                     (filter (fn [indexed]
+                               (= (:symbol-id desired)
+                                  (:symbol-id indexed)))
+                             visible))]
+    (and (= (count expected) (count actual))
+         (= (set expected) (set actual)))))
+
+(defn- visible-documents
+  [worker prepared]
+  (vec
+   (mapcat
+    #(index/indexed-documents (:client worker) %)
+    (partition-all inventory-batch-size
+                   (mapv (comp :symbol-id :desired) prepared)))))
+
+(defn- await-documents!
+  [worker prepared predicate description]
+  (let [jobs (mapv :job prepared)
+        deadline (+ (now worker) (:visibility-timeout-ms (:settings worker)))]
+    (loop []
+      (renew-leases! worker jobs)
+      (let [visible (visible-documents worker prepared)]
+        (cond
+          (predicate visible) visible
+          (>= (now worker) deadline)
+          (throw
+           (ex-info (str "Timed out waiting for NextPlaid " description)
+                    {:type :semantic/visibility-timeout
+                     :retriable? true
+                     :symbol-count (count prepared)
+                     :visible-chunks (count visible)}))
+          :else
+          (do
+            (sleep! worker (:visibility-poll-ms (:settings worker)))
+            (recur)))))))
+
+(defn- submit-update-batches!
+  [worker jobs batches]
+  (let [threads (min (count batches)
+                     (:update-concurrency (:settings worker)))
+        executor (Executors/newFixedThreadPool threads)]
+    (try
+      (renew-leases! worker jobs)
+      (let [futures
+            (mapv
+             (fn [batch]
+               (.submit executor
+                        ^Callable
+                        (fn []
+                          (index/add-documents! (:client worker) batch))))
+             batches)]
+        (doseq [future futures]
+          (try
+            (.get future)
+            (catch ExecutionException error
+              (throw (.getCause error))))))
+      (finally
+        (.shutdown executor)
+        (.awaitTermination executor 5 TimeUnit/SECONDS)))))
 
 (defn- process-upsert-batch! [worker jobs]
   (let [prepared-results
@@ -323,32 +391,56 @@
         prepared (filterv :desired prepared-results)
         immediate (filterv :status prepared-results)]
     (if (empty? prepared)
-      immediate
+      {:results immediate
+       :metrics {:submitted-documents 0 :submitted-chunks 0
+                 :upload-batches 0 :delete-ms 0
+                 :upload-ms 0 :visibility-ms 0}}
       (try
-        (doseq [batch (partition-all (:update-batch-size (:settings worker))
-                                     (mapcat (comp :chunks :desired) prepared))]
-          (renew-leases! worker (mapv :job prepared))
-          (index/add-documents! (:client worker) (vec batch)))
-        (loop [remaining prepared
-               results (vec immediate)]
-          (if-let [{:keys [job desired]} (first remaining)]
-            (let [result
-                  (safely
-                   worker job
-                   #(do
-                      (await-count!
-                       worker (mapv :job remaining) job
-                       (:symbol-id desired) (:document-hash desired)
-                       (fn [observed]
-                         (= (count (:chunks desired)) observed))
-                       "upsert visibility")
-                      (complete-job! worker job
-                                     (indexed-record worker desired))))]
-              (recur (next remaining) (conj results result)))
-            results))
+        (let [jobs (mapv :job prepared)
+              symbols (mapv (comp :symbol-id :desired) prepared)
+              delete-start (System/nanoTime)
+              existing (visible-documents worker prepared)
+              _ (when (seq existing)
+                  (index/delete-symbols! (:client worker) symbols)
+                  (await-documents! worker prepared empty?
+                                    "batched replacement deletion"))
+              delete-ms (long (/ (- (System/nanoTime) delete-start) 1000000))
+              chunks (vec (mapcat (comp :chunks :desired) prepared))
+              batches (mapv vec
+                            (partition-all
+                             (:update-batch-size (:settings worker)) chunks))
+              upload-start (System/nanoTime)
+              _ (submit-update-batches! worker jobs batches)
+              upload-ms (long (/ (- (System/nanoTime) upload-start) 1000000))
+              visibility-start (System/nanoTime)
+              _ (await-documents!
+                 worker prepared
+                 #(every? (fn [{:keys [desired]}]
+                            (desired-visible? % desired))
+                          prepared)
+                 "batched upsert visibility")
+              visibility-ms
+              (long (/ (- (System/nanoTime) visibility-start) 1000000))
+              results
+              (into immediate
+                    (mapv (fn [{:keys [job desired]}]
+                            (complete-job! worker job
+                                           (indexed-record worker desired)))
+                          prepared))]
+          {:results results
+           :metrics {:submitted-documents (count prepared)
+                     :submitted-chunks (count chunks)
+                     :upload-batches (count batches)
+                     :delete-ms delete-ms
+                     :upload-ms upload-ms
+                     :visibility-ms visibility-ms}})
         (catch Throwable error
-          (into immediate
-                (mapv #(retry-job! worker (:job %) error) prepared)))))))
+          {:results
+           (into immediate
+                 (mapv #(retry-job! worker (:job %) error) prepared))
+           :metrics {:submitted-documents 0 :submitted-chunks 0
+                     :upload-batches 0 :delete-ms 0
+                     :upload-ms 0 :visibility-ms 0}})))))
 
 (defn prepare!
   "Recover state, reconcile graph changes, verify the exact model, and declare
@@ -409,7 +501,9 @@
                worker
                #(state/lease-jobs!
                  (:graph worker) reconcile/provider (:owner worker)
-                 time (:lease-ms settings) (:update-batch-size settings)))]
+                 time (:lease-ms settings)
+                 (* (:update-batch-size settings)
+                    (:update-concurrency settings))))]
     (if (empty? jobs)
       {:leased 0 :completed 0 :retried 0 :failed 0 :superseded 0}
       (do
@@ -422,8 +516,9 @@
               deletes (filterv #(= :delete (:semantic.job/operation %)) jobs)
               invalid (remove #(#{:upsert :delete}
                                  (:semantic.job/operation %)) jobs)
+              upsert-result (process-upsert-batch! worker upserts)
               results
-              (into (process-upsert-batch! worker upserts)
+              (into (:results upsert-result)
                     (concat
                      (map (fn [job]
                             (safely worker job
@@ -439,11 +534,13 @@
                                        (:semantic.job/operation job)})))
                           invalid)))
               frequencies (frequencies (map :status results))
-              summary {:leased (count jobs)
-                       :completed (get frequencies :completed 0)
-                       :retried (get frequencies :pending 0)
-                       :failed (get frequencies :failed 0)
-                       :superseded (get frequencies :superseded 0)}]
+              summary (merge
+                       {:leased (count jobs)
+                        :completed (get frequencies :completed 0)
+                        :retried (get frequencies :pending 0)
+                        :failed (get frequencies :failed 0)
+                        :superseded (get frequencies :superseded 0)}
+                       (:metrics upsert-result))]
           (with-graph-lock
             worker
             #(state/record-watermark!
@@ -464,12 +561,40 @@
                   (store/database (:graph worker)))})))
           summary)))))
 
+(defn- report-progress! [worker result]
+  (when (pos? (:leased result))
+    (let [snapshot
+          (swap! (:progress worker)
+                 (fn [current]
+                   (-> current
+                       (update :leased + (:leased result 0))
+                       (update :completed + (:completed result 0))
+                       (update :retried + (:retried result 0))
+                       (update :failed + (:failed result 0))
+                       (update :submitted-documents +
+                               (:submitted-documents result 0))
+                       (update :submitted-chunks +
+                               (:submitted-chunks result 0))
+                       (update :upload-batches + (:upload-batches result 0))
+                       (update :delete-ms + (:delete-ms result 0))
+                       (update :upload-ms + (:upload-ms result 0))
+                       (update :visibility-ms + (:visibility-ms result 0)))))
+          elapsed-ms (max 1 (- (now worker) (:started-at snapshot)))
+          event (assoc snapshot
+                       :phase :semantic-indexing
+                       :elapsed-ms elapsed-ms
+                       :documents-per-minute
+                       (* 60000.0 (/ (:completed snapshot) elapsed-ms)))]
+      (when-let [progress-fn (:progress-fn worker)]
+        (progress-fn event)))))
+
 (defn run!
   "Prepare and consume jobs until stop! is requested."
   [worker]
   (prepare! worker)
   (while (not @(:stop? worker))
     (let [result (process-once! worker)]
+      (report-progress! worker result)
       (when (zero? (:leased result))
         (sleep! worker (:idle-poll-ms (:settings worker))))))
   :stopped)
@@ -481,13 +606,20 @@
 (defn create
   ([graph project config client]
    (create graph project config client {}))
-  ([graph project config client {:keys [owner now-fn sleep-fn]}]
-   {:graph graph
+  ([graph project config client {:keys [owner now-fn sleep-fn progress-fn]}]
+   (let [now-fn (or now-fn #(System/currentTimeMillis))]
+    {:graph graph
     :project project
     :config config
     :settings (get-in config [:semantic :lateon-code])
     :client client
     :owner (or owner (str (UUID/randomUUID)))
-    :now-fn (or now-fn #(System/currentTimeMillis))
+    :now-fn now-fn
     :sleep-fn (or sleep-fn #(Thread/sleep %))
-    :stop? (atom false)}))
+    :progress-fn progress-fn
+    :progress (atom {:started-at (now-fn)
+                     :leased 0 :completed 0 :retried 0 :failed 0
+                     :submitted-documents 0 :submitted-chunks 0
+                     :upload-batches 0 :delete-ms 0
+                     :upload-ms 0 :visibility-ms 0})
+    :stop? (atom false)})))
