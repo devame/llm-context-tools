@@ -1,5 +1,6 @@
 (ns llm-context.semantic.worker-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is]]
             [llm-context.analysis.full :as full]
             [llm-context.analysis.incremental :as incremental]
             [llm-context.config :as config]
@@ -37,6 +38,12 @@
                   :now-fn #(System/currentTimeMillis)
                   :sleep-fn (fn [_])}))
 
+(defn semantic-documents [client]
+  (->> (:documents (fake/snapshot client))
+       vals
+       (remove #(str/starts-with? (:symbol-id %)
+                                  "semantic-generation:"))))
+
 (deftest worker-upserts-and-commits-verified-indexed-state
   (let [{:keys [project]} (fixture)
         client (fake/create)]
@@ -61,7 +68,29 @@
              (get-in (state/semantic-summary
                       graph reconcile/provider (System/currentTimeMillis))
                      [:watermark
-                      :semantic.watermark/graph-revision])))))))
+                      :semantic.watermark/graph-revision])))
+        (is (string?
+             (get-in (state/semantic-summary
+                      graph reconcile/provider (System/currentTimeMillis))
+                     [:watermark
+                      :semantic.watermark/index-generation])))))))
+
+(deftest missing-index-generation-fails-closed-and-requeues-all-symbols
+  (let [{:keys [project]} (fixture)
+        client (fake/create)]
+    (store/with-store [graph project settings]
+      (let [first-worker (test-worker graph project client)]
+        (worker/prepare! first-worker)
+        (worker/process-once! first-worker)
+        (let [generation
+              (:semantic.watermark/index-generation
+               (state/watermark graph reconcile/provider))]
+          (index/delete-symbols! client [(str "semantic-generation:"
+                                               generation)])
+          (let [prepared (worker/prepare! (test-worker graph project client))]
+            (is (true? (get-in prepared [:generation :invalidated?])))
+            (is (empty? (state/indexed-records graph reconcile/provider)))
+            (is (= 1 (count (state/job-records graph reconcile/provider))))))))))
 
 (deftest worker-builds-each-file-once-and-submits-fresh-documents-together
   (let [{:keys [project]}
@@ -84,8 +113,15 @@
                             (apply original-renew args))]
               (worker/prepare! worker)
               (worker/process-once! worker))
-            additions (filter #(= :add (:operation %))
-                              (:operations (fake/snapshot client)))]
+            additions
+            (->> (:operations (fake/snapshot client))
+                 (filter #(= :add (:operation %)))
+                 (keep (fn [operation]
+                         (let [ids (remove #(str/starts-with?
+                                            % "semantic-generation:")
+                                           (:document-ids operation))]
+                           (when (seq ids)
+                             (assoc operation :document-ids (vec ids)))))))]
         (is (= 2 (:completed result)))
         (is (= 1 @builds))
         (is (= 1 (count additions)))
@@ -128,7 +164,7 @@
       (let [worker (test-worker graph project client)]
         (worker/prepare! worker)
         (worker/process-once! worker)
-        (is (= 1 (count (:documents (fake/snapshot client)))))))
+        (is (= 1 (count (semantic-documents client))))))
     (Files/delete path)
     (incremental/analyze! project settings)
     (store/with-store [graph project settings]
@@ -137,7 +173,7 @@
                (:semantic.job/operation
                 (first (state/job-records graph reconcile/provider)))))
         (is (= 1 (:completed (worker/process-once! worker))))
-        (is (empty? (:documents (fake/snapshot client))))
+        (is (empty? (semantic-documents client)))
         (is (empty? (state/indexed-records graph reconcile/provider)))))))
 
 (deftest source-race-is-retried-without-committing-indexed-state

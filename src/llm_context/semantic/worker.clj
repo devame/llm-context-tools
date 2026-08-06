@@ -14,9 +14,128 @@
 (defn- sleep! [worker milliseconds]
   ((:sleep-fn worker) milliseconds))
 
+(def ^:private inventory-batch-size 128)
+
+(defn- generation-symbol-id [generation]
+  (str "semantic-generation:" generation))
+
+(defn- generation-document [settings generation]
+  (let [symbol-id (generation-symbol-id generation)]
+    {:id (str symbol-id "#chunk-000")
+     :symbol-id symbol-id
+     :file-id "semantic-generation"
+     :document-hash (str "generation:" generation)
+     :model-revision (:model-revision settings)
+     :document-version (:document-version settings)
+     :chunk-index 0
+     :chunk-count 1
+     :text "llm-context semantic index generation marker"}))
+
 (defn- with-graph-lock [worker f]
   (locking (:graph worker)
     (f)))
+
+(defn- matching-indexed-record?
+  [visible indexed]
+  (let [matching
+        (filter #(and (= (:semantic.indexed/symbol-id indexed)
+                         (:symbol-id %))
+                      (= (:semantic.indexed/document-hash indexed)
+                         (:document-hash %))
+                      (= (:semantic.indexed/model-revision indexed)
+                         (:model-revision %))
+                      (= (:semantic.indexed/document-version indexed)
+                         (:document-version %)))
+                visible)]
+    (and (= (:semantic.indexed/chunk-count indexed) (count matching))
+         (= (:semantic.indexed/chunk-count indexed)
+            (count (filter #(= (:semantic.indexed/symbol-id indexed)
+                               (:symbol-id %))
+                           visible))))))
+
+(defn- indexed-inventory-valid?
+  [worker indexed-records]
+  (every?
+   true?
+   (for [batch (partition-all inventory-batch-size indexed-records)
+         :let [visible (index/indexed-documents
+                        (:client worker)
+                        (mapv :semantic.indexed/symbol-id batch))]]
+     (every? #(matching-indexed-record? visible %) batch))))
+
+(defn- generation-visible?
+  [worker generation]
+  (let [expected (generation-document (:settings worker) generation)
+        attributes [:id :symbol-id :file-id :document-hash :model-revision
+                    :document-version :chunk-index :chunk-count]
+        visible (index/indexed-documents
+                 (:client worker) [(:symbol-id expected)])]
+    (and (= 1 (count visible))
+         (= (select-keys expected attributes)
+            (select-keys (first visible) attributes)))))
+
+(defn- await-generation! [worker generation]
+  (let [deadline (+ (now worker)
+                    (get-in worker [:settings :visibility-timeout-ms]))]
+    (loop []
+      (cond
+        (generation-visible? worker generation) true
+        (>= (now worker) deadline)
+        (throw
+         (ex-info "Timed out waiting for NextPlaid generation marker"
+                  {:type :semantic/visibility-timeout
+                   :retriable? true
+                   :index-generation generation}))
+        :else
+        (do
+          (sleep! worker (get-in worker [:settings :visibility-poll-ms]))
+          (recur))))))
+
+(defn- create-generation! [worker]
+  (let [generation (str (UUID/randomUUID))]
+    (index/add-documents!
+     (:client worker) [(generation-document (:settings worker) generation)])
+    (await-generation! worker generation)
+    generation))
+
+(defn- invalidate-semantic-state! [worker]
+  (with-graph-lock
+    worker
+    #(do
+       (store/reset-semantic-state! (:graph worker))
+       (reconcile/mark-full! (:graph worker)))))
+
+(defn- ensure-index-generation!
+  [worker index-state]
+  (let [watermark (state/watermark (:graph worker) reconcile/provider)
+        generation (:semantic.watermark/index-generation watermark)
+        indexed-records (state/indexed-records (:graph worker)
+                                               reconcile/provider)
+        generation-valid? (and generation
+                               (generation-visible? worker generation))
+        inventory-valid? (and (not (:created? index-state))
+                              (or generation-valid?
+                                  (indexed-inventory-valid?
+                                   worker indexed-records)))
+        invalidated? (or (:created? index-state)
+                         (and generation (not generation-valid?))
+                         (and (seq indexed-records) (not inventory-valid?)))]
+    (when invalidated?
+      (invalidate-semantic-state! worker))
+    (let [active-generation (if generation-valid?
+                              generation
+                              (create-generation! worker))]
+      (with-graph-lock
+        worker
+        #(state/record-watermark!
+          (:graph worker)
+          {:provider reconcile/provider
+           :state :idle
+           :index-generation active-generation}))
+      {:generation active-generation
+       :created? (:created? index-state)
+       :inventory-verified? inventory-valid?
+       :invalidated? invalidated?})))
 
 (defn- retry-delay [settings attempts]
   (let [shift (min 20 (max 0 attempts))
@@ -240,10 +359,6 @@
                     worker
                     #(state/recover-expired-leases!
                       (:graph worker) reconcile/provider time))
-        planned (reconcile/reconcile! (:graph worker)
-                                      (:project worker)
-                                      (:config worker)
-                                      time)
         health (index/index-health (:client worker))]
     (when-not (:ready? health)
       (with-graph-lock
@@ -259,14 +374,20 @@
                 {:type :semantic/not-ready
                  :retriable? true
                  :health (dissoc health :raw)})))
-    (index/ensure-index! (:client worker))
+    (let [index-state (index/ensure-index! (:client worker))
+          generation (ensure-index-generation! worker index-state)
+          planned (reconcile/reconcile! (:graph worker)
+                                        (:project worker)
+                                        (:config worker)
+                                        time)]
     (with-graph-lock
       worker
       #(state/record-watermark!
         (:graph worker)
         {:provider reconcile/provider :state :idle
          :graph-revision (:graph-revision planned)}))
-    {:recovered recovered :planned planned :health health}))
+      {:recovered recovered :planned planned :health health
+       :generation generation})))
 
 (defn process-once!
   "Lease and synchronously process one bounded job batch."

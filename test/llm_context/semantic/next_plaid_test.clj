@@ -85,7 +85,7 @@
         client (scripted-client
                 (atom [(response 200 [(:index-name settings)])])
                 requests)]
-    (is (= {:name (:index-name settings)}
+    (is (= {:name (:index-name settings) :created? false}
            (index/ensure-index! client)))
     (is (= 1 (count @requests)))
     (is (= "/indices" (:path (first @requests))))))
@@ -123,6 +123,29 @@
            (get-in (first @requests) [:body :condition])))
     (is (= "llm_symbol_id = ? AND llm_document_hash = ?"
            (get-in (second @requests) [:body :condition])))))
+
+(deftest indexed-documents-fetches-private-metadata-in-one-query
+  (let [requests (atom [])
+        client
+        (scripted-client
+         (atom [(response 200
+                          {:count 1
+                           :metadata
+                           [{:llm_chunk_id "symbol:a#chunk-000"
+                             :llm_symbol_id "symbol:a"
+                             :llm_file_id "file:src/a.clj"
+                             :llm_document_hash "sha256:document"
+                             :llm_model_revision (:model-revision settings)
+                             :llm_document_version 3
+                             :llm_chunk_index 0
+                             :llm_chunk_count 1}]})])
+         requests)]
+    (is (= [(dissoc document-chunk :text)]
+           (index/indexed-documents client ["symbol:a" "symbol:b"])))
+    (is (= "/indices/llm-context-v3/metadata/get"
+           (:path (first @requests))))
+    (is (= "llm_symbol_id IN (?, ?)"
+           (get-in (first @requests) [:body :condition])))))
 
 (deftest absent-metadata-database-means-no-visible-chunks
   (let [client (scripted-client

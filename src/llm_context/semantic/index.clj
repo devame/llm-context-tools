@@ -9,6 +9,8 @@
     "Submit already-structured text chunks for asynchronous encoding.")
   (delete-symbols! [client symbol-ids]
     "Submit deletion of every indexed chunk belonging to the symbols.")
+  (indexed-documents [client symbol-ids]
+    "Return visible private metadata for a bounded set of symbol IDs.")
   (indexed-chunk-count [client symbol-id document-hash]
     "Count visible chunks for a symbol, optionally restricted to one hash.")
   (search-text [client query options]

@@ -47,6 +47,13 @@
                                    documents)))))))
     "queued")
 
+  (indexed-documents [_ symbol-ids]
+    (let [symbols (set symbol-ids)]
+      (->> (vals (:documents @state))
+           (filter #(contains? symbols (:symbol-id %)))
+           (sort-by :id)
+           vec)))
+
   (indexed-chunk-count [_ symbol-id document-hash]
     (count
      (filter (fn [document]

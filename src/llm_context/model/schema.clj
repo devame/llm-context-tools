@@ -360,6 +360,7 @@
    :semantic.watermark/last-error-at {:db/valueType :db.type/long}
    :semantic.watermark/last-error {:db/valueType :db.type/string}
    :semantic.watermark/graph-revision {:db/valueType :db.type/string}
+   :semantic.watermark/index-generation {:db/valueType :db.type/string}
 
    :entity/type {:db/valueType :db.type/keyword
                  :db/index true}

@@ -128,6 +128,21 @@
    "llm_chunk_index" (:chunk-index document)
    "llm_chunk_count" (:chunk-count document)})
 
+(defn- normalized-metadata [value]
+  {:id (:llm_chunk_id value)
+   :symbol-id (:llm_symbol_id value)
+   :file-id (:llm_file_id value)
+   :document-hash (:llm_document_hash value)
+   :model-revision (:llm_model_revision value)
+   :document-version (:llm_document_version value)
+   :chunk-index (:llm_chunk_index value)
+   :chunk-count (:llm_chunk_count value)})
+
+(defn- metadata-missing? [error]
+  (and (= 404 (:status (ex-data error)))
+       (contains? #{"INDEX_NOT_FOUND" "METADATA_NOT_FOUND"}
+                  (:code (ex-data error)))))
+
 (defrecord NextPlaidClient
     [base-uri index-name expected-model expected-revision settings transport]
   index/SemanticIndex
@@ -161,21 +176,23 @@
                          listed)]
       (cond
         existing
-        existing
+        (assoc existing :created? false)
 
         (contains? #{200 404} (:status response))
         (try
-          (request! client
-                    {:method :post
-                     :path "/indices"
-                     :timeout-ms (:health-timeout-ms settings)
-                     :body {:name index-name
-                            :config
-                            {:nbits (:nbits settings)
-                             :start_from_scratch
-                             (:start-from-scratch settings)
-                             :fts_tokenizer "unicode61"
-                             :binary false}}})
+          (assoc
+           (request! client
+                     {:method :post
+                      :path "/indices"
+                      :timeout-ms (:health-timeout-ms settings)
+                      :body {:name index-name
+                             :config
+                             {:nbits (:nbits settings)
+                              :start_from_scratch
+                              (:start-from-scratch settings)
+                              :fts_tokenizer "unicode61"
+                              :binary false}}})
+           :created? true)
           (catch clojure.lang.ExceptionInfo error
             ;; Another coordinator may have won declaration after our list.
             (if (= 409 (:status (ex-data error)))
@@ -183,7 +200,8 @@
                 (or (some (fn [entry]
                             (let [name (if (map? entry) (:name entry) entry)]
                               (when (= index-name name)
-                                (if (map? entry) entry {:name name}))))
+                                (assoc (if (map? entry) entry {:name name})
+                                       :created? false))))
                           after)
                     (throw error)))
               (throw error))))
@@ -218,6 +236,27 @@
           :body {:condition (str "llm_symbol_id IN (" placeholders ")")
                  :parameters symbol-ids}}))))
 
+  (indexed-documents [client symbol-ids]
+    (let [symbol-ids (vec (distinct symbol-ids))]
+      (if-not (seq symbol-ids)
+        []
+        (let [placeholders (str/join ", " (repeat (count symbol-ids) "?"))
+              result
+              (try
+                (request!
+                 client
+                 {:method :post
+                  :path (str "/indices/" index-name "/metadata/get")
+                  :timeout-ms (:health-timeout-ms settings)
+                  :body {:condition (str "llm_symbol_id IN (" placeholders ")")
+                         :parameters symbol-ids
+                         :limit 100000}})
+                (catch clojure.lang.ExceptionInfo error
+                  (if (metadata-missing? error)
+                    {:metadata []}
+                    (throw error))))]
+          (mapv normalized-metadata (:metadata result))))))
+
   (indexed-chunk-count [client symbol-id document-hash]
     (let [with-hash? (some? document-hash)
           result
@@ -235,9 +274,7 @@
                :parameters
                (cond-> [symbol-id] with-hash? (conj document-hash))}})
             (catch clojure.lang.ExceptionInfo error
-              (if (and (= 404 (:status (ex-data error)))
-                       (contains? #{"INDEX_NOT_FOUND" "METADATA_NOT_FOUND"}
-                                  (:code (ex-data error))))
+              (if (metadata-missing? error)
                 {:count 0}
                 (throw error))))]
       (long (:count result 0))))

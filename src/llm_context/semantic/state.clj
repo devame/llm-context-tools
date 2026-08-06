@@ -576,7 +576,8 @@
        :watermark (watermark graph provider)})))
 
   (record-watermark! [graph {:keys [provider state last-success-at
-                                    last-error-at last-error graph-revision]
+                                    last-error-at last-error graph-revision
+                                    index-generation]
                              :as value}]
     (require-key! value :provider keyword?
                   "Semantic watermark provider must be a keyword")
@@ -600,7 +601,10 @@
                                 0 (min max-error-length
                                        (count (str last-error)))))
                    graph-revision
-                   (assoc :semantic.watermark/graph-revision graph-revision))
+                   (assoc :semantic.watermark/graph-revision graph-revision)
+                   index-generation
+                   (assoc :semantic.watermark/index-generation
+                          index-generation))
           clear-errors (when (and existing (nil? last-error))
                          (retract-present
                           existing
