@@ -95,6 +95,24 @@
                  graph (state/job-id provider "symbol:a")
                  "worker-a" 160 100))))))
 
+(deftest worker-can-renew-current-leases-in-bulk
+  (let [project (fixture/temp-project)]
+    (store/with-store [graph project (config/defaults)]
+      (state/enqueue-job! graph (job "symbol:a" "sha256:a" 10))
+      (state/enqueue-job! graph (job "symbol:b" "sha256:b" 10))
+      (state/lease-jobs! graph provider "worker-a" 10 100 1)
+      (state/lease-jobs! graph provider "worker-b" 10 100 1)
+      (is (= #{(state/job-id provider "symbol:a")}
+             (state/renew-job-leases!
+              graph [(state/job-id provider "symbol:a")
+                     (state/job-id provider "symbol:b")
+                     (state/job-id provider "symbol:missing")]
+              "worker-a" 50 100)))
+      (let [records (into {} (map (juxt :semantic.job/symbol-id identity))
+                          (state/job-records graph provider))]
+        (is (= 150 (:semantic.job/lease-until (get records "symbol:a"))))
+        (is (= 110 (:semantic.job/lease-until (get records "symbol:b"))))))))
+
 (deftest stale-worker-cannot-complete-superseded-job
   (let [project (fixture/temp-project)]
     (store/with-store [graph project (config/defaults)]
@@ -149,6 +167,33 @@
         (is (= 1 (count records)))
         (is (= "sha256:new"
                (:semantic.indexed/document-hash (first records))))))))
+
+(deftest bulk-completion-isolates-a-superseded-job
+  (let [project (fixture/temp-project)]
+    (store/with-store [graph project (config/defaults)]
+      (state/enqueue-job! graph (job "symbol:a" "sha256:a" 10))
+      (state/enqueue-job! graph (job "symbol:b" "sha256:old" 10))
+      (state/lease-jobs! graph provider "worker-a" 10 100 2)
+      (state/enqueue-job! graph (job "symbol:b" "sha256:new" 20))
+      (let [a-id (state/job-id provider "symbol:a")
+            b-id (state/job-id provider "symbol:b")]
+        (is (= #{a-id}
+               (state/complete-jobs!
+                graph [{:job-id a-id
+                        :lease-owner "worker-a"
+                        :indexed (indexed "symbol:a" "sha256:a" 30)
+                        :completed-at 30}
+                       {:job-id b-id
+                        :lease-owner "worker-a"
+                        :indexed (indexed "symbol:b" "sha256:old" 30)
+                        :completed-at 30}])))
+        (is (= ["symbol:a"]
+               (mapv :semantic.indexed/symbol-id
+                     (state/indexed-records graph provider))))
+        (let [remaining (first (state/job-records graph provider))]
+          (is (= "symbol:b" (:semantic.job/symbol-id remaining)))
+          (is (= "sha256:new" (:semantic.job/document-hash remaining)))
+          (is (= :pending (:semantic.job/status remaining))))))))
 
 (deftest delete-completion-removes-indexed-state
   (let [project (fixture/temp-project)]

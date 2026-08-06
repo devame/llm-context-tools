@@ -147,14 +147,16 @@
 
 (defn- renew-leases! [worker jobs]
   (let [settings (:settings worker)
-        time (now worker)]
+        time (now worker)
+        job-ids (mapv :semantic.job/id jobs)
+        renewed
+        (with-graph-lock
+          worker
+          #(state/renew-job-leases!
+            (:graph worker) job-ids (:owner worker) time
+            (:lease-ms settings)))]
     (doseq [job jobs]
-      (when-not
-       (with-graph-lock
-        worker
-        #(state/renew-job-lease!
-          (:graph worker) (:semantic.job/id job)
-          (:owner worker) time (:lease-ms settings)))
+      (when-not (contains? renewed (:semantic.job/id job))
         (throw
          (ex-info "Semantic job lease was superseded"
                   {:type :semantic/lease-lost
@@ -225,9 +227,6 @@
                  :actual (:document-hash desired)}))))
   desired)
 
-(defn- renew-lease! [worker job]
-  (renew-leases! worker [job]))
-
 (defn- indexed-record [worker desired]
   {:provider reconcile/provider
    :symbol-id (:symbol-id desired)
@@ -255,6 +254,25 @@
              :completed-at completed-at}))
       {:status :completed :operation operation}
       {:status :superseded :operation operation})))
+
+(defn- complete-prepared! [worker prepared]
+  (let [completed-at (now worker)
+        completions
+        (mapv (fn [{:keys [job desired]}]
+                {:job-id (:semantic.job/id job)
+                 :lease-owner (:owner worker)
+                 :indexed (indexed-record worker desired)
+                 :completed-at completed-at})
+              prepared)
+        completed
+        (with-graph-lock
+          worker
+          #(state/complete-jobs! (:graph worker) completions))]
+    (mapv (fn [{:keys [job]}]
+            {:status (if (contains? completed (:semantic.job/id job))
+                       :completed :superseded)
+             :operation (:semantic.job/operation job)})
+          prepared)))
 
 (defn- process-delete-job! [worker job]
   (process-delete! worker job)
@@ -307,7 +325,6 @@
           worker job
           #(let [desired (validate-desired!
                           job (get documents (:semantic.job/symbol-id job)))]
-             (renew-lease! worker job)
              {:job job :desired desired})))
        jobs))
     (catch Throwable error
@@ -397,6 +414,7 @@
                  :upload-ms 0 :visibility-ms 0}}
       (try
         (let [jobs (mapv :job prepared)
+              _ (renew-leases! worker jobs)
               symbols (mapv (comp :symbol-id :desired) prepared)
               delete-start (System/nanoTime)
               existing (visible-documents worker prepared)
@@ -422,11 +440,7 @@
               visibility-ms
               (long (/ (- (System/nanoTime) visibility-start) 1000000))
               results
-              (into immediate
-                    (mapv (fn [{:keys [job desired]}]
-                            (complete-job! worker job
-                                           (indexed-record worker desired)))
-                          prepared))]
+              (into immediate (complete-prepared! worker prepared))]
           {:results results
            :metrics {:submitted-documents (count prepared)
                      :submitted-chunks (count chunks)

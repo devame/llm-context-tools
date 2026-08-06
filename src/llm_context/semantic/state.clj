@@ -136,10 +136,15 @@
     "Atomically lease up to limit currently available jobs.")
   (renew-job-lease! [graph job-id owner now lease-ms]
     "Extend a worker-owned lease during a long model or visibility operation.")
+  (renew-job-leases! [graph job-ids owner now lease-ms]
+    "Extend current worker-owned leases in one conditional transaction.")
   (recover-expired-leases! [graph provider now]
     "Return expired leases to pending and report how many were recovered.")
   (complete-job! [graph completion]
     "Conditionally complete a worker-owned job and update indexed state.")
+  (complete-jobs! [graph completions]
+    "Conditionally complete worker-owned jobs in one transaction. Returns the
+    set of job IDs that were still owned and completed.")
   (retry-job! [graph failure]
     "Conditionally release a worker-owned job for retry or mark it failed.")
   (job-records [graph provider]
@@ -358,22 +363,42 @@
               :order-by [?available :asc ?id :asc]
               :limit]
             (long limit))
-           (d/db conn) provider now)]
-      (reduce
-       (fn [leased [eid _ _]]
-         (try
-           (d/transact! conn
-                        [[:db.fn/cas eid :semantic.job/status :pending :leased]
-                         {:db/id eid
-                          :semantic.job/lease-owner owner
-                          :semantic.job/lease-until (+ now lease-ms)
-                          :semantic.job/updated-at now}])
-           (conj leased (d/pull (d/db conn) '[*] eid))
-           (catch clojure.lang.ExceptionInfo error
-             (if (= :transact/cas (:error (ex-data error)))
-               leased
-               (throw error)))))
-       [] candidates)))
+           (d/db conn) provider now)
+          eids (mapv first candidates)
+          lease-one
+          (fn [leased eid]
+            (try
+              (d/transact! conn
+                           [[:db.fn/cas eid :semantic.job/status
+                             :pending :leased]
+                            {:db/id eid
+                             :semantic.job/lease-owner owner
+                             :semantic.job/lease-until (+ now lease-ms)
+                             :semantic.job/updated-at now}])
+              (conj leased (d/pull (d/db conn) '[*] eid))
+              (catch clojure.lang.ExceptionInfo error
+                (if (= :transact/cas (:error (ex-data error)))
+                  leased
+                  (throw error)))))]
+      (if (empty? eids)
+        []
+        (let [tx (mapcat
+                  (fn [eid]
+                    [[:db.fn/cas eid :semantic.job/status :pending :leased]
+                     {:db/id eid
+                      :semantic.job/lease-owner owner
+                      :semantic.job/lease-until (+ now lease-ms)
+                      :semantic.job/updated-at now}])
+                  eids)]
+          (try
+            (d/transact! conn (vec tx))
+            (pull-many (d/db conn) eids)
+            (catch clojure.lang.ExceptionInfo error
+              (if (= :transact/cas (:error (ex-data error)))
+                ;; Preserve the original per-job race isolation for callers
+                ;; that lease without holding the project graph lock.
+                (reduce lease-one [] eids)
+                (throw error))))))))
 
   (renew-job-lease! [graph job-id owner now lease-ms]
     (let [conn (connection graph)
@@ -395,6 +420,58 @@
             (if (= :transact/cas (:error (ex-data error)))
               false
               (throw error)))))))
+
+  (renew-job-leases! [graph job-ids owner now lease-ms]
+    (let [job-ids (vec (distinct job-ids))]
+      (when-not (and (string? owner) (seq owner))
+        (throw (ex-info "Semantic lease owner must be a non-empty string"
+                        {:owner owner})))
+      (when-not (and (nat-int? now) (pos-int? lease-ms))
+        (throw (ex-info "Semantic lease times must be valid"
+                        {:now now :lease-ms lease-ms})))
+      (if (empty? job-ids)
+        #{}
+        (let [conn (connection graph)
+              db (d/db conn)
+              current
+              (into {}
+                    (map (fn [[id entity lease-owner status]]
+                           [id [entity lease-owner status]]))
+                    (d/q '[:find ?id ?entity ?lease-owner ?status
+                           :in $ [?id ...]
+                           :where
+                           [?entity :semantic.job/id ?id]
+                           [?entity :semantic.job/lease-owner ?lease-owner]
+                           [?entity :semantic.job/status ?status]]
+                         db job-ids))
+              renewable
+              (filterv (fn [job-id]
+                         (let [[_ lease-owner status] (get current job-id)]
+                           (and (= owner lease-owner) (= :leased status))))
+                       job-ids)
+              tx
+              (mapcat (fn [job-id]
+                        (let [[eid] (get current job-id)]
+                          [[:db.fn/cas eid :semantic.job/lease-owner owner owner]
+                           {:db/id eid
+                            :semantic.job/lease-until (+ now lease-ms)
+                            :semantic.job/updated-at now}]))
+                      renewable)]
+          (if-not (seq tx)
+            #{}
+            (try
+              (d/transact! conn (vec tx))
+              (set renewable)
+              (catch clojure.lang.ExceptionInfo error
+                (if (= :transact/cas (:error (ex-data error)))
+                  ;; A superseding graph mutation can race callers that do not
+                  ;; hold the project graph lock. Preserve per-job isolation in
+                  ;; that exceptional path.
+                  (into #{}
+                        (filter #(renew-job-lease!
+                                  graph % owner now lease-ms))
+                        renewable)
+                  (throw error)))))))))
 
   (recover-expired-leases! [graph provider now]
     (when-not (nat-int? now)
@@ -471,6 +548,102 @@
             (catch clojure.lang.ExceptionInfo error
               (if (= :transact/cas (:error (ex-data error)))
                 false
+                (throw error))))))))
+
+  (complete-jobs! [graph completions]
+    (let [completions (vec completions)]
+      (doseq [{:keys [completed-at]} completions]
+        (when-not (nat-int? completed-at)
+          (throw (ex-info "Semantic completion time must be non-negative"
+                          {:completed-at completed-at}))))
+      (if (empty? completions)
+        #{}
+        (let [conn (connection graph)
+              db (d/db conn)
+              by-id (into {} (map (juxt :job-id identity)) completions)
+              job-ids (vec (keys by-id))
+              jobs
+              (into {}
+                    (map (fn [job]
+                           [(:semantic.job/id job) job]))
+                    (pull-many
+                     db
+                     (d/q '[:find [?entity ...]
+                            :in $ [?id ...]
+                            :where [?entity :semantic.job/id ?id]]
+                          db job-ids)))
+              eligible
+              (into []
+                    (keep (fn [job-id]
+                            (let [{:keys [lease-owner indexed] :as completion}
+                                  (get by-id job-id)
+                                  job (get jobs job-id)]
+                              (when (and job
+                                         (= lease-owner
+                                            (:semantic.job/lease-owner job)))
+                                (assoc completion
+                                       :job job
+                                       :indexed
+                                       (when indexed
+                                         (validate-indexed! indexed)))))))
+                    job-ids)
+              indexed-ids
+              (mapv (fn [{:keys [job]}]
+                      (indexed-id (:semantic.job/provider job)
+                                  (:semantic.job/symbol-id job)))
+                    eligible)
+              old-indexed
+              (into {}
+                    (d/q '[:find ?id ?entity
+                           :in $ [?id ...]
+                           :where [?entity :semantic.indexed/id ?id]]
+                         db indexed-ids))
+              tx
+              (mapcat
+               (fn [{:keys [job-id lease-owner indexed completed-at job]}]
+                 (let [eid (:db/id job)
+                       old-indexed-eid
+                       (get old-indexed
+                            (indexed-id (:semantic.job/provider job)
+                                        (:semantic.job/symbol-id job)))
+                       completion-token
+                       (str lease-owner "|complete|" completed-at "|" job-id)]
+                   (cond-> [[:db.fn/cas eid :semantic.job/lease-owner
+                             lease-owner completion-token]]
+                     (and old-indexed-eid (nil? indexed))
+                     (conj [:db/retractEntity old-indexed-eid])
+
+                     indexed
+                     (conj {:semantic.indexed/id
+                            (indexed-id (:provider indexed)
+                                        (:symbol-id indexed))
+                            :semantic.indexed/provider (:provider indexed)
+                            :semantic.indexed/symbol-id (:symbol-id indexed)
+                            :semantic.indexed/file-id (:file-id indexed)
+                            :semantic.indexed/document-hash
+                            (:document-hash indexed)
+                            :semantic.indexed/model-revision
+                            (:model-revision indexed)
+                            :semantic.indexed/document-version
+                            (:document-version indexed)
+                            :semantic.indexed/chunk-count
+                            (:chunk-count indexed)
+                            :semantic.indexed/updated-at (:updated-at indexed)})
+
+                     true
+                     (conj [:db/retractEntity eid]))))
+               eligible)]
+          (try
+            (when (seq tx)
+              (d/transact! conn (vec tx)))
+            (set (map :job-id eligible))
+            (catch clojure.lang.ExceptionInfo error
+              (if (= :transact/cas (:error (ex-data error)))
+                (into #{}
+                      (keep (fn [{:keys [job-id] :as completion}]
+                              (when (complete-job! graph completion)
+                                job-id)))
+                      eligible)
                 (throw error))))))))
 
   (retry-job! [graph {:keys [job-id lease-owner failed-at available-at

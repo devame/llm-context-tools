@@ -100,8 +100,10 @@
         client (fake/create)
         builds (atom 0)
         renewals (atom 0)
+        completion-batches (atom [])
         original-build document/build-symbols
-        original-renew state/renew-job-lease!]
+        original-renew state/renew-job-leases!
+        original-complete state/complete-jobs!]
     (store/with-store [graph project settings]
       (let [worker (test-worker graph project client)
             result
@@ -109,10 +111,15 @@
                           (fn [& args]
                             (swap! builds inc)
                             (apply original-build args))
-                          state/renew-job-lease!
-                          (fn [& args]
-                            (swap! renewals inc)
-                            (apply original-renew args))]
+                          state/renew-job-leases!
+                          (fn [graph job-ids & args]
+                            (swap! renewals + (count job-ids))
+                            (apply original-renew graph job-ids args))
+                          state/complete-jobs!
+                          (fn [graph completions]
+                            (swap! completion-batches conj
+                                   (count completions))
+                            (original-complete graph completions))]
               (worker/prepare! worker)
               (worker/process-once! worker))
             additions
@@ -128,7 +135,8 @@
         (is (= 1 @builds))
         (is (= 1 (count additions)))
         (is (= 2 (count (:document-ids (first additions)))))
-        (is (<= 4 @renewals 6))))))
+        (is (<= 4 @renewals 6))
+        (is (= [2] @completion-batches))))))
 
 (deftest worker-keeps-multiple-update-requests-in-flight
   (let [definitions (apply str (for [index (range 40)]
