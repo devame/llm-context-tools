@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.11.0
+
+- Added a pinned public cross-repository semantic evaluation suite for
+  clojure-lsp, re-frame, and Metabase, with development and held-out corpora,
+  hard negatives, deterministic repeats, bootstrap confidence intervals, and
+  aggregate-only output.
+- Added explicit `fts-only`, `lateon-only`, and `hybrid` retrieval modes with
+  comparable recall, MRR, nDCG, context, slice, latency, and freshness
+  diagnostics.
+- Made canonical graph traversal lock-free and bounded, including bounded
+  transitive call tracing, lexical fallback, status aggregation, and
+  high-connectivity semantic metadata.
+- Reworked Clojure-family materialization around indexed ownership, source
+  coordinates, framework forms, and namespace declarations, eliminating
+  repository-wide per-usage owner scans on dense projects.
+- Added rebuildable analyzer dependency manifests and incremental dependency
+  closures so unchanged analysis can reuse validated analyzer snapshots while
+  preserving full-versus-incremental convergence.
+- Reduced full-analysis memory and persistence cost through streamed semantic
+  fingerprints, bounded snapshot state, batched replacement planning, and
+  identity-indexed semantic-state resets and traversal.
+- Shortened service analysis coordination and moved dirty semantic
+  reconciliation fully into the background so queries and watcher-triggered
+  analysis remain responsive during large synchronizations.
+- Made semantic synchronization resumable across compatible full analyses,
+  preserved valid document hashes, verified the physical NextPlaid generation
+  sentinel, and rebuilt conservatively when the external index is missing or
+  recreated.
+- Pipelined concurrent asynchronous NextPlaid updates, bulk inventory and
+  visibility checks, batched durable leasing/renewal/completion transitions,
+  and progress telemetry while retaining conditional completion and lease
+  recovery semantics.
+- Added bounded public-evaluation stages, reusable analyzer snapshots, dense
+  scaling gates, packaged semantic convergence checks, and corrected corpus
+  resolution/count validation for release qualification.
+
 ## 0.10.0
 
 - Kept semantic status responsive by moving NextPlaid I/O and semantic
