@@ -28,6 +28,7 @@
    :analysis (* 30 60 1000)
    :service-start (* 5 60 1000)
    :semantic-sync (* 30 60 1000)
+   :semantic-warmup (* 5 60 1000)
    :status (* 5 60 1000)
    :benchmark (* 15 60 1000)
    :service-stop (* 5 60 1000)})
@@ -281,6 +282,28 @@
        (zero? (:dirty status 0))
        (loopback-endpoint? (get-in status [:runtime :endpoint]))))
 
+(defn- warm-semantic-runtime! [checkout timeouts]
+  ;; The first LateOn request can pay the sidecar's index-load cost. Warm it
+  ;; before the repeated benchmark runs so a cold process does not create a
+  ;; false deterministic-ranking failure on run 1.
+  (loop [attempt 1]
+    (let [result
+          (run-and-log!
+           checkout
+           (format ".llm-context/public-semantic-evaluation/preflight/semantic-warmup-%d.edn"
+                   attempt)
+           :semantic-warmup
+           ["query" "search" "warmup"
+            "--mode" "lateon-only" "--explain"]
+           timeouts)
+          status (get-in (parse-edn-output result) [:retrieval :status])]
+      (cond
+        (contains? #{:ok :no-matches} status) status
+        (< attempt 5) (do (Thread/sleep 1000) (recur (inc attempt)))
+        :else
+        (fail! "Public semantic runtime warmup did not complete"
+               {:status status :attempts attempt})))))
+
 (defn- start-and-synchronize! [checkout timeouts]
   (run-and-log! checkout ".llm-context/public-semantic-evaluation/preflight/doctor.edn"
                 :doctor ["doctor"] timeouts)
@@ -302,6 +325,7 @@
         status (parse-edn-output status-result)]
     (when-not (synchronized-status? status)
       (fail! "Public checkout did not reach complete semantic coverage" {}))
+    (warm-semantic-runtime! checkout timeouts)
     status))
 
 (defn- stop-service! [checkout timeouts]
