@@ -13,7 +13,8 @@
     (is (Files/isRegularFile
          (daemon/java-executable) (make-array LinkOption 0)))
     (is (= "--enable-native-access=ALL-UNNAMED" (nth command 1)))
-    (is (= (System/getProperty "java.class.path") (nth command 3)))
+    (is (= "-Xshare:off" (nth command 2)))
+    (is (= (System/getProperty "java.class.path") (nth command 4)))
     (is (= ["clojure.main" "-m" "llm-context.main"
             "-C" (:root-str project) "service" "foreground"]
-           (subvec (vec command) 4)))))
+           (subvec (vec command) 5)))))

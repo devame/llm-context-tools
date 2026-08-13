@@ -22,6 +22,30 @@
 (defn- unavailable-response [type message]
   {:ok false :error message :exit-code 1 :type type})
 
+(defn- communication-error-response [request-timeout error]
+  (cond
+    (instance? java.net.SocketTimeoutException error)
+    (unavailable-response
+     :service/timeout
+     (str "Project service request timed out after "
+          request-timeout " ms; the service may be busy"))
+
+    (instance? java.net.ConnectException error)
+    (unavailable-response
+     :service/unreachable
+     "Project service is advertised but its endpoint is unreachable")
+
+    (instance? java.io.IOException error)
+    (unavailable-response
+     :service/io-error
+     (str "Project service communication failed: " (.getMessage error)))
+
+    :else
+    (unavailable-response
+     :service/protocol-error
+     (str "Project service returned an unreadable response: "
+          (.getMessage error)))))
+
 (defn- read-response [input]
   (with-open [reader (PushbackReader. (java.io.InputStreamReader. input))]
     (edn/read {:eof nil} reader)))
@@ -76,24 +100,20 @@
          :tcp (tcp-request endpoint payload connect-timeout request-timeout)
          (throw (ex-info (str "Unknown project service transport: " transport)
                          {:transport transport})))
-       (catch java.net.SocketTimeoutException _
-         (unavailable-response
-          :service/timeout
-          (str "Project service request timed out after "
-               request-timeout " ms; the service may be busy")))
-       (catch java.net.ConnectException _
-         (unavailable-response
-          :service/unreachable
-          "Project service is advertised but its endpoint is unreachable"))
+       (catch java.util.concurrent.ExecutionException error
+         ;; Unix requests run in a future so a stuck connect can be bounded.
+         ;; Future.get/deref wraps the actual socket exception, so unwrap it
+         ;; before classifying the endpoint failure.
+         (communication-error-response
+          request-timeout (or (.getCause error) error)))
+       (catch java.net.SocketTimeoutException error
+         (communication-error-response request-timeout error))
+       (catch java.net.ConnectException error
+         (communication-error-response request-timeout error))
        (catch java.io.IOException error
-         (unavailable-response
-          :service/io-error
-          (str "Project service communication failed: " (.getMessage error))))
+         (communication-error-response request-timeout error))
        (catch RuntimeException error
-         (unavailable-response
-          :service/protocol-error
-          (str "Project service returned an unreadable response: "
-               (.getMessage error))))))))
+         (communication-error-response request-timeout error))))))
 
 (defn available? [project]
   (= {:ok true :value :pong} (request project {:op :ping})))
