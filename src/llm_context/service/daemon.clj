@@ -19,6 +19,10 @@
 (defn launch-command [project]
   [(str (java-executable))
    "--enable-native-access=ALL-UNNAMED"
+   ;; The long-lived coordinator must not depend on the JVM's shared class
+   ;; archive. On WSL/overlay-backed filesystems an inaccessible mapped CDS
+   ;; page can turn a recoverable service failure into a native JVM crash.
+   "-Xshare:off"
    "-cp" (System/getProperty "java.class.path")
    "clojure.main" "-m" "llm-context.main"
    "-C" (:root-str project)
