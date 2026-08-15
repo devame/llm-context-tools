@@ -47,14 +47,21 @@
         {:results [] :retrieval {:status :no-matches}}))))
 
 (deftest intent-focus-selects-diverse-roots-for-set-plans
-  (let [results [{:id "symbol:a" :qualified-name "fixture.a/routes"
-                  :file "src/a.clj" :intent-score 4 :intent-qualified? true
+  (let [results [{:id "symbol:decoy" :qualified-name "fixture.noise/supported-db"
+                  :file "src/noise.clj" :intent-score 9
+                  :relevance-qualified? true :structurally-qualified? false
+                  :matched-by #{:lateon}}
+                 {:id "symbol:a" :qualified-name "fixture.a/routes"
+                  :file "src/a.clj" :intent-score 4
+                  :relevance-qualified? true :structurally-qualified? true
                   :matched-by #{:lateon}}
                  {:id "symbol:a-helper" :qualified-name "fixture.a/handler"
-                  :file "src/a.clj" :intent-score 3 :intent-qualified? true
+                  :file "src/a.clj" :intent-score 3
+                  :relevance-qualified? true :structurally-qualified? true
                   :matched-by #{:lateon}}
                  {:id "symbol:b" :qualified-name "fixture.b/routes"
-                  :file "src/b.clj" :intent-score 2 :intent-qualified? true
+                  :file "src/b.clj" :intent-score 2
+                  :relevance-qualified? true :structurally-qualified? true
                   :matched-by #{:fts}}]
         resolution
         (context/resolve-intent-focus
@@ -65,7 +72,35 @@
     (is (= ["symbol:a" "symbol:b"] (mapv :id (:selected resolution))))
     (is (= ["fixture.a/routes" "fixture.a/handler" "fixture.b/routes"]
            (mapv :qualified-name (:inventory resolution))))
-    (is (= ["symbol:a-helper"] (mapv :id (:alternatives resolution))))))
+    (is (= ["symbol:decoy" "symbol:a-helper"]
+           (mapv :id (:alternatives resolution))))))
+
+(deftest intent-markdown-discloses-qualification-and-seed-authority
+  (let [packet {:focus "what are the supported databases"
+                :budget {:estimated-tokens 10 :max-tokens 100}
+                :focus-resolution
+                {:mode :intent :strategy :lexical-fallback
+                 :selected [{:id "symbol:db" :source-role :production}]
+                 :retrieval
+                 {:requested-source-preference :auto
+                  :resolved-source-preference :production
+                  :source-preference-reason :general-implementation-query
+                  :status :ok :latency-ms 12 :effective-timeout-ms 5000
+                  :query-plan
+                  {:shape :adaptive :seed-mode :multi
+                   :planning-authority :shape-neutral-fallback
+                   :reason :advisory-not-structurally-supported
+                   :evidence-status :relevance-only
+                   :seed-selection-authority :relevance-fallback
+                   :structural-support {:qualified-candidates 0
+                                        :exact-relationships 0}}}}
+                :symbols [] :relationships [] :topics [] :effects []}
+        markdown (context/markdown packet)]
+    (is (re-find #"Planning authority: shape-neutral-fallback" markdown))
+    (is (re-find #"Evidence qualification: relevance-only" markdown))
+    (is (re-find #"seed selection: relevance-fallback" markdown))
+    (is (re-find #"0 qualified candidates, 0 exact execution relationships"
+                 markdown))))
 
 (deftest context-packets-are-focused-depth-bounded-and-renderable
   (let [root (Files/createTempDirectory "llm-context-packet-"

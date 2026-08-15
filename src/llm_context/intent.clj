@@ -114,9 +114,14 @@
                 (not= requested-mode :auto) :explicit-seed-mode
                 :else :shape-neutral-retrieval)})))
 
+(defn- relevance-qualified? [candidate]
+  (if (contains? candidate :relevance-qualified?)
+    (true? (:relevance-qualified? candidate))
+    ;; Compatibility for callers constructing pre-separation candidates.
+    (pos? (double (:intent-score candidate 0.0)))))
+
 (defn- materially-qualified? [candidate]
-  (and (:intent-qualified? candidate)
-       (some #(not= :unconstrained %) (:intent-reasons candidate))))
+  (true? (:structurally-qualified? candidate)))
 
 (defn resolve-plan
   "Resolve an evidence plan from an explicit override or an advisory model
@@ -124,49 +129,68 @@
   candidate pool. Unsupported advice leaves the plan adaptive."
   [plan candidates {:keys [advisory exact-relationship-count
                            minimum-advisory-margin]}]
-  (if (not= :auto (:requested-seed-mode plan))
-    (assoc plan :planning-authority :caller
-                :advisory advisory)
-    (let [minimum-margin (double (or minimum-advisory-margin 0.0))
-          margin (double (or (:margin advisory) 0.0))
-          confident? (>= margin minimum-margin)
-          suggestion (when (and (= :available (:status advisory)) confident?)
-                       (:suggested-shape advisory))
-          qualified-count (count (filter materially-qualified? candidates))
-          relationship-count (long (or exact-relationship-count 0))
-          supported?
-          (case suggestion
-            :lookup (and (< qualified-count 2) (zero? relationship-count))
-            :set (>= qualified-count 2)
-            :flow (pos? relationship-count)
-            false)
-          shape (if supported? suggestion :adaptive)
-          seed-mode (if (= :lookup shape) :single :multi)
-          max-seeds (case shape
-                      :lookup 1
-                      :flow (min 2 (:max-seeds plan))
-                      (:max-seeds plan))]
+  (let [minimum-margin (double (or minimum-advisory-margin 0.0))
+        margin (double (or (:margin advisory) 0.0))
+        confident? (>= margin minimum-margin)
+        suggestion (when (and (= :available (:status advisory)) confident?)
+                     (:suggested-shape advisory))
+        relevant-count (count (filter relevance-qualified? candidates))
+        qualified-count (count (filter materially-qualified? candidates))
+        relationship-count (long (or exact-relationship-count 0))
+        evidence-status (cond
+                          (pos? qualified-count) :structural-evidence
+                          (pos? relevant-count) :relevance-only
+                          :else :no-evidence)
+        seed-selection-authority (cond
+                                   (pos? qualified-count) :structural
+                                   (pos? relevant-count) :relevance-fallback
+                                   :else :rank-fallback)
+        support-base
+        {:relevant-candidates relevant-count
+         :qualified-candidates qualified-count
+         :exact-relationships relationship-count
+         :advisory-margin margin
+         :minimum-advisory-margin minimum-margin
+         :advisory-confident? confident?}]
+    (if (not= :auto (:requested-seed-mode plan))
       (assoc plan
-             :shape shape
-             :seed-mode seed-mode
-             :max-seeds max-seeds
-             :reason (cond
-                       (not= :available (:status advisory))
-                       :advisory-unavailable
-                       (not confident?) :advisory-below-margin
-                       (nil? suggestion) :advisory-invalid
-                       supported? :advisory-structure-agreement
-                       :else :advisory-not-structurally-supported)
-             :planning-authority (if supported? :model-plus-structure
-                                     :shape-neutral-fallback)
-             :structural-support
-             {:qualified-candidates qualified-count
-              :exact-relationships relationship-count
-              :advisory-margin margin
-              :minimum-advisory-margin minimum-margin
-              :advisory-confident? confident?
-              :supports-advice? supported?}
-             :advisory advisory))))
+             :planning-authority :caller
+             :evidence-status evidence-status
+             :seed-selection-authority seed-selection-authority
+             :structural-support (assoc support-base :supports-advice? nil)
+             :advisory advisory)
+      (let [supported?
+            (case suggestion
+              :lookup (and (= qualified-count 1)
+                           (zero? relationship-count))
+              :set (>= qualified-count 2)
+              :flow (and (>= qualified-count 2)
+                         (pos? relationship-count))
+              false)
+            shape (if supported? suggestion :adaptive)
+            seed-mode (if (= :lookup shape) :single :multi)
+            max-seeds (case shape
+                        :lookup 1
+                        :flow (min 2 (:max-seeds plan))
+                        (:max-seeds plan))]
+        (assoc plan
+               :shape shape
+               :seed-mode seed-mode
+               :max-seeds max-seeds
+               :reason (cond
+                         (not= :available (:status advisory))
+                         :advisory-unavailable
+                         (not confident?) :advisory-below-margin
+                         (nil? suggestion) :advisory-invalid
+                         supported? :advisory-structure-agreement
+                         :else :advisory-not-structurally-supported)
+               :planning-authority (if supported? :model-plus-structure
+                                       :shape-neutral-fallback)
+               :evidence-status evidence-status
+               :seed-selection-authority seed-selection-authority
+               :structural-support
+               (assoc support-base :supports-advice? supported?)
+               :advisory advisory)))))
 
 (defn- candidate-text [candidate]
   (str/join " " (keep candidate
@@ -186,23 +210,29 @@
       (conj [:endpoint-term 1.0]))))
 
 (defn- concept-evidence [plan candidate candidate-terms]
-  (mapcat
-   (fn [concept]
-     (case concept
-       :code-concept/http-endpoint
-       (endpoint-evidence candidate candidate-terms)
-       :code-concept/test
-       (when (= :test (:source-role candidate)) [[:test-source 2.0]])
-       :code-concept/permission
-       (when (seq (set/intersection
-                   candidate-terms #{"authorize" "permission" "perms" "policy" "read"}))
-         [[:permission-vocabulary 1.5]])
-       :code-concept/validation
-       (when (seq (set/intersection
-                   candidate-terms #{"check" "coerce" "schema" "validate" "validation"}))
-         [[:validation-vocabulary 1.5]])
-       []))
-   (:concepts plan)))
+  (let [identifier-terms
+        (terms (str (:name candidate) " " (:qualified-name candidate)))]
+    (mapcat
+     (fn [concept]
+       (case concept
+         :code-concept/http-endpoint
+         (endpoint-evidence candidate candidate-terms)
+         :code-concept/test
+         (when (= :test (:source-role candidate)) [[:test-source 2.0]])
+         :code-concept/permission
+         (when (or (seq (set/intersection
+                         identifier-terms
+                         #{"authorize" "permission" "perms" "policy"}))
+                   (and (contains? identifier-terms "read")
+                        (contains? identifier-terms "check")))
+           [[:permission-like-identifier 1.5]])
+         :code-concept/validation
+         (when (seq (set/intersection
+                     identifier-terms
+                     #{"check" "coerce" "schema" "validate" "validation"}))
+           [[:validation-like-identifier 1.5]])
+         []))
+     (:concepts plan))))
 
 (defn- qualification-reasons
   "Return structural evidence that makes a candidate a valid traversal root
@@ -220,12 +250,12 @@
       (set/intersection reasons #{:route-like-identifier})
 
       (contains? concepts :code-concept/permission)
-      (set/intersection reasons #{:permission-vocabulary})
+      (set/intersection reasons #{:permission-like-identifier})
 
       (contains? concepts :code-concept/validation)
-      (set/intersection reasons #{:validation-vocabulary})
+      (set/intersection reasons #{:validation-like-identifier})
 
-      :else #{:unconstrained})))
+      :else #{})))
 
 (defn rerank
   "Conservatively rerank candidates using query coverage and supported
@@ -243,19 +273,32 @@
                  evidence-score (reduce + 0.0 (map second evidence))
                  score (+ (* 1.0 (count direct))
                           (* 0.5 (count expanded))
-                          evidence-score)]
+                          evidence-score)
+                 relevance-reasons
+                 (vec (concat
+                       (map #(keyword (str "query-term-" %)) (sort direct))
+                       (map #(keyword (str "expanded-term-" %))
+                            (sort expanded))))
+                 structural-reasons (vec (sort qualification))
+                 concept-reasons (vec (map first evidence))
+                 structurally-qualified? (boolean (seq structural-reasons))]
              (assoc candidate
                     :pre-rerank-rank rank
                     :intent-score score
-                    :intent-qualified? (boolean (seq qualification))
+                    :relevance-qualified? (boolean (or (seq direct)
+                                                       (seq expanded)))
+                    :relevance-reasons relevance-reasons
+                    :structurally-qualified? structurally-qualified?
+                    ;; Compatibility aliases remain explicit: qualification is
+                    ;; structural, while reasons retain all reranking evidence.
+                    :intent-qualified? structurally-qualified?
+                    :structural-reasons structural-reasons
+                    :concept-reasons concept-reasons
                     :intent-reasons
-                    (vec (concat
-                          (map #(keyword (str "query-term-" %)) (sort direct))
-                          (map #(keyword (str "expanded-term-" %)) (sort expanded))
-                          (map first evidence))))))
+                    (vec (concat relevance-reasons concept-reasons)))))
          (range 1 (inc (count candidates))) candidates)
         ordered (if active?
-                  (sort-by (juxt (comp not :intent-qualified?)
+                  (sort-by (juxt (comp not :structurally-qualified?)
                                  (comp - :intent-score)
                                  :pre-rerank-rank)
                            enriched)
@@ -277,10 +320,12 @@
   (if (= :single (:seed-mode plan))
     (vec (take 1 candidates))
     (let [limit (:max-seeds plan)
-          qualifying (filter #(and (:intent-qualified? %)
-                                   (pos? (double (:intent-score % 0.0))))
-                             candidates)
-          pool (if (seq qualifying) qualifying candidates)]
+          structural (filter :structurally-qualified? candidates)
+          relevant (filter relevance-qualified? candidates)
+          pool (cond
+                 (seq structural) structural
+                 (seq relevant) relevant
+                 :else candidates)]
       (loop [remaining (seq pool) selected [] files #{} namespaces #{}]
         (if (or (nil? remaining) (= limit (count selected)))
           (vec selected)

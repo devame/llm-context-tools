@@ -149,9 +149,11 @@ Datalevin whenever the sidecar is unavailable.
 
 `context --intent` starts with shape-neutral, freshness-safe hybrid retrieval.
 In parallel, a resident 32M Mixedbread model scores lookup, set, and flow answer
-shapes. The model is advisory: llm-context accepts a flow only when retrieved
-roots have exact graph relationships, accepts a set only when several roots
-qualify, and otherwise retains an adaptive multi-root plan. Explicit
+shapes. The model is advisory: llm-context accepts a flow only when at least
+two structurally qualified roots have an exact call or macro-invocation edge,
+accepts a set only when several roots structurally qualify, and otherwise
+retains an adaptive multi-root plan. Lexical and semantic relevance may reorder
+candidates but cannot qualify them. Explicit
 `--seed-mode` choices remain authoritative. The model never filters the
 candidate pool, and its three scores, margin, latency, revision, structural
 support, and final planning authority remain inspectable in retrieval
@@ -166,6 +168,9 @@ Without either resident model, retrieval falls back to Datalevin and planning
 stays adaptive. Set packets also carry a compact, explicitly bounded inventory
 of structurally qualified candidates; inventory entries do not become
 traversal roots or inferred graph relationships.
+Packets distinguish `:structural-evidence`, `:relevance-only`, and
+`:no-evidence`, and disclose whether roots came from structural selection, a
+relevance fallback, or the original rank.
 Intent context defaults to `--source-preference auto`: ordinary implementation
 questions stably prefer production paths, while requests explicitly about
 tests prefer test paths. Exact identifier matches retain priority, scores are

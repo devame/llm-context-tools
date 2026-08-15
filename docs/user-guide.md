@@ -106,8 +106,10 @@ reported separately.
 natural-language request before traversal. Automatic planning first retrieves
 a broad, shape-neutral pool while a resident 32M Mixedbread model independently
 scores lookup, set, and flow. The score is advisory: a set needs several
-qualified candidates, a flow needs an exact graph relationship among candidate
-roots, and unsupported advice leaves an adaptive multi-root plan. Explicit
+structurally qualified candidates, while a flow needs at least two qualified
+roots joined by an exact call or macro-invocation edge. Vocabulary relevance
+can reorder candidates but cannot authorize a shape. Unsupported advice leaves
+an adaptive multi-root plan. Explicit
 single/multi options remain authoritative, and the model never filters the
 retrieval pool. Accepted lookup requests keep one seed; set/flow requests may
 select bounded, diverse roots under one shared traversal budget. Set requests
@@ -117,6 +119,9 @@ Inventory entries are evidence summaries, not graph edges. Up to four
 unselected alternatives remain packet metadata. If LateOn
 is unavailable or times out, lexical retrieval remains available and the
 packet records `:lexical-fallback`.
+The query plan also reports whether evidence was structural, relevance-only,
+or absent, and whether seed selection used structural evidence, relevance
+fallback, or original rank.
 Intent requests default to `--source-preference auto`. General implementation
 questions prefer production files; explicit test/spec/fixture questions prefer
 test files. This is a stable policy ordering, not a filter: lower-priority

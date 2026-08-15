@@ -106,10 +106,10 @@
 
 (deftest advisory-flow-plan-requires-an-exact-candidate-relationship
   (let [{:keys [project file entities]} (fixture)
-        candidates [{:id "symbol:caller" :name "caller"
-                     :qualified-name "sample/caller" :file "src/a.clj"}
-                    {:id "symbol:callee" :name "callee"
-                     :qualified-name "sample/callee" :file "src/b.clj"}]
+        candidates [{:id "symbol:caller" :name "validate-input"
+                     :qualified-name "sample/validate-input" :file "src/a.clj"}
+                    {:id "symbol:callee" :name "validate-output"
+                     :qualified-name "sample/validate-output" :file "src/b.clj"}]
         advisory {:provider :mixedbread-32m :status :available
                   :suggested-shape :flow
                   :scores {:flow 10.0 :lookup 9.9 :set 9.8}
@@ -117,11 +117,13 @@
     (store/with-store [graph project (config/defaults)]
       (store/replace-file! graph file entities)
       (with-redefs [query/symbols (fn [_ _ limit]
-                                    (is (= 100 limit))
+                                    ;; Original query plus four validation
+                                    ;; expansions share one bounded budget.
+                                    (is (= 20 limit))
                                     candidates)]
         (let [response
               (query/search-explain-with-attempt
-               graph (config/defaults) "follow caller into callee"
+               graph (config/defaults) "how is input validated before output"
                {:mode :fts-only :status :not-requested :candidates []}
                {:mode :fts-only :intent-rerank? true
                 :intent-advisory advisory})
@@ -131,6 +133,35 @@
           (is (= 1 (get-in plan [:structural-support
                                  :exact-relationships])))
           (is (= advisory (:advisory plan))))))))
+
+(deftest advisory-flow-plan-rejects-non-execution-relationships
+  (let [{:keys [project file entities]} (fixture)
+        entities (mapv #(if (= "edge:call" (:edge/id %))
+                          (assoc % :edge/kind :edge.kind/contains)
+                          %)
+                       entities)
+        candidates [{:id "symbol:caller" :name "validate-input"
+                     :qualified-name "sample/validate-input" :file "src/a.clj"}
+                    {:id "symbol:callee" :name "validate-output"
+                     :qualified-name "sample/validate-output" :file "src/b.clj"}]
+        advisory {:provider :mixedbread-32m :status :available
+                  :suggested-shape :flow :scores {:flow 10.0 :set 9.8}
+                  :margin 0.2}]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-file! graph file entities)
+      (with-redefs [query/symbols (fn [_ _ _] candidates)]
+        (let [response
+              (query/search-explain-with-attempt
+               graph (config/defaults) "how is input validated before output"
+               {:mode :fts-only :status :not-requested :candidates []}
+               {:mode :fts-only :intent-rerank? true
+                :intent-advisory advisory})
+              plan (get-in response [:retrieval :query-plan])]
+          (is (= :adaptive (:shape plan)))
+          (is (= :advisory-not-structurally-supported (:reason plan)))
+          (is (= :shape-neutral-fallback (:planning-authority plan)))
+          (is (= 0 (get-in plan [:structural-support
+                                 :exact-relationships]))))))))
 
 (defn trace-fixture [unrelated-count]
   (let [root (Files/createTempDirectory "llm-context-trace-"

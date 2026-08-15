@@ -261,6 +261,10 @@
            :pre-rerank-rank (:pre-rerank-rank symbol)
            :post-rerank-rank (:post-rerank-rank symbol)
            :intent-score (:intent-score symbol)
+           :relevance-qualified? (:relevance-qualified? symbol)
+           :relevance-reasons (:relevance-reasons symbol)
+           :structurally-qualified? (:structurally-qualified? symbol)
+           :structural-reasons (:structural-reasons symbol)
            :intent-qualified? (:intent-qualified? symbol)
            :intent-reasons (:intent-reasons symbol)})
         candidates (mapv candidate (range 1 (inc (count results))) results)
@@ -270,7 +274,7 @@
         selected-ids (set (map :id selected-results))
         selected (->> candidates
                       (filter #(contains? selected-ids (:id %))) vec)
-        qualified (filter :intent-qualified? candidates)
+        qualified (filter :structurally-qualified? candidates)
         inventory-limit 24
         inventory (if (= :set (:shape plan))
                     (mapv #(select-keys % [:qualified-name :file])
@@ -368,6 +372,30 @@
                                     :query-plan :seed-mode] :single))
               " (" (count (get-in packet [:focus-resolution :selected]))
               " selected)"
+              "\nPlanning authority: "
+              (name (get-in packet [:focus-resolution :retrieval
+                                    :query-plan :planning-authority]
+                            :unknown))
+              " ("
+              (name (get-in packet [:focus-resolution :retrieval
+                                    :query-plan :reason]
+                            :unknown))
+              ")"
+              "\nEvidence qualification: "
+              (name (get-in packet [:focus-resolution :retrieval
+                                    :query-plan :evidence-status]
+                            :unknown))
+              "; seed selection: "
+              (name (get-in packet [:focus-resolution :retrieval
+                                    :query-plan :seed-selection-authority]
+                            :unknown))
+              "\nStructural support: "
+              (get-in packet [:focus-resolution :retrieval :query-plan
+                              :structural-support :qualified-candidates] 0)
+              " qualified candidates, "
+              (get-in packet [:focus-resolution :retrieval :query-plan
+                              :structural-support :exact-relationships] 0)
+              " exact execution relationships"
               "\nSemantic retrieval: "
               (name (get-in packet [:focus-resolution :retrieval :status]
                             :unknown))

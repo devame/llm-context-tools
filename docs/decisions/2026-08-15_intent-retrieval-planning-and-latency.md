@@ -91,9 +91,14 @@ reranking stage for intent context. It considers:
 - concept evidence such as route-like names and literal API paths;
 - pre-rerank rank as the stable final tie-break.
 
-The stage does not mutate LateOn or FTS scores. It emits
-`:pre-rerank-rank`, `:intent-score`, `:intent-reasons`, and
-`:post-rerank-rank` so policy never masquerades as model confidence.
+The stage does not mutate LateOn or FTS scores. It emits separate relevance
+and qualification channels: `:relevance-qualified?` and
+`:relevance-reasons` describe vocabulary coverage, while
+`:structurally-qualified?` and `:structural-reasons` describe evidence that a
+candidate has the code role required by the task. It also emits
+`:pre-rerank-rank`, `:intent-score`, and `:post-rerank-rank`. This separation
+prevents a high lexical or semantic score from masquerading as structural
+proof.
 
 The built-in reranker is deliberately conservative: it only reorders when the
 query analyzer identifies supported concepts or multiple candidates have
@@ -408,3 +413,36 @@ remain independently measurable and replaceable.
 
 The implementation is more complex, so provenance and frozen evaluations are
 release gates rather than optional diagnostics.
+
+## Qualification integrity amendment — 2026-08-15
+
+An implementation review found that query-term matches, concept hints, and
+structural qualification were accumulated into one reason set. As a result, a
+candidate such as `set-role-if-supported!` could be relevant to the words
+"supported databases" and then be treated as if it proved membership in the
+requested database set. If a router advised `:set` or `:flow`, this relevance
+could authorize the wrong retrieval shape and amplify the original miss.
+
+The implementation therefore adopts the following invariants:
+
+1. Lexical and semantic relevance may generate and reorder candidates, but
+   cannot structurally qualify them.
+2. Automatic `:lookup` requires exactly one structurally qualified candidate.
+   Automatic `:set` requires at least two. Automatic `:flow` requires at least
+   two plus an exact execution edge between qualified candidates.
+3. Only exact `calls` and `macro-invokes` edges currently establish execution
+   flow. Containment, imports, implementation, topic, and generic reference
+   edges do not.
+4. Set inventories contain only structurally qualified candidates.
+5. When no candidate qualifies, bounded relevance-based roots may still form a
+   best-effort packet, but the plan stays `:adaptive` and reports
+   `:evidence-status :relevance-only` plus
+   `:seed-selection-authority :relevance-fallback`. If there is not even
+   query-term relevance, it reports `:no-evidence` and `:rank-fallback`.
+6. Explicit caller seed-mode overrides remain authoritative. Their provenance
+   still discloses whether structural evidence supported the selected roots.
+
+These rules are repository-neutral. Concept qualification may later be
+extended by analyzers or framework providers, but every extension must emit a
+named, testable structural reason rather than promote retrieval score into
+proof.

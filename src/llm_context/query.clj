@@ -301,12 +301,16 @@
            (take limit)
            vec))))
 
+(def ^:private flow-edge-kinds
+  #{:edge.kind/calls :edge.kind/macro-invokes})
+
 (defn- exact-relationship-count
-  "Count exact graph edges among a bounded prefix of retrieved candidates.
-  This is structural support for a flow plan, not a relevance score."
+  "Count exact execution edges among structurally qualified candidates.
+  Generic containment, imports, implementation, and reference edges do not
+  establish an ordered flow."
   [graph candidates]
   (let [ids (->> candidates
-                 (filter #(and (:intent-qualified? %)
+                 (filter #(and (:structurally-qualified? %)
                                (pos? (double (:intent-score % 0.0)))))
                  (take 12) (map :id) distinct vec)]
     (if (< (count ids) 2)
@@ -314,14 +318,15 @@
       (or (some-> (store/query
                    graph
                    '[:find (count ?edge)
-                     :in $ [?from-id ...] [?to-id ...]
+                     :in $ [?from-id ...] [?to-id ...] [?kind ...]
                      :where
                      [?from :symbol/id ?from-id]
                      [?to :symbol/id ?to-id]
                      [?edge :edge/from ?from]
                      [?edge :edge/to ?to]
+                     [?edge :edge/kind ?kind]
                      [?edge :edge/resolution :resolution/exact]]
-                   [ids ids])
+                   [ids ids (vec flow-edge-kinds)])
                   ffirst long)
           0))))
 
