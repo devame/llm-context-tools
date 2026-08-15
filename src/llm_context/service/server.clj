@@ -38,8 +38,9 @@
     "stats" (query/stats graph)
     "find-symbol" (query/find-symbol graph (argument))
     "search"
-    (let [{:keys [term mode]} (query-search-options args)]
-      (query/search-explain graph semantic-client settings term {:mode mode}))
+    (let [{:keys [term mode source-preference]} (query-search-options args)]
+      (query/search-explain graph semantic-client settings term
+                            {:mode mode :source-preference source-preference}))
     "callers" (query/callers graph (argument))
     "callees" (query/callees-command graph args)
     "trace" (query/trace-command graph settings args)
@@ -162,7 +163,8 @@
     :analyze (analyze! graph generation project settings (:full? request))
     :query
     (if (= "search" (:subcommand request))
-      (let [{:keys [term mode]} (query-search-options (:args request))
+      (let [{:keys [term mode source-preference]}
+            (query-search-options (:args request))
             semantic-attempt
             (if (= :hybrid mode)
               ;; Keep the historical arity on the default path for callers
@@ -173,15 +175,21 @@
          graph generation true
          #(if (= :hybrid mode)
             (query/search-explain-with-attempt
-             % settings term semantic-attempt)
+             % settings term semantic-attempt
+             {:source-preference source-preference})
             (query/search-explain-with-attempt
-             % settings term semantic-attempt mode))))
+             % settings term semantic-attempt
+             {:mode mode :source-preference source-preference}))))
       (read-consistently
        graph generation true
        #(query-value % (:client runtime) settings
                      (:subcommand request) (:args request))))
     :context
-    (let [options (:options request)
+    (let [options (cond-> (:options request)
+                    (and (get-in request [:options :intent?])
+                         (nil? (get-in request [:options :source-preference])))
+                    (assoc :source-preference
+                           (get-in settings [:context :intent-source-preference])))
           packet
           (if (:intent? options)
             (let [term (:focus options)
@@ -194,7 +202,8 @@
                    (fn [view]
                      (let [search
                            (query/search-explain-with-attempt
-                            view settings term semantic-attempt)
+                            view settings term semantic-attempt
+                            {:source-preference (:source-preference options)})
                            resolution
                            (context/resolve-intent-focus term search)]
                        (context/build-from-seeds view options resolution))))]

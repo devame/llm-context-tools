@@ -61,7 +61,8 @@
                                        :intent? true
                                        :format :edn
                                        :depth context-depth
-                                       :max-tokens context-max-tokens}}))
+                                       :max-tokens context-max-tokens
+                                       :source-preference :auto}}))
           context-ms (when context-started (elapsed-ms context-started))
           packet (when (:ok context-response) (:value context-response))
           selected (get-in packet [:focus-resolution :selected])
@@ -103,6 +104,12 @@
        (when (= :hybrid mode)
          (boolean
           (some #(contains? (:matched-by %) :lateon) selected)))
+       :seed-source-role (when (= :hybrid mode)
+                           (:source-role (first selected)))
+       :resolved-source-preference
+       (when (= :hybrid mode)
+         (get-in packet [:focus-resolution :retrieval
+                         :resolved-source-preference]))
        :result-count (count results)
        :context-error (when (and context-response (not (:ok context-response)))
                         (:error context-response))}))))
@@ -156,7 +163,8 @@
      :document-version (:document-version lateon)
      :candidate-count (:candidate-count lateon)
      :context-depth context-depth
-     :context-max-tokens context-max-tokens}))
+     :context-max-tokens context-max-tokens
+     :context-source-preference :auto}))
 
 (defn- benchmark-result
   ([project corpus settings]

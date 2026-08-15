@@ -5,6 +5,7 @@
             [llm-context.model.schema :as schema]
             [llm-context.semantic.hybrid :as hybrid]
             [llm-context.semantic.mode :as retrieval-mode]
+            [llm-context.source-role :as source-role]
             [llm-context.store :as store]))
 
 (defn stats [graph]
@@ -200,6 +201,7 @@
     (loop [remaining (next args)
            result {:term term
                    :mode retrieval-mode/default
+                   :source-preference :none
                    :explain? false}]
       (if-let [argument (first remaining)]
         (case argument
@@ -209,6 +211,13 @@
             (recur (nnext remaining)
                    (assoc result :mode (retrieval-mode/normalize value)))
             (throw (ex-info (str argument " requires fts-only, lateon-only, or hybrid")
+                            {:exit-code 2})))
+          "--source-preference"
+          (if-let [value (second remaining)]
+            (recur (nnext remaining)
+                   (assoc result :source-preference
+                          (source-role/normalize-preference value)))
+            (throw (ex-info "--source-preference requires auto, production, test, or none"
                             {:exit-code 2})))
           (throw (ex-info (str "Unknown query search option: " argument)
                           {:exit-code 2})))
@@ -223,7 +232,9 @@
   optional fifth argument for an explicit ablation."
   ([graph semantic-client config term]
    (search graph semantic-client config term {}))
-  ([graph semantic-client config term {:keys [mode] :or {mode retrieval-mode/default}}]
+  ([graph semantic-client config term {:keys [mode source-preference]
+                                       :or {mode retrieval-mode/default
+                                            source-preference :none}}]
    (let [mode (retrieval-mode/normalize mode)
          candidate-limit (or (get-in config
                                      [:semantic :lateon-code :candidate-count])
@@ -235,7 +246,8 @@
 
        (:lateon-only :hybrid)
        (:results
-        (search-explain graph semantic-client config term {:mode mode}))))))
+        (search-explain graph semantic-client config term
+                        {:mode mode :source-preference source-preference}))))))
 
 (defn semantic-search-attempt
   "Run only the external semantic phase of search.
@@ -253,31 +265,53 @@
   "Fuse a completed semantic attempt with current lexical and graph state."
   ([graph config term semantic-attempt]
    (search-explain-with-attempt
-    graph config term semantic-attempt
-    (or (:mode semantic-attempt) retrieval-mode/default)))
-  ([graph config term semantic-attempt mode]
-   (let [mode (retrieval-mode/normalize mode)
+    graph config term semantic-attempt {}))
+  ([graph config term semantic-attempt options-or-mode]
+   (let [{:keys [mode source-preference]}
+         (if (map? options-or-mode)
+           options-or-mode
+           {:mode options-or-mode})
+         mode (retrieval-mode/normalize
+               (or mode (:mode semantic-attempt) retrieval-mode/default))
+         source-preference (source-role/normalize-preference
+                            (or source-preference :none))
          candidate-limit (or (get-in config
                                      [:semantic :lateon-code :candidate-count])
                              50)
-         lexical-results (symbols graph term candidate-limit)]
-     (case mode
-       :fts-only (hybrid/fts-explain lexical-results)
-       :lateon-only (hybrid/fuse-with-metadata
-                     graph config term [] semantic-attempt mode)
-       :hybrid (hybrid/fuse-with-metadata
-                graph config term lexical-results semantic-attempt mode)))))
+         lexical-results (symbols graph term candidate-limit)
+         response
+         (case mode
+           :fts-only (hybrid/fts-explain lexical-results)
+           :lateon-only (hybrid/fuse-with-metadata
+                         graph config term [] semantic-attempt mode)
+           :hybrid (hybrid/fuse-with-metadata
+                    graph config term lexical-results semantic-attempt mode))
+         preferred
+         (source-role/prefer
+          (:results response) term source-preference
+          (get-in config [:context :source-role-overrides]))
+         {:keys [requested resolved reason]} (:resolution preferred)]
+     (assoc response
+            :results (:results preferred)
+            :retrieval
+            (assoc (:retrieval response)
+                   :requested-source-preference requested
+                   :resolved-source-preference resolved
+                   :source-preference-reason reason
+                   :source-role-counts (:role-counts preferred)
+                   :source-preference-reordered? (:reordered? preferred))))))
 
 (defn search-explain
   ([graph semantic-client config term]
    (search-explain graph semantic-client config term {}))
-  ([graph semantic-client config term {:keys [mode]
-                                      :or {mode retrieval-mode/default}}]
+  ([graph semantic-client config term {:keys [mode source-preference]
+                                       :or {mode retrieval-mode/default
+                                            source-preference :none}}]
    (let [mode (retrieval-mode/normalize mode)]
      (search-explain-with-attempt
       graph config term
       (semantic-search-attempt semantic-client config term mode)
-      mode))))
+      {:mode mode :source-preference source-preference}))))
 
 (defn callers [graph target]
   (->> (store/query

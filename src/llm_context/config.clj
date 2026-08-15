@@ -1,7 +1,8 @@
 (ns llm-context.config
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [llm-context.source-role :as source-role])
   (:import [java.io PushbackReader]
            [java.nio.file FileAlreadyExistsException Files OpenOption Path StandardOpenOption]))
 
@@ -15,6 +16,12 @@
 
 (defn- positive-number? [value]
   (and (number? value) (pos? value)))
+
+(defn- valid-source-role-override? [value]
+  (and (map? value)
+       (= #{:role :pattern} (set (keys value)))
+       (contains? source-role/roles (:role value))
+       (non-blank-string? (:pattern value))))
 
 (defn deep-merge
   "Recursively merge configuration maps; user scalars and collections replace
@@ -77,6 +84,15 @@
 
     (not (pos-int? (get-in config [:context :trace-limit])))
     (conj ":context/:trace-limit must be a positive integer")
+
+    (not (contains? source-role/preferences
+                    (get-in config [:context :intent-source-preference])))
+    (conj ":context/:intent-source-preference must be :auto, :production, :test, or :none")
+
+    (not (and (vector? (get-in config [:context :source-role-overrides]))
+              (every? valid-source-role-override?
+                      (get-in config [:context :source-role-overrides]))))
+    (conj ":context/:source-role-overrides must contain ordered {:role keyword :pattern glob} maps")
 
     (not (and (vector? (get-in config [:semantic :providers]))
               (every? keyword? (get-in config [:semantic :providers]))))

@@ -115,7 +115,7 @@ llm-context doctor
 llm-context analyze [--full|--check]
 llm-context query stats
 llm-context query find-symbol <name-or-id>
-llm-context query search <natural-language-query> [--mode fts-only|lateon-only|hybrid] [--explain]
+llm-context query search <natural-language-query> [--mode fts-only|lateon-only|hybrid] [--source-preference auto|production|test|none] [--explain]
 llm-context query callers <symbol-id>
 llm-context query callees <symbol-id> [--include-external]
 llm-context query trace <symbol-id> [--depth N] [--limit N]
@@ -125,7 +125,7 @@ llm-context query unresolved [--classification unresolved|ambiguous|dynamic|exte
 llm-context query topics|registrations|dispatchers|subscribers
 llm-context query state-readers|state-writers
 llm-context context <name-or-id> [--depth N] [--max-tokens N]
-llm-context context --intent <natural-language-query> [--depth N] [--max-tokens N]
+llm-context context --intent <natural-language-query> [--source-preference auto|production|test|none] [--depth N] [--max-tokens N]
 llm-context export --format edn|json|jsonl|markdown [--output PATH]
 llm-context summary [--output PATH]
 llm-context integrate claude|codex|generic [--force]
@@ -151,6 +151,12 @@ only the highest-ranked symbol as the traversal seed, and records up to four
 unexpanded alternatives in the packet. LateOn chooses the likely starting
 symbol; every relationship admitted afterward is still an exact canonical
 graph edge. Without the resident service it falls back to Datalevin retrieval.
+Intent context defaults to `--source-preference auto`: ordinary implementation
+questions stably prefer production paths, while requests explicitly about
+tests prefer test paths. Exact identifier matches retain priority, scores are
+never rewritten, and the packet records fused rank, final rank, source role,
+and the resolved preference. `query search` defaults to `none` for backward-
+compatible general-purpose search ordering.
 
 `analyze` runs embedded clj-kondo once over the complete Clojure source set and
 a two-pass Tree-sitter AST/module resolver over Janet. Static Clojure topic

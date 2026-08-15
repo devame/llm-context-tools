@@ -261,10 +261,11 @@
     "find-symbol" ((resolve-fn 'llm-context.query/find-symbol)
                    graph (require-argument subcommand args))
     "search"
-    (let [{:keys [term mode]}
+    (let [{:keys [term mode source-preference]}
           ((resolve-fn 'llm-context.query/parse-search-args) args)]
       ((resolve-fn 'llm-context.query/search-explain)
-       graph semantic-client settings term {:mode mode}))
+       graph semantic-client settings term
+       {:mode mode :source-preference source-preference}))
     "callers" ((resolve-fn 'llm-context.query/callers)
                graph (require-argument subcommand args))
     "callees" ((resolve-fn 'llm-context.query/callees-command) graph args)
@@ -482,6 +483,14 @@
     (if-let [arg (first remaining)]
       (case arg
         "--intent" (recur (next remaining) (assoc result :intent? true))
+        "--source-preference"
+        (if-let [value (second remaining)]
+          (recur (nnext remaining)
+                 (assoc result :source-preference
+                        ((resolve-fn 'llm-context.source-role/normalize-preference)
+                         value)))
+          (throw (ex-info "--source-preference requires auto, production, test, or none"
+                          {:exit-code 2})))
         "--max-tokens" (if-let [value (second remaining)]
                          (recur (nnext remaining)
                                 (assoc result :max-tokens (parse-long value)))
@@ -520,6 +529,8 @@
         options (parse-context-args
                  args {:max-tokens (get-in settings [:context :default-max-tokens])
                        :depth (get-in settings [:context :trace-depth])
+                       :source-preference
+                       (get-in settings [:context :intent-source-preference])
                        :format "markdown"})]
     (when-not (:focus options)
       (throw (ex-info "context requires a symbol name, ID, or --intent query"
@@ -546,7 +557,8 @@
                           search
                           ((resolve-fn
                             'llm-context.query/search-explain-with-attempt)
-                           graph settings (:focus options) attempt)
+                           graph settings (:focus options) attempt
+                           {:source-preference (:source-preference options)})
                           resolution
                           ((resolve-fn
                             'llm-context.context/resolve-intent-focus)

@@ -128,6 +128,15 @@ Invalid candidates are discarded before ranking or hydration. Multiple chunks
 collapse to their symbol. Exact identifier matches retain priority and the
 remaining lexical and semantic ranks are combined deterministically.
 
+Source-role preference is applied only after fresh candidates have been
+hydrated from the canonical graph. It derives production, test, generated,
+vendor, or unknown roles from repository-relative file paths, then performs a
+stable policy ordering without changing reciprocal-rank scores. This keeps
+semantic relevance distinct from caller intent: tests remain searchable and
+available as alternatives, but a general implementation question can choose a
+production traversal seed. Because role derivation uses current graph paths,
+changing this policy does not require semantic document re-encoding.
+
 If NextPlaid is unavailable, loading, unhealthy, or exceeds its query timeout,
 the command returns Datalevin results. Semantic retrieval is an enhancement,
 not a command availability dependency.

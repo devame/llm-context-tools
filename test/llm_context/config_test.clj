@@ -25,7 +25,9 @@
     (is (= 120000
            (get-in loaded [:semantic :lateon-code :startup-timeout-ms])))
     (is (= 4 (get-in loaded [:context :trace-depth])))
-    (is (= 200 (get-in loaded [:context :trace-limit])))))
+    (is (= 200 (get-in loaded [:context :trace-limit])))
+    (is (= :auto (get-in loaded [:context :intent-source-preference])))
+    (is (= [] (get-in loaded [:context :source-role-overrides])))))
 
 (deftest trace-bounds-must-be-positive
   (let [context (temp-project)]
@@ -44,6 +46,35 @@
     (let [loaded (config/load-config context)]
       (is (= ["lib"] (get-in loaded [:analysis :include])))
       (is (pos-int? (get-in loaded [:analysis :max-file-bytes]))))))
+
+(deftest source-role-settings-are-validated-and-ordered
+  (let [context (temp-project)]
+    (spit (str (:config-file context))
+          (pr-str {:context
+                   {:intent-source-preference :production
+                    :source-role-overrides
+                    [{:role :test :pattern "quality/**"}
+                     {:role :production :pattern "quality/runtime/**"}]}}))
+    (let [loaded (config/load-config context)]
+      (is (= :production
+             (get-in loaded [:context :intent-source-preference])))
+      (is (= [:test :production]
+             (mapv :role
+                   (get-in loaded [:context :source-role-overrides]))))))
+  (let [context (temp-project)]
+    (spit (str (:config-file context))
+          (pr-str {:context
+                   {:intent-source-preference :sometimes
+                    :source-role-overrides
+                    [{:role :mystery :pattern "mystery/**"}
+                     {:role :test}]}}))
+    (let [errors (:errors
+                  (ex-data
+                   (try (config/load-config context)
+                        nil
+                        (catch clojure.lang.ExceptionInfo error error))))]
+      (is (some #(re-find #"intent-source-preference" %) errors))
+      (is (some #(re-find #"source-role-overrides" %) errors)))))
 
 (deftest init-never-overwrites
   (let [context (temp-project)]

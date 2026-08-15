@@ -57,4 +57,6 @@
  :context
  {:default-max-tokens 8000
   :trace-depth 4
-  :trace-limit 200}}
+  :trace-limit 200
+  :intent-source-preference :auto
+  :source-role-overrides []}}

@@ -12,6 +12,9 @@
         (mapv (fn [index]
                 {:id (str "symbol:" index)
                  :qualified-name (str "fixture/symbol-" index)
+                 :source-role (if (zero? index) :production :test)
+                 :fused-rank (inc index)
+                 :final-rank (inc index)
                  :matched-by (if (zero? index) #{:lateon :fts} #{:lateon})
                  :score (/ 1.0 (inc index))})
               (range 7))
@@ -23,6 +26,7 @@
     (is (= :intent (:mode resolution)))
     (is (= :hybrid (:strategy resolution)))
     (is (= ["symbol:0"] (mapv :id (:selected resolution))))
+    (is (= :production (get-in resolution [:selected 0 :source-role])))
     (is (= ["symbol:1" "symbol:2" "symbol:3" "symbol:4"]
            (mapv :id (:alternatives resolution))))
     (is (= retrieval (:retrieval resolution))))

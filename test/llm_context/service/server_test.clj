@@ -322,6 +322,7 @@
         entered-retrieval (promise)
         release-retrieval (promise)
         acquired-graph (promise)
+        seen-options (atom nil)
         runtime-state (atom {:client :semantic-client})]
     (with-redefs [query/semantic-search-attempt
                   (fn [_ _ _]
@@ -330,19 +331,23 @@
                     {:status :unavailable :candidates [] :latency-ms 0})
                   store/assert-query-compatible! identity
                   query/search-explain-with-attempt
-                  (fn [& _] {:results []})]
+                  (fn [_ _ _ _ options]
+                    (reset! seen-options options)
+                    {:results []})]
       (let [search
             (future
               (#'server/dispatch nil {} graph generation runtime-state
                                  {:op :query :subcommand "search"
-                                  :args ["semantic intent"]}))]
+                                  :args ["semantic intent" "--source-preference"
+                                         "production"]}))]
         (is (= true (deref entered-retrieval 1000 false)))
         (future
           (locking graph
             (deliver acquired-graph true)))
         (is (= true (deref acquired-graph 1000 false)))
         (deliver release-retrieval true)
-        (is (= {:results []} (deref search 1000 ::timeout)))))))
+        (is (= {:results []} (deref search 1000 ::timeout)))
+        (is (= :production (:source-preference @seen-options)))))))
 
 (deftest intent-context-resolves-a-hybrid-seed-before-traversal
   (let [graph (Object.)
@@ -366,9 +371,10 @@
                     (is (= "where is selection handled?" term))
                     attempt)
                   query/search-explain-with-attempt
-                  (fn [_ _ term actual-attempt]
+                  (fn [_ _ term actual-attempt options]
                     (is (= "where is selection handled?" term))
                     (is (= attempt actual-attempt))
+                    (is (= :auto (:source-preference options)))
                     search)
                   context/build-from-seeds
                   (fn [_ options resolution]
@@ -377,7 +383,8 @@
                   store/assert-query-compatible! identity]
       (is (= {:packet/version 3}
              (#'server/dispatch
-              nil {} graph generation runtime-state
+              nil {:context {:intent-source-preference :auto}}
+              graph generation runtime-state
               {:op :context
                :options {:focus "where is selection handled?"
                          :intent? true :format :edn}})))

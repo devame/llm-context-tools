@@ -65,6 +65,67 @@
         (is (= #{:lateon} (:matched-by (first result))))
         (is (= "src/a.clj" (:file (first result))))))))
 
+(deftest source-preference-reorders-fresh-results-without-changing-scores
+  (let [{:keys [project file entities]} (graph-fixture)
+        client (fake/create)
+        test-file (assoc file
+                         :file/id "file:test/a_test.clj"
+                         :file/path "test/a_test.clj")
+        test-symbol
+        {:entity/type :entity.type/symbol
+         :symbol/id "symbol:test-reset"
+         :symbol/name "reset-password-test"
+         :symbol/qualified-name "sample-test/reset-password-test"
+         :symbol/kind :symbol.kind/function
+         :symbol/file (:file/id test-file)
+         :symbol/platform :clj
+         :symbol/analyzer :test
+         :symbol/scope :scope/top-level
+         :symbol/role :role/definition
+         :symbol/indexable? true
+         :source/start-line 1 :source/start-column 1
+         :source/end-line 2 :source/end-column 1}]
+    (store/with-store [graph project settings]
+      (store/replace-file! graph file entities)
+      (store/replace-file! graph test-file [test-symbol])
+      (state/put-indexed!
+       graph (indexed "symbol:test-reset" (:file/id test-file) "sha256:test"))
+      (state/put-indexed!
+       graph (indexed "symbol:caller" (:file/id file) "sha256:caller"))
+      (fake/set-search-results!
+       client [(candidate "symbol:test-reset" (:file/id test-file)
+                          "sha256:test" 0 10.0)
+               (candidate "symbol:caller" (:file/id file)
+                          "sha256:caller" 0 9.0)])
+      (let [none (query/search-explain
+                  graph client settings "reset password"
+                  {:mode :lateon-only :source-preference :none})
+            production (query/search-explain
+                        graph client settings "reset password"
+                        {:mode :lateon-only :source-preference :production})
+            test-auto (query/search-explain
+                       graph client settings "which tests reset passwords?"
+                       {:mode :lateon-only :source-preference :auto})
+            exact-test (query/search-explain
+                        graph client settings "sample-test/reset-password-test"
+                        {:mode :lateon-only :source-preference :production})]
+        (is (= ["symbol:test-reset" "symbol:caller"]
+               (mapv :id (:results none))))
+        (is (= ["symbol:caller" "symbol:test-reset"]
+               (mapv :id (:results production))))
+        (is (= ["symbol:test-reset" "symbol:caller"]
+               (mapv :id (:results test-auto))))
+        (is (= ["symbol:test-reset" "symbol:caller"]
+               (mapv :id (:results exact-test))))
+        (is (= [(/ 1.0 62.0) (/ 1.0 61.0)]
+               (mapv :score (:results production))))
+        (is (= :production
+               (get-in production [:retrieval :resolved-source-preference])))
+        (is (= {:test 1 :production 1}
+               (get-in production [:retrieval :source-role-counts])))
+        (is (true?
+             (get-in production [:retrieval :source-preference-reordered?])))))))
+
 (deftest fts-only-does-not-contact-semantic-sidecar
   (let [{:keys [project file entities]} (graph-fixture)
         failing
@@ -106,9 +167,14 @@
 (deftest search-mode-arguments-are-normalized
   (is (= {:term "where is auth handled?"
           :mode :lateon-only
+          :source-preference :none
           :explain? true}
          (query/parse-search-args
           ["where is auth handled?" "--mode" "lateon-only" "--explain"])))
+  (is (= :production
+         (:source-preference
+          (query/parse-search-args
+           ["where is auth handled?" "--source-preference" "production"]))))
   (is (thrown-with-msg?
        clojure.lang.ExceptionInfo
        #"Retrieval mode must be one of"

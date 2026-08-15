@@ -251,7 +251,11 @@
            :qualified-name (:qualified-name symbol)
            :rank rank
            :matched-by (:matched-by symbol)
-           :score (:score symbol)})
+           :score (:score symbol)
+           :source-role (:source-role symbol)
+           :fused-rank (:fused-rank symbol)
+           :final-rank (:final-rank symbol)
+           :ranking-reason (:ranking-reason symbol)})
         candidates (mapv candidate (range 1 (inc (count results))) results)
         selected (first candidates)]
     {:mode :intent
@@ -315,7 +319,24 @@
        " (`"
        (str/join "`, `"
                  (map :id (get-in packet [:focus-resolution :selected])))
-       "`)\n\n"
+       "`)\n"
+       (when (= :intent (get-in packet [:focus-resolution :mode]))
+         (str "Source preference: "
+              (name (get-in packet [:focus-resolution :retrieval
+                                    :requested-source-preference] :none))
+              " → "
+              (name (get-in packet [:focus-resolution :retrieval
+                                    :resolved-source-preference] :none))
+              " ("
+              (name (get-in packet [:focus-resolution :retrieval
+                                    :source-preference-reason]
+                            :explicit-preference))
+              ")\n"
+              "Selected source role: "
+              (name (get-in packet [:focus-resolution :selected 0 :source-role]
+                            :unknown))
+              "\n"))
+       "\n"
        "## Symbols\n\n"
        (str/join
         "\n"

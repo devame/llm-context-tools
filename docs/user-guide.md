@@ -67,6 +67,7 @@ llm-context query stats
 llm-context query find-symbol authenticate
 llm-context query search "where is authentication handled?"
 llm-context query search "where is authentication handled?" --explain
+llm-context query search "where is authentication handled?" --source-preference production --explain
 llm-context query callers symbol:...
 llm-context query callees symbol:...
 llm-context query callees symbol:... --include-external
@@ -80,14 +81,18 @@ llm-context query state-readers saved-programs
 supports `--mode fts-only`, `--mode lateon-only`, and `--mode hybrid` (the
 default); the first two are useful for controlled retrieval ablations.
 `--explain` reports semantic status, latency, raw candidates, accepted fresh
-candidates, and stale rejections. A timeout or runtime failure still returns
-FTS results with an explicit warning on the hybrid path.
+candidates, stale rejections, source-role counts, and whether a source
+preference reordered results. Search defaults to `--source-preference none`;
+`auto`, `production`, and `test` are available when the caller wants explicit
+source-role policy. A timeout or runtime failure still returns FTS results with
+an explicit warning on the hybrid path.
 
 ## Build bounded context
 
 ```bash
 llm-context context authenticate --depth 3 --max-tokens 4000
 llm-context context --intent "where is authentication failure handled?"
+llm-context context --intent "where are authentication tests?" --source-preference auto
 llm-context context authenticate --format edn
 ```
 
@@ -102,6 +107,24 @@ natural-language request before traversal. The highest-ranked fresh result is
 the only traversal seed; up to four alternatives are retained as packet
 metadata but are not expanded. If LateOn is unavailable or times out, lexical
 retrieval remains available and the packet records `:lexical-fallback`.
+Intent requests default to `--source-preference auto`. General implementation
+questions prefer production files; explicit test/spec/fixture questions prefer
+test files. This is a stable policy ordering, not a filter: lower-priority
+roles remain alternatives, exact identifier matches retain priority, and the
+original reciprocal-rank score is unchanged.
+
+Project-specific path conventions can override the built-in cross-language
+classifier in `llm-context.edn`:
+
+```edn
+{:context
+ {:intent-source-preference :auto
+  :source-role-overrides
+  [{:role :production :pattern "test/support/runtime/**"}
+   {:role :test :pattern "quality/**"}]}}
+```
+
+Overrides are evaluated in order and use `*`, `**`, and `?` glob syntax.
 
 ## Semantic indexing
 
