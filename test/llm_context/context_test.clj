@@ -46,6 +46,27 @@
         "missing intent"
         {:results [] :retrieval {:status :no-matches}}))))
 
+(deftest intent-focus-selects-diverse-roots-for-set-plans
+  (let [results [{:id "symbol:a" :qualified-name "fixture.a/routes"
+                  :file "src/a.clj" :intent-score 4 :intent-qualified? true
+                  :matched-by #{:lateon}}
+                 {:id "symbol:a-helper" :qualified-name "fixture.a/handler"
+                  :file "src/a.clj" :intent-score 3 :intent-qualified? true
+                  :matched-by #{:lateon}}
+                 {:id "symbol:b" :qualified-name "fixture.b/routes"
+                  :file "src/b.clj" :intent-score 2 :intent-qualified? true
+                  :matched-by #{:fts}}]
+        resolution
+        (context/resolve-intent-focus
+         "what modules expose endpoints?"
+         {:results results
+          :retrieval {:query-plan {:shape :set :seed-mode :multi
+                                   :max-seeds 2}}})]
+    (is (= ["symbol:a" "symbol:b"] (mapv :id (:selected resolution))))
+    (is (= ["fixture.a/routes" "fixture.a/handler" "fixture.b/routes"]
+           (mapv :qualified-name (:inventory resolution))))
+    (is (= ["symbol:a-helper"] (mapv :id (:alternatives resolution))))))
+
 (deftest context-packets-are-focused-depth-bounded-and-renderable
   (let [root (Files/createTempDirectory "llm-context-packet-"
                                         (make-array java.nio.file.attribute.FileAttribute 0))

@@ -108,6 +108,9 @@
   ([client config term]
    (retrieve client config term :hybrid))
   ([client config term retrieval-mode-value]
+   (retrieve client config term retrieval-mode-value {}))
+  ([client config term retrieval-mode-value
+    {:keys [candidate-count timeout-ms]}]
    (let [retrieval-mode-value (retrieval-mode/normalize retrieval-mode-value)
          lateon (get-in config [:semantic :lateon-code])
         started (System/nanoTime)
@@ -117,7 +120,10 @@
             {:status :ok
              :candidates
              (vec (index/search-text
-                   client term {:top-k (:candidate-count lateon)}))}
+                   client term
+                   (cond-> {:top-k (or candidate-count
+                                       (:candidate-count lateon))}
+                     timeout-ms (assoc :timeout-ms timeout-ms))))}
             (catch Throwable error
               {:status (failure-status error)
                :error (or (.getMessage error) (str (class error)))
@@ -125,6 +131,8 @@
           {:status :unavailable :candidates []})]
      (assoc attempt
             :mode retrieval-mode-value
+            :requested-timeout-ms timeout-ms
+            :effective-timeout-ms (or timeout-ms (:query-timeout-ms lateon))
             :latency-ms
             (long (/ (- (System/nanoTime) started) 1000000))))))
 
@@ -196,6 +204,10 @@
       (cond-> {:mode retrieval-mode-value
                :status status
                :latency-ms latency-ms
+               :requested-timeout-ms (:requested-timeout-ms semantic-attempt)
+               :effective-timeout-ms (:effective-timeout-ms semantic-attempt)
+               :fallback? (and (= :hybrid retrieval-mode-value)
+                               (not= :ok status))
                :raw-candidate-count raw-count
                :accepted-fresh-candidate-count accepted-count
                :rejected-stale-candidate-count (- raw-count accepted-count)}

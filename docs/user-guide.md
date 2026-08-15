@@ -103,10 +103,15 @@ only a compact diagnostic budget. Graph-limit and token-limit truncation are
 reported separately.
 
 `--intent` asks the local LateOn index and Datalevin FTS to resolve a
-natural-language request before traversal. The highest-ranked fresh result is
-the only traversal seed; up to four alternatives are retained as packet
-metadata but are not expanded. If LateOn is unavailable or times out, lexical
-retrieval remains available and the packet records `:lexical-fallback`.
+natural-language request before traversal. An inspectable planner classifies
+the request as lookup, set discovery, or flow. Lookup requests keep one seed;
+set/flow requests may select bounded, diverse roots under one shared traversal
+budget. Set requests additionally expose a compact qualified-candidate
+inventory so a four-root traversal is not presented as an exhaustive set.
+Inventory entries are evidence summaries, not graph edges. Up to four
+unselected alternatives remain packet metadata. If LateOn
+is unavailable or times out, lexical retrieval remains available and the
+packet records `:lexical-fallback`.
 Intent requests default to `--source-preference auto`. General implementation
 questions prefer production files; explicit test/spec/fixture questions prefer
 test files. This is a stable policy ordering, not a filter: lower-priority
@@ -119,12 +124,22 @@ classifier in `llm-context.edn`:
 ```edn
 {:context
  {:intent-source-preference :auto
+  :intent-seed-mode :auto
+  :intent-max-seeds 4
+  :intent-rerank true
+  :intent-candidate-count 100
   :source-role-overrides
   [{:role :production :pattern "test/support/runtime/**"}
    {:role :test :pattern "quality/**"}]}}
 ```
 
 Overrides are evaluated in order and use `*`, `**`, and `?` glob syntax.
+
+Use `--semantic-timeout-ms N` to override the configured LateOn query deadline
+for one `query search` or `context --intent` request. Use
+`--seed-mode single|multi|auto` and `--max-seeds N` to override context
+cardinality. `query search` retains its existing ordering unless
+`--intent-rerank` is explicitly supplied.
 
 ## Semantic indexing
 

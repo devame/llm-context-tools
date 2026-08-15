@@ -261,11 +261,14 @@
     "find-symbol" ((resolve-fn 'llm-context.query/find-symbol)
                    graph (require-argument subcommand args))
     "search"
-    (let [{:keys [term mode source-preference]}
+    (let [{:keys [term mode source-preference intent-rerank?
+                  semantic-timeout-ms]}
           ((resolve-fn 'llm-context.query/parse-search-args) args)]
       ((resolve-fn 'llm-context.query/search-explain)
        graph semantic-client settings term
-       {:mode mode :source-preference source-preference}))
+       {:mode mode :source-preference source-preference
+        :intent-rerank? intent-rerank?
+        :semantic-timeout-ms semantic-timeout-ms}))
     "callers" ((resolve-fn 'llm-context.query/callers)
                graph (require-argument subcommand args))
     "callees" ((resolve-fn 'llm-context.query/callees-command) graph args)
@@ -491,6 +494,33 @@
                          value)))
           (throw (ex-info "--source-preference requires auto, production, test, or none"
                           {:exit-code 2})))
+        "--semantic-timeout-ms"
+        (if-let [value (second remaining)]
+          (let [timeout (parse-long value)]
+            (when-not (pos-int? timeout)
+              (throw (ex-info "--semantic-timeout-ms requires a positive integer"
+                              {:exit-code 2})))
+            (recur (nnext remaining)
+                   (assoc result :semantic-timeout-ms timeout)))
+          (throw (ex-info "--semantic-timeout-ms requires a positive integer"
+                          {:exit-code 2})))
+        "--seed-mode"
+        (if-let [value (second remaining)]
+          (recur (nnext remaining)
+                 (assoc result :seed-mode
+                        ((resolve-fn 'llm-context.intent/normalize-seed-mode)
+                         value)))
+          (throw (ex-info "--seed-mode requires auto, single, or multi"
+                          {:exit-code 2})))
+        "--max-seeds"
+        (if-let [value (second remaining)]
+          (let [maximum (parse-long value)]
+            (when-not (pos-int? maximum)
+              (throw (ex-info "--max-seeds requires a positive integer"
+                              {:exit-code 2})))
+            (recur (nnext remaining) (assoc result :max-seeds maximum)))
+          (throw (ex-info "--max-seeds requires a positive integer"
+                          {:exit-code 2})))
         "--max-tokens" (if-let [value (second remaining)]
                          (recur (nnext remaining)
                                 (assoc result :max-tokens (parse-long value)))
@@ -531,6 +561,10 @@
                        :depth (get-in settings [:context :trace-depth])
                        :source-preference
                        (get-in settings [:context :intent-source-preference])
+                       :seed-mode (get-in settings [:context :intent-seed-mode])
+                       :max-seeds (get-in settings [:context :intent-max-seeds])
+                       :intent-rerank?
+                       (get-in settings [:context :intent-rerank])
                        :format "markdown"})]
     (when-not (:focus options)
       (throw (ex-info "context requires a symbol name, ID, or --intent query"
@@ -553,12 +587,21 @@
                     (let [attempt
                           ((resolve-fn
                             'llm-context.query/semantic-search-attempt)
-                           nil settings (:focus options))
+                           nil settings (:focus options)
+                           {:mode :hybrid
+                            :semantic-timeout-ms
+                            (:semantic-timeout-ms options)
+                            :candidate-count
+                            (get-in settings [:context
+                                              :intent-candidate-count])})
                           search
                           ((resolve-fn
                             'llm-context.query/search-explain-with-attempt)
                            graph settings (:focus options) attempt
-                           {:source-preference (:source-preference options)})
+                           {:source-preference (:source-preference options)
+                            :intent-rerank? (:intent-rerank? options)
+                            :seed-mode (:seed-mode options)
+                            :max-seeds (:max-seeds options)})
                           resolution
                           ((resolve-fn
                             'llm-context.context/resolve-intent-focus)

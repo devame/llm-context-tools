@@ -27,6 +27,10 @@
     (is (= 4 (get-in loaded [:context :trace-depth])))
     (is (= 200 (get-in loaded [:context :trace-limit])))
     (is (= :auto (get-in loaded [:context :intent-source-preference])))
+    (is (= :auto (get-in loaded [:context :intent-seed-mode])))
+    (is (= 4 (get-in loaded [:context :intent-max-seeds])))
+    (is (true? (get-in loaded [:context :intent-rerank])))
+    (is (= 100 (get-in loaded [:context :intent-candidate-count])))
     (is (= [] (get-in loaded [:context :source-role-overrides])))))
 
 (deftest trace-bounds-must-be-positive

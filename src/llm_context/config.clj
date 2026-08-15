@@ -2,6 +2,7 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [llm-context.intent :as intent]
             [llm-context.source-role :as source-role])
   (:import [java.io PushbackReader]
            [java.nio.file FileAlreadyExistsException Files OpenOption Path StandardOpenOption]))
@@ -88,6 +89,19 @@
     (not (contains? source-role/preferences
                     (get-in config [:context :intent-source-preference])))
     (conj ":context/:intent-source-preference must be :auto, :production, :test, or :none")
+
+    (not (contains? intent/seed-modes
+                    (get-in config [:context :intent-seed-mode])))
+    (conj ":context/:intent-seed-mode must be :auto, :single, or :multi")
+
+    (not (pos-int? (get-in config [:context :intent-max-seeds])))
+    (conj ":context/:intent-max-seeds must be a positive integer")
+
+    (not (boolean? (get-in config [:context :intent-rerank])))
+    (conj ":context/:intent-rerank must be true or false")
+
+    (not (pos-int? (get-in config [:context :intent-candidate-count])))
+    (conj ":context/:intent-candidate-count must be a positive integer")
 
     (not (and (vector? (get-in config [:context :source-role-overrides]))
               (every? valid-source-role-override?

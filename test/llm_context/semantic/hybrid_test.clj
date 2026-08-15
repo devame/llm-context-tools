@@ -168,6 +168,8 @@
   (is (= {:term "where is auth handled?"
           :mode :lateon-only
           :source-preference :none
+          :intent-rerank? false
+          :semantic-timeout-ms nil
           :explain? true}
          (query/parse-search-args
           ["where is auth handled?" "--mode" "lateon-only" "--explain"])))
@@ -175,6 +177,14 @@
          (:source-preference
           (query/parse-search-args
            ["where is auth handled?" "--source-preference" "production"]))))
+  (is (= 5000
+         (:semantic-timeout-ms
+          (query/parse-search-args
+           ["where is auth handled?" "--semantic-timeout-ms" "5000"]))))
+  (is (true?
+       (:intent-rerank?
+        (query/parse-search-args
+         ["where is auth handled?" "--intent-rerank"]))))
   (is (thrown-with-msg?
        clojure.lang.ExceptionInfo
        #"Retrieval mode must be one of"
@@ -354,3 +364,24 @@
         (is (= :no-matches (:status retrieval)))
         (is (>= (:latency-ms retrieval) 500))
         (is (= 0 (:raw-candidate-count retrieval)))))))
+
+(deftest per-request-timeout-and-candidate-count-reach-the-semantic-provider
+  (let [seen (atom nil)
+        client
+        (reify index/SemanticIndex
+          (index-health [_] {:ready? true})
+          (ensure-index! [_] nil)
+          (add-documents! [_ _] nil)
+          (delete-symbols! [_ _] nil)
+          (indexed-chunk-count [_ _ _] 0)
+          (search-text [_ _ options]
+            (reset! seen options)
+            [])
+          (close-index! [_] nil))
+        attempt (query/semantic-search-attempt
+                 client settings "list endpoint modules"
+                 {:mode :hybrid :semantic-timeout-ms 5000
+                  :candidate-count 100})]
+    (is (= {:top-k 100 :timeout-ms 5000} @seen))
+    (is (= 5000 (:requested-timeout-ms attempt)))
+    (is (= 5000 (:effective-timeout-ms attempt)))))

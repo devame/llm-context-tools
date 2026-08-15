@@ -5,6 +5,7 @@
             [llm-context.config :as config]
             [llm-context.context :as context]
             [llm-context.export :as export]
+            [llm-context.intent :as intent]
             [llm-context.query :as query]
             [llm-context.semantic.reconcile :as semantic-reconcile]
             [llm-context.semantic.runtime :as semantic-runtime]
@@ -38,9 +39,12 @@
     "stats" (query/stats graph)
     "find-symbol" (query/find-symbol graph (argument))
     "search"
-    (let [{:keys [term mode source-preference]} (query-search-options args)]
+    (let [{:keys [term mode source-preference intent-rerank?
+                  semantic-timeout-ms]} (query-search-options args)]
       (query/search-explain graph semantic-client settings term
-                            {:mode mode :source-preference source-preference}))
+                            {:mode mode :source-preference source-preference
+                             :intent-rerank? intent-rerank?
+                             :semantic-timeout-ms semantic-timeout-ms}))
     "callers" (query/callers graph (argument))
     "callees" (query/callees-command graph args)
     "trace" (query/trace-command graph settings args)
@@ -163,23 +167,39 @@
     :analyze (analyze! graph generation project settings (:full? request))
     :query
     (if (= "search" (:subcommand request))
-      (let [{:keys [term mode source-preference]}
+      (let [{:keys [term mode source-preference intent-rerank?
+                    semantic-timeout-ms]}
             (query-search-options (:args request))
+            plan (intent/analyze
+                  term {:seed-mode (if intent-rerank?
+                                     (get-in settings [:context
+                                                       :intent-seed-mode])
+                                     :single)
+                        :default-max-seeds
+                        (get-in settings [:context :intent-max-seeds])
+                        :default-candidate-count
+                        (get-in settings [:semantic :lateon-code
+                                          :candidate-count])
+                        :multi-candidate-count
+                        (get-in settings [:context :intent-candidate-count])})
             semantic-attempt
-            (if (= :hybrid mode)
+            (if (and (= :hybrid mode) (not intent-rerank?)
+                     (nil? semantic-timeout-ms))
               ;; Keep the historical arity on the default path for callers
               ;; that instrument the resident service.
               (query/semantic-search-attempt (:client runtime) settings term)
-              (query/semantic-search-attempt (:client runtime) settings term mode))]
+              (query/semantic-search-attempt
+               (:client runtime) settings term
+               {:mode mode :semantic-timeout-ms semantic-timeout-ms
+                :candidate-count (:candidate-count plan)}))]
         (read-consistently
          graph generation true
-         #(if (= :hybrid mode)
-            (query/search-explain-with-attempt
-             % settings term semantic-attempt
-             {:source-preference source-preference})
-            (query/search-explain-with-attempt
-             % settings term semantic-attempt
-             {:mode mode :source-preference source-preference}))))
+         #(query/search-explain-with-attempt
+           % settings term semantic-attempt
+           {:mode mode :source-preference source-preference
+            :intent-rerank? intent-rerank?
+            :seed-mode (when intent-rerank?
+                         (get-in settings [:context :intent-seed-mode]))})))
       (read-consistently
        graph generation true
        #(query-value % (:client runtime) settings
@@ -189,13 +209,39 @@
                     (and (get-in request [:options :intent?])
                          (nil? (get-in request [:options :source-preference])))
                     (assoc :source-preference
-                           (get-in settings [:context :intent-source-preference])))
+                           (get-in settings [:context :intent-source-preference]))
+                    (and (get-in request [:options :intent?])
+                         (nil? (get-in request [:options :seed-mode])))
+                    (assoc :seed-mode
+                           (get-in settings [:context :intent-seed-mode]))
+                    (and (get-in request [:options :intent?])
+                         (nil? (get-in request [:options :max-seeds])))
+                    (assoc :max-seeds
+                           (get-in settings [:context :intent-max-seeds]))
+                    (and (get-in request [:options :intent?])
+                         (nil? (get-in request [:options :intent-rerank?])))
+                    (assoc :intent-rerank?
+                           (get-in settings [:context :intent-rerank])))
           packet
           (if (:intent? options)
             (let [term (:focus options)
+                  plan (intent/analyze
+                        term {:seed-mode (:seed-mode options)
+                              :max-seeds (:max-seeds options)
+                              :default-max-seeds
+                              (get-in settings [:context :intent-max-seeds])
+                              :default-candidate-count
+                              (get-in settings [:semantic :lateon-code
+                                                :candidate-count])
+                              :multi-candidate-count
+                              (get-in settings [:context
+                                                :intent-candidate-count])})
                   semantic-attempt
                   (query/semantic-search-attempt
-                   (:client runtime) settings term)
+                   (:client runtime) settings term
+                   {:mode :hybrid
+                    :semantic-timeout-ms (:semantic-timeout-ms options)
+                    :candidate-count (:candidate-count plan)})
                   packet
                   (read-consistently
                    graph generation true
@@ -203,7 +249,10 @@
                      (let [search
                            (query/search-explain-with-attempt
                             view settings term semantic-attempt
-                            {:source-preference (:source-preference options)})
+                            {:source-preference (:source-preference options)
+                             :intent-rerank? (:intent-rerank? options)
+                             :seed-mode (:seed-mode options)
+                             :max-seeds (:max-seeds options)})
                            resolution
                            (context/resolve-intent-focus term search)]
                        (context/build-from-seeds view options resolution))))]

@@ -289,7 +289,8 @@
            client
            {:method :post
             :path (str "/indices/" index-name "/search_with_encoding")
-            :timeout-ms (:query-timeout-ms settings)
+            :timeout-ms (or (:timeout-ms options)
+                            (:query-timeout-ms settings))
             :body {:queries [query]
                    :params
                    {:top_k top-k

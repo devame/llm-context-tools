@@ -2,6 +2,7 @@
   (:require [clojure.set :as set]
             [clojure.string :as str]
             [llm-context.graph.read :as graph-read]
+            [llm-context.intent :as intent]
             [llm-context.model.schema :as schema]
             [llm-context.semantic.hybrid :as hybrid]
             [llm-context.semantic.mode :as retrieval-mode]
@@ -202,6 +203,8 @@
            result {:term term
                    :mode retrieval-mode/default
                    :source-preference :none
+                   :intent-rerank? false
+                   :semantic-timeout-ms nil
                    :explain? false}]
       (if-let [argument (first remaining)]
         (case argument
@@ -218,6 +221,18 @@
                    (assoc result :source-preference
                           (source-role/normalize-preference value)))
             (throw (ex-info "--source-preference requires auto, production, test, or none"
+                            {:exit-code 2})))
+          "--intent-rerank"
+          (recur (next remaining) (assoc result :intent-rerank? true))
+          "--semantic-timeout-ms"
+          (if-let [value (second remaining)]
+            (let [timeout (parse-long value)]
+              (when-not (pos-int? timeout)
+                (throw (ex-info "--semantic-timeout-ms requires a positive integer"
+                                {:exit-code 2})))
+              (recur (nnext remaining)
+                     (assoc result :semantic-timeout-ms timeout)))
+            (throw (ex-info "--semantic-timeout-ms requires a positive integer"
                             {:exit-code 2})))
           (throw (ex-info (str "Unknown query search option: " argument)
                           {:exit-code 2})))
@@ -255,11 +270,36 @@
   FTS-only deliberately does not contact the semantic sidecar."
   ([semantic-client config term]
    (semantic-search-attempt semantic-client config term retrieval-mode/default))
-  ([semantic-client config term mode]
-   (let [mode (retrieval-mode/normalize mode)]
+  ([semantic-client config term mode-or-options]
+   (let [{:keys [mode] :as options}
+         (if (map? mode-or-options) mode-or-options {:mode mode-or-options})
+         mode (retrieval-mode/normalize (or mode retrieval-mode/default))]
      (if (= :fts-only mode)
-       {:mode mode :status :not-requested :candidates [] :latency-ms 0}
-       (hybrid/retrieve semantic-client config term mode)))))
+       {:mode mode :status :not-requested :candidates [] :latency-ms 0
+        :requested-timeout-ms (:semantic-timeout-ms options)
+        :effective-timeout-ms (or (:semantic-timeout-ms options)
+                                  (get-in config [:semantic :lateon-code
+                                                  :query-timeout-ms]))}
+       (hybrid/retrieve semantic-client config term mode
+                        {:candidate-count (:candidate-count options)
+                         :timeout-ms (:semantic-timeout-ms options)})))))
+
+(defn- intent-lexical-results [graph term limit plan enabled?]
+  (if-not (and enabled? (seq (:lexical-expansions plan)))
+    (symbols graph term limit)
+    (let [queries (into [term] (:lexical-expansions plan))
+          per-query-limit (max 10 (quot limit (count queries)))]
+      (->> queries
+           (mapcat #(symbols graph % per-query-limit))
+           (reduce (fn [{:keys [seen results] :as state} candidate]
+                     (if (contains? seen (:id candidate))
+                       state
+                       {:seen (conj seen (:id candidate))
+                        :results (conj results candidate)}))
+                   {:seen #{} :results []})
+           :results
+           (take limit)
+           vec))))
 
 (defn search-explain-with-attempt
   "Fuse a completed semantic attempt with current lexical and graph state."
@@ -267,7 +307,7 @@
    (search-explain-with-attempt
     graph config term semantic-attempt {}))
   ([graph config term semantic-attempt options-or-mode]
-   (let [{:keys [mode source-preference]}
+   (let [{:keys [mode source-preference intent-rerank? seed-mode max-seeds]}
          (if (map? options-or-mode)
            options-or-mode
            {:mode options-or-mode})
@@ -275,10 +315,27 @@
                (or mode (:mode semantic-attempt) retrieval-mode/default))
          source-preference (source-role/normalize-preference
                             (or source-preference :none))
-         candidate-limit (or (get-in config
-                                     [:semantic :lateon-code :candidate-count])
+         plan (intent/analyze
+               term {:seed-mode (if intent-rerank?
+                                  (or seed-mode
+                                      (get-in config [:context
+                                                      :intent-seed-mode]))
+                                  :single)
+                     :max-seeds (or max-seeds
+                                    (get-in config [:context :intent-max-seeds]))
+                     :default-max-seeds
+                     (get-in config [:context :intent-max-seeds])
+                     :default-candidate-count
+                     (get-in config [:semantic :lateon-code :candidate-count])
+                     :semantic-candidate-count
+                     (get-in config [:semantic :lateon-code :candidate-count])
+                     :multi-candidate-count
+                     (get-in config [:context :intent-candidate-count])})
+         candidate-limit (or (:candidate-count plan)
+                             (get-in config [:semantic :lateon-code :candidate-count])
                              50)
-         lexical-results (symbols graph term candidate-limit)
+         lexical-results (intent-lexical-results
+                          graph term candidate-limit plan intent-rerank?)
          response
          (case mode
            :fts-only (hybrid/fts-explain lexical-results)
@@ -290,28 +347,61 @@
          (source-role/prefer
           (:results response) term source-preference
           (get-in config [:context :source-role-overrides]))
-         {:keys [requested resolved reason]} (:resolution preferred)]
+         {:keys [requested resolved reason]} (:resolution preferred)
+         reranked (if intent-rerank?
+                    (intent/rerank term (:results preferred) plan)
+                    {:results (:results preferred)
+                     :provider :none :status :not-requested
+                     :reordered? false})]
      (assoc response
-            :results (:results preferred)
+            :results (:results reranked)
             :retrieval
             (assoc (:retrieval response)
                    :requested-source-preference requested
                    :resolved-source-preference resolved
                    :source-preference-reason reason
                    :source-role-counts (:role-counts preferred)
-                   :source-preference-reordered? (:reordered? preferred))))))
+                   :source-preference-reordered? (:reordered? preferred)
+                   :query-plan (dissoc plan :query-terms :expanded-terms)
+                   :reranker {:provider (:provider reranked)
+                              :status (:status reranked)
+                              :reordered? (:reordered? reranked)})))))
 
 (defn search-explain
   ([graph semantic-client config term]
    (search-explain graph semantic-client config term {}))
-  ([graph semantic-client config term {:keys [mode source-preference]
+  ([graph semantic-client config term {:keys [mode source-preference
+                                              intent-rerank?
+                                              semantic-timeout-ms seed-mode
+                                              max-seeds]
                                        :or {mode retrieval-mode/default
                                             source-preference :none}}]
-   (let [mode (retrieval-mode/normalize mode)]
+   (let [mode (retrieval-mode/normalize mode)
+         plan (intent/analyze
+               term {:seed-mode (if intent-rerank?
+                                  (or seed-mode
+                                      (get-in config [:context
+                                                      :intent-seed-mode]))
+                                  :single)
+                     :max-seeds (or max-seeds
+                                    (get-in config [:context :intent-max-seeds]))
+                     :default-max-seeds
+                     (get-in config [:context :intent-max-seeds])
+                     :default-candidate-count
+                     (get-in config [:semantic :lateon-code :candidate-count])
+                     :semantic-candidate-count
+                     (get-in config [:semantic :lateon-code :candidate-count])
+                     :multi-candidate-count
+                     (get-in config [:context :intent-candidate-count])})]
      (search-explain-with-attempt
       graph config term
-      (semantic-search-attempt semantic-client config term mode)
-      {:mode mode :source-preference source-preference}))))
+      (semantic-search-attempt
+       semantic-client config term
+       {:mode mode :semantic-timeout-ms semantic-timeout-ms
+        :candidate-count (:semantic-candidate-count plan)})
+      {:mode mode :source-preference source-preference
+       :intent-rerank? intent-rerank? :seed-mode seed-mode
+       :max-seeds max-seeds}))))
 
 (defn callers [graph target]
   (->> (store/query

@@ -142,11 +142,21 @@ the command returns Datalevin results. Semantic retrieval is an enhancement,
 not a command availability dependency.
 
 Natural-language context requests reuse the same retrieval and freshness
-checks. The highest-ranked accepted symbol becomes the sole zero-cost context
-seed; a bounded set of alternatives is retained only as provenance. Semantic
-scores never add graph edges or change traversal costs. Context expansion
-continues over exact canonical relationships, and an unavailable semantic
-runtime degrades to Datalevin lexical seed resolution.
+checks, then apply query-shape planning and score-preserving structural
+reranking. Lookup plans use one zero-cost seed; set/flow plans can use bounded,
+diverse zero-cost seeds. Set plans may also retain a compact inventory of
+qualified candidates without traversing every candidate. A bounded set of
+alternatives is retained only as provenance. Semantic and intent scores never
+add graph edges or change
+traversal costs. Context expansion continues over exact canonical
+relationships, and an unavailable semantic runtime degrades visibly to
+Datalevin lexical seed resolution.
+
+The configured query timeout is a default, not a global fixed constant. A
+positive per-request override is passed to NextPlaid and returned as requested
+and effective deadline metadata. Timeout responses set `:fallback? true` in
+hybrid mode so callers can distinguish degraded lexical availability from a
+successful semantic search.
 
 ## Process model
 

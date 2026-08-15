@@ -366,9 +366,10 @@
                     :score 0.4}]
          :retrieval {:status :ok :latency-ms 4}}]
     (with-redefs [query/semantic-search-attempt
-                  (fn [client _ term]
+                  (fn [client _ term options]
                     (is (= :semantic-client client))
                     (is (= "where is selection handled?" term))
+                    (is (= :hybrid (:mode options)))
                     attempt)
                   query/search-explain-with-attempt
                   (fn [_ _ term actual-attempt options]

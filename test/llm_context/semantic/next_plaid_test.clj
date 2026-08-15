@@ -175,13 +175,15 @@
                     :metadata [{:llm_symbol_id "symbol:a"
                                 :llm_document_hash "sha256:document"}]}]})])
          requests)
-        result (index/search-text client "database retry" {:top-k 7})]
+        result (index/search-text client "database retry"
+                                  {:top-k 7 :timeout-ms 5000})]
     (is (= [{:document-id 7
              :score 12.5
              :metadata {:llm_symbol_id "symbol:a"
                         :llm_document_hash "sha256:document"}}]
            result))
     (is (= 7 (get-in (first @requests) [:body :params :top_k])))
+    (is (= 5000 (:timeout-ms (first @requests))))
     (is (= 8 (get-in (first @requests)
                      [:body :params :n_ivf_probe])))
     (is (nil? (get-in (first @requests)

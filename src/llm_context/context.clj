@@ -1,6 +1,7 @@
 (ns llm-context.context
   (:require [clojure.string :as str]
             [llm-context.graph.read :as graph-read]
+            [llm-context.intent :as intent]
             [llm-context.model.schema :as schema]
             [llm-context.query :as query]
             [llm-context.store :as store])
@@ -236,8 +237,8 @@
      :alternatives []}))
 
 (defn resolve-intent-focus
-  "Select one fresh hybrid-search result as the traversal seed. Additional
-  results remain bounded explanatory alternatives and are not traversed."
+  "Select one or more bounded, diverse traversal roots according to the
+  inspectable query plan. Unselected results remain provenance only."
   [focus {:keys [results retrieval]}]
   (when-not (seq results)
     (throw
@@ -249,21 +250,43 @@
           {:id (:id symbol)
            :name (:name symbol)
            :qualified-name (:qualified-name symbol)
+           :file (:file symbol)
            :rank rank
            :matched-by (:matched-by symbol)
            :score (:score symbol)
            :source-role (:source-role symbol)
            :fused-rank (:fused-rank symbol)
            :final-rank (:final-rank symbol)
-           :ranking-reason (:ranking-reason symbol)})
+           :ranking-reason (:ranking-reason symbol)
+           :pre-rerank-rank (:pre-rerank-rank symbol)
+           :post-rerank-rank (:post-rerank-rank symbol)
+           :intent-score (:intent-score symbol)
+           :intent-qualified? (:intent-qualified? symbol)
+           :intent-reasons (:intent-reasons symbol)})
         candidates (mapv candidate (range 1 (inc (count results))) results)
-        selected (first candidates)]
+        plan (or (:query-plan retrieval)
+                 {:shape :lookup :seed-mode :single :max-seeds 1})
+        selected-results (intent/select-seeds results plan)
+        selected-ids (set (map :id selected-results))
+        selected (->> candidates
+                      (filter #(contains? selected-ids (:id %))) vec)
+        qualified (filter :intent-qualified? candidates)
+        inventory-limit 24
+        inventory (if (= :set (:shape plan))
+                    (mapv #(select-keys % [:qualified-name :file])
+                          (take inventory-limit qualified))
+                    [])
+        alternatives (->> candidates
+                          (remove #(contains? selected-ids (:id %)))
+                          (take 4) vec)]
     {:mode :intent
-     :strategy (if (contains? (:matched-by selected) :lateon)
+     :strategy (if (some #(contains? (:matched-by %) :lateon) selected)
                  :hybrid
                  :lexical-fallback)
-     :selected [selected]
-     :alternatives (vec (take 4 (next candidates)))
+     :selected selected
+     :inventory inventory
+     :inventory-truncated? (> (count qualified) inventory-limit)
+     :alternatives alternatives
      :retrieval retrieval}))
 
 (defn build-from-seeds
@@ -333,10 +356,40 @@
                             :explicit-preference))
               ")\n"
               "Selected source role: "
-              (name (get-in packet [:focus-resolution :selected 0 :source-role]
+              (str/join ", "
+                        (distinct
+                         (map #(name (:source-role % :unknown))
+                              (get-in packet [:focus-resolution :selected]))))
+              "\nQuery plan: "
+              (name (get-in packet [:focus-resolution :retrieval
+                                    :query-plan :shape] :lookup))
+              " / "
+              (name (get-in packet [:focus-resolution :retrieval
+                                    :query-plan :seed-mode] :single))
+              " (" (count (get-in packet [:focus-resolution :selected]))
+              " selected)"
+              "\nSemantic retrieval: "
+              (name (get-in packet [:focus-resolution :retrieval :status]
                             :unknown))
+              " in "
+              (get-in packet [:focus-resolution :retrieval :latency-ms] 0)
+              " ms, timeout "
+              (get-in packet [:focus-resolution :retrieval
+                              :effective-timeout-ms] 0)
+              " ms"
               "\n"))
        "\n"
+       (when (seq (get-in packet [:focus-resolution :inventory]))
+         (str "## Structurally qualified inventory\n\n"
+              (str/join
+               "\n"
+               (for [{:keys [qualified-name file]}
+                     (get-in packet [:focus-resolution :inventory])]
+                 (str "- `" qualified-name "`"
+                      (when file (str " — `" file "`")))))
+              (when (get-in packet [:focus-resolution :inventory-truncated?])
+                "\n- … additional qualified candidates omitted by the packet bound")
+              "\n\n"))
        "## Symbols\n\n"
        (str/join
         "\n"

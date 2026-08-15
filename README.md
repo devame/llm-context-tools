@@ -115,7 +115,7 @@ llm-context doctor
 llm-context analyze [--full|--check]
 llm-context query stats
 llm-context query find-symbol <name-or-id>
-llm-context query search <natural-language-query> [--mode fts-only|lateon-only|hybrid] [--source-preference auto|production|test|none] [--explain]
+llm-context query search <natural-language-query> [--mode fts-only|lateon-only|hybrid] [--source-preference auto|production|test|none] [--semantic-timeout-ms N] [--intent-rerank] [--explain]
 llm-context query callers <symbol-id>
 llm-context query callees <symbol-id> [--include-external]
 llm-context query trace <symbol-id> [--depth N] [--limit N]
@@ -125,7 +125,7 @@ llm-context query unresolved [--classification unresolved|ambiguous|dynamic|exte
 llm-context query topics|registrations|dispatchers|subscribers
 llm-context query state-readers|state-writers
 llm-context context <name-or-id> [--depth N] [--max-tokens N]
-llm-context context --intent <natural-language-query> [--source-preference auto|production|test|none] [--depth N] [--max-tokens N]
+llm-context context --intent <natural-language-query> [--source-preference auto|production|test|none] [--semantic-timeout-ms N] [--seed-mode auto|single|multi] [--max-seeds N] [--depth N] [--max-tokens N]
 llm-context export --format edn|json|jsonl|markdown [--output PATH]
 llm-context summary [--output PATH]
 llm-context integrate claude|codex|generic [--force]
@@ -146,17 +146,28 @@ multi-vector index. It preserves exact identifiers, rejects semantic
 candidates whose content hash or model revision is stale, and falls back to
 Datalevin whenever the sidecar is unavailable.
 
-`context --intent` performs that freshness-safe hybrid retrieval first, selects
-only the highest-ranked symbol as the traversal seed, and records up to four
-unexpanded alternatives in the packet. LateOn chooses the likely starting
-symbol; every relationship admitted afterward is still an exact canonical
-graph edge. Without the resident service it falls back to Datalevin retrieval.
+`context --intent` performs that freshness-safe hybrid retrieval first, builds
+an inspectable lookup/set/flow query plan, and structurally reranks the bounded
+candidate pool without rewriting model scores. Lookup questions select one
+seed; set and flow questions can select bounded, file-diverse roots under one
+shared traversal and token budget. Every relationship admitted afterward is
+still an exact canonical graph edge. Without the resident service it falls
+back to Datalevin retrieval. Set packets also carry a compact, explicitly
+bounded inventory of structurally qualified candidates; inventory entries do
+not become traversal roots or inferred graph relationships.
 Intent context defaults to `--source-preference auto`: ordinary implementation
 questions stably prefer production paths, while requests explicitly about
 tests prefer test paths. Exact identifier matches retain priority, scores are
 never rewritten, and the packet records fused rank, final rank, source role,
 and the resolved preference. `query search` defaults to `none` for backward-
 compatible general-purpose search ordering.
+
+The semantic deadline comes from
+`:semantic/:lateon-code/:query-timeout-ms` and can be overridden per request
+with `--semantic-timeout-ms`. Retrieval provenance reports the effective
+deadline, latency, status, fallback, query plan, reranker status, and selected
+root count. `--seed-mode single` preserves historical one-root behavior;
+`--seed-mode multi` explicitly requests bounded multi-root selection.
 
 `analyze` runs embedded clj-kondo once over the complete Clojure source set and
 a two-pass Tree-sitter AST/module resolver over Janet. Static Clojure topic

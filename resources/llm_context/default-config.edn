@@ -59,4 +59,8 @@
   :trace-depth 4
   :trace-limit 200
   :intent-source-preference :auto
+  :intent-seed-mode :auto
+  :intent-max-seeds 4
+  :intent-rerank true
+  :intent-candidate-count 100
   :source-role-overrides []}}
