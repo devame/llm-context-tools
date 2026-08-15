@@ -1,0 +1,18 @@
+flowchart LR
+    subgraph Before["BEFORE ANY QUESTION · INDEXING TIME"]
+        Files["Source files"] --> Analyze["Language analyzers"]
+        Analyze --> Edges["Exact relationships<br/>calls · contains · implements"]
+        Analyze --> Symbols["Symbols<br/>functions · variables · modules"]
+        Edges --> Graph[("Datalevin<br/>canonical code graph")]
+        Symbols --> Graph
+        Symbols --> Docs["Semantic documents<br/>name · signature · docs · role"]
+        Docs --> Encode["Late-interaction encoder"]
+        Encode --> Index[("LateOn / NextPlaid<br/>semantic index")]
+    end
+
+    subgraph During["WHEN A QUESTION ARRIVES · QUERY TIME"]
+        Question["Natural-language question"] --> Existing["Use the completed indexes"]
+    end
+
+    Graph --> Existing
+    Index --> Existing

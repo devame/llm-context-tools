@@ -63,4 +63,24 @@
   :intent-max-seeds 4
   :intent-rerank true
   :intent-candidate-count 100
+  :query-router
+  {:enabled true
+   :next-plaid-version "1.6.4"
+   :next-plaid-command ["next-plaid-api"]
+   :model "mixedbread-ai/mxbai-edge-colbert-v0-32m"
+   :model-revision "963e23afa1478d8bcc12e5d7115adcfdbd22c3af"
+   :model-path nil
+   :quantization :int8
+   :index-path ".llm-context/query-router/next-plaid"
+   :index-name "llm-context-query-shapes-v1"
+   :nbits 4
+   :start-from-scratch 0
+   :pool-factor 1
+   :encoding-sessions 1
+   :encoding-batch-size 1
+   :startup-timeout-ms 120000
+   :health-timeout-ms 2000
+   :update-timeout-ms 30000
+   :query-timeout-ms 250
+   :minimum-margin 0.02}
   :source-role-overrides []}}

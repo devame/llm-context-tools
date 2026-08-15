@@ -151,6 +151,33 @@
            :else
            (str "checksum mismatch: "
                 (str/join ", " (:mismatched model-verification))))}
+        router-settings (get-in config [:context :query-router])
+        router-enabled? (:enabled router-settings)
+        router-model-path (when router-enabled?
+                            (semantic-runtime/model-path project router-settings))
+        router-verification
+        (when router-model-path
+          (artifacts/verify-query-router-model router-model-path))
+        router-model-ok?
+        (and router-model-path
+             (empty? (:missing router-verification))
+             (empty? (:mismatched router-verification)))
+        router-model-check
+        {:check :query-router-model
+         :required? false
+         :ok? (or (not router-enabled?) router-model-ok?)
+         :detail
+         (cond
+           (not router-enabled?) "router disabled"
+           router-model-ok?
+           (str router-model-path " @ "
+                (subs artifacts/query-router-model-revision 0 12))
+           (seq (:missing router-verification))
+           (str "missing " (str/join ", " (:missing router-verification))
+                " below " router-model-path)
+           :else
+           (str "checksum mismatch: "
+                (str/join ", " (:mismatched router-verification))))}
         service-response
         (when (service-client/available? project)
           (service-client/request project {:op :semantic-status}))
@@ -178,7 +205,7 @@
            :else "running")}]
     [java-check writable-check clj-kondo-check janet-catalog-check
      janet-grammar-check datalevin-check graph-format-check runtime-check
-     onnx-check model-check service-check]))
+     onnx-check model-check router-model-check service-check]))
 
 (defn healthy? [checks]
   (every? #(or (not (:required? %)) (:ok? %)) checks))

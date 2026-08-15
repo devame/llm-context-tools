@@ -43,7 +43,8 @@
   (read-edn (io/resource default-resource)))
 
 (defn- validation-errors [config]
-  (let [lateon (get-in config [:semantic :lateon-code])]
+  (let [lateon (get-in config [:semantic :lateon-code])
+        router (get-in config [:context :query-router])]
     (cond-> []
     (not (map? config))
     (conj "configuration must be an EDN map")
@@ -102,6 +103,58 @@
 
     (not (pos-int? (get-in config [:context :intent-candidate-count])))
     (conj ":context/:intent-candidate-count must be a positive integer")
+
+    (not (map? router))
+    (conj ":context/:query-router must be a map")
+
+    (not (boolean? (:enabled router)))
+    (conj ":context/:query-router/:enabled must be true or false")
+
+    (not (and (vector? (:next-plaid-command router))
+              (seq (:next-plaid-command router))
+              (every? non-blank-string? (:next-plaid-command router))))
+    (conj ":context/:query-router/:next-plaid-command must be a non-empty command vector")
+
+    (not (non-blank-string? (:model router)))
+    (conj ":context/:query-router/:model must be a non-blank string")
+
+    (not (and (non-blank-string? (:model-revision router))
+              (re-matches #"[0-9a-f]{40}" (:model-revision router))))
+    (conj ":context/:query-router/:model-revision must be a 40-character commit hash")
+
+    (not (or (nil? (:model-path router))
+             (non-blank-string? (:model-path router))))
+    (conj ":context/:query-router/:model-path must be nil or a non-blank path")
+
+    (not (contains? semantic-quantizations (:quantization router)))
+    (conj ":context/:query-router/:quantization must be :int8")
+
+    (not (and (non-blank-string? (:next-plaid-version router))
+              (re-matches #"\d+\.\d+\.\d+" (:next-plaid-version router))))
+    (conj ":context/:query-router/:next-plaid-version must be a semantic version")
+
+    (not (non-blank-string? (:index-path router)))
+    (conj ":context/:query-router/:index-path must be a non-blank path")
+
+    (not (and (non-blank-string? (:index-name router))
+              (re-matches #"[A-Za-z0-9_-]+" (:index-name router))))
+    (conj ":context/:query-router/:index-name must contain only letters, digits, underscore, or hyphen")
+
+    (not (pos-int? (:startup-timeout-ms router)))
+    (conj ":context/:query-router/:startup-timeout-ms must be a positive integer")
+
+    (not (pos-int? (:query-timeout-ms router)))
+    (conj ":context/:query-router/:query-timeout-ms must be a positive integer")
+
+    (not (pos-int? (:health-timeout-ms router)))
+    (conj ":context/:query-router/:health-timeout-ms must be a positive integer")
+
+    (not (pos-int? (:update-timeout-ms router)))
+    (conj ":context/:query-router/:update-timeout-ms must be a positive integer")
+
+    (not (and (number? (:minimum-margin router))
+              (not (neg? (:minimum-margin router)))))
+    (conj ":context/:query-router/:minimum-margin must be a non-negative number")
 
     (not (and (vector? (get-in config [:context :source-role-overrides]))
               (every? valid-source-role-override?

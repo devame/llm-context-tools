@@ -1,8 +1,8 @@
 # User guide
 
 `llm-context` is a project-local code graph for Clojure, ClojureScript, CLJC,
-and Janet. The executable and LateOn model are installed once per user; each
-repository keeps its generated Datalevin graph and semantic index below
+and Janet. The executable, LateOn model, and 32M query router are installed
+once per user; each repository keeps its generated Datalevin graph and indices below
 `.llm-context/`. Datalevin and clj-kondo are embedded—there is no database
 server or separate analyzer to install.
 
@@ -103,10 +103,15 @@ only a compact diagnostic budget. Graph-limit and token-limit truncation are
 reported separately.
 
 `--intent` asks the local LateOn index and Datalevin FTS to resolve a
-natural-language request before traversal. An inspectable planner classifies
-the request as lookup, set discovery, or flow. Lookup requests keep one seed;
-set/flow requests may select bounded, diverse roots under one shared traversal
-budget. Set requests additionally expose a compact qualified-candidate
+natural-language request before traversal. Automatic planning first retrieves
+a broad, shape-neutral pool while a resident 32M Mixedbread model independently
+scores lookup, set, and flow. The score is advisory: a set needs several
+qualified candidates, a flow needs an exact graph relationship among candidate
+roots, and unsupported advice leaves an adaptive multi-root plan. Explicit
+single/multi options remain authoritative, and the model never filters the
+retrieval pool. Accepted lookup requests keep one seed; set/flow requests may
+select bounded, diverse roots under one shared traversal budget. Set requests
+additionally expose a compact qualified-candidate
 inventory so a four-root traversal is not presented as an exhaustive set.
 Inventory entries are evidence summaries, not graph edges. Up to four
 unselected alternatives remain packet metadata. If LateOn
@@ -128,6 +133,10 @@ classifier in `llm-context.edn`:
   :intent-max-seeds 4
   :intent-rerank true
   :intent-candidate-count 100
+  :query-router
+  {:enabled true
+   :query-timeout-ms 250
+   :minimum-margin 0.02}
   :source-role-overrides
   [{:role :production :pattern "test/support/runtime/**"}
    {:role :test :pattern "quality/**"}]}}
@@ -182,9 +191,9 @@ coordinated through its Unix socket (loopback TCP on Windows).
 
 ## Installation and troubleshooting
 
-The one-script installer verifies the jar, NextPlaid, ONNX Runtime, and pinned
-LateOn model. Set `LLM_CONTEXT_SKIP_SEMANTIC=1` when only exact graph and FTS
-features are wanted.
+The one-script installer verifies the jar, NextPlaid, ONNX Runtime, pinned
+LateOn model, and pinned 33 MB INT8 query-router model. Set
+`LLM_CONTEXT_SKIP_SEMANTIC=1` when only exact graph and FTS features are wanted.
 
 - If `doctor` reports Java failure, install JDK 23 or newer.
 - If graph format is incompatible, run `llm-context analyze --full`.

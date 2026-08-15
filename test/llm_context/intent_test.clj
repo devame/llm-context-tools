@@ -2,19 +2,63 @@
   (:require [clojure.test :refer [deftest is testing]]
             [llm-context.intent :as intent]))
 
-(deftest query-plans-distinguish-lookup-set-and-flow
-  (is (= :lookup (:shape (intent/analyze "how to reset password"))))
-  (is (= :single (:seed-mode (intent/analyze "how to reset password"))))
-  (is (= :set (:shape (intent/analyze "what modules expose HTTP endpoints?"))))
+(deftest automatic-query-plans-start-shape-neutral
+  (is (= :adaptive (:shape (intent/analyze "how to reset password"))))
   (is (= :multi (:seed-mode (intent/analyze "what modules expose HTTP endpoints?"))))
-  (is (= :flow (:shape (intent/analyze "how is email validated before it is sent?"))))
-  (is (= 2 (:max-seeds (intent/analyze
-                        "how is email validated before it is sent?"))))
+  (is (= :shape-neutral-retrieval
+         (:reason (intent/analyze "unusual wording the old rules never knew"))))
   (is (= :lookup (:shape (intent/analyze
                           "what modules expose HTTP endpoints?"
                           {:seed-mode :single}))))
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Seed mode"
                         (intent/normalize-seed-mode "everything"))))
+
+(deftest advisory-shapes-require-structural-support
+  (let [plan (intent/analyze "show the relevant code")
+        advice {:provider :mixedbread-32m :status :available
+                :suggested-shape :flow :scores {:flow 9.0 :set 8.0}
+                :margin 1.0}
+        candidates [{:id "a" :intent-qualified? true
+                     :intent-reasons [:query-term-handler]}
+                    {:id "b" :intent-qualified? true
+                     :intent-reasons [:query-term-handler]}]
+        supported (intent/resolve-plan
+                   plan candidates
+                   {:advisory advice :exact-relationship-count 1})
+        unsupported (intent/resolve-plan
+                     plan candidates
+                     {:advisory advice :exact-relationship-count 0})]
+    (is (= :flow (:shape supported)))
+    (is (= :model-plus-structure (:planning-authority supported)))
+    (is (= 2 (:max-seeds supported)))
+    (is (= :adaptive (:shape unsupported)))
+    (is (= :shape-neutral-fallback (:planning-authority unsupported)))
+    (is (= advice (:advisory unsupported)))))
+
+(deftest low-margin-advice-remains-visible-but-does-not-resolve-shape
+  (let [advice {:status :available :suggested-shape :flow :margin 0.01}
+        resolved (intent/resolve-plan
+                  (intent/analyze "trace it")
+                  [{:id "a" :intent-qualified? true
+                    :intent-score 2 :intent-reasons [:query-term-trace]}
+                   {:id "b" :intent-qualified? true
+                    :intent-score 1 :intent-reasons [:query-term-trace]}]
+                  {:advisory advice :minimum-advisory-margin 0.02
+                   :exact-relationship-count 1})]
+    (is (= :adaptive (:shape resolved)))
+    (is (false? (get-in resolved [:structural-support
+                                  :advisory-confident?])))
+    (is (= advice (:advisory resolved)))))
+
+(deftest explicit-overrides-remain-authoritative
+  (let [plan (intent/analyze "anything" {:seed-mode :single})
+        resolved (intent/resolve-plan
+                  plan []
+                  {:advisory {:status :available :suggested-shape :flow}
+                   :exact-relationship-count 4})]
+    (is (= :lookup (:shape resolved)))
+    (is (= :single (:seed-mode resolved)))
+    (is (= :caller (:planning-authority resolved)))))
 
 (deftest endpoint-reranking-uses-structural-evidence-without-changing-scores
   (let [query "what modules expose HTTP endpoints?"

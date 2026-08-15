@@ -11,12 +11,6 @@
     "in" "is" "it" "metabase" "of" "or" "repository" "the" "to" "what"
     "where" "which" "with"})
 
-(def ^:private set-language
-  #"(?i)\b(?:all|list|which|what)\b.*\b(?:apis|classes|components|endpoints|files|functions|handlers|implementations|modules|namespaces|routes|symbols|tests)\b|\b(?:modules|namespaces|components)\s+(?:expose|implement|provide)\b")
-
-(def ^:private flow-language
-  #"(?i)\b(?:before|after|flow|pipeline|responsible for|end[- ]to[- ]end|how.+(?:handled|processed|validated|sent|delivered|enforced))\b")
-
 (def ^:private concept-specs
   [{:concept :code-concept/http-endpoint
     :query-pattern #"(?i)\b(?:api|apis|endpoint|endpoints|http route|http routes)\b"
@@ -71,8 +65,9 @@
        set))
 
 (defn analyze
-  "Create an inspectable query plan. Caller seed mode and maximum override
-  conservative natural-language shape detection."
+  "Create the retrieval-stage query plan. Automatic planning is deliberately
+  shape-neutral: learned advice is applied only after broad retrieval, where
+  repository structure can confirm or reject it."
   ([query] (analyze query {}))
   ([query {:keys [seed-mode max-seeds default-max-seeds multi-candidate-count
                   default-candidate-count semantic-candidate-count]
@@ -83,10 +78,8 @@
          shape (cond
                  (= requested-mode :multi) :set
                  (= requested-mode :single) :lookup
-                 (re-find set-language (or query "")) :set
-                 (re-find flow-language (or query "")) :flow
-                 :else :lookup)
-         resolved-mode (if (or (= :set shape) (= :flow shape)) :multi :single)
+                 :else :adaptive)
+         resolved-mode (if (= requested-mode :single) :single :multi)
          concepts (->> concept-specs
                        (keep #(when (re-find (:query-pattern %) (or query ""))
                                 (:concept %)))
@@ -103,8 +96,7 @@
          default-candidate-count (or default-candidate-count 50)
          multi-candidate-count (or multi-candidate-count 100)
          max-seeds (max 1 (long (or max-seeds default-max-seeds)))
-         max-seeds (if (= resolved-mode :single) 1
-                       (if (= shape :flow) (min 2 max-seeds) max-seeds))]
+         max-seeds (if (= resolved-mode :single) 1 max-seeds)]
      {:shape shape
       :requested-seed-mode requested-mode
       :seed-mode resolved-mode
@@ -120,9 +112,61 @@
       :lexical-expansions lexical-expansions
       :reason (cond
                 (not= requested-mode :auto) :explicit-seed-mode
-                (= shape :set) :explicit-set-language
-                (= shape :flow) :flow-language
-                :else :default-lookup)})))
+                :else :shape-neutral-retrieval)})))
+
+(defn- materially-qualified? [candidate]
+  (and (:intent-qualified? candidate)
+       (some #(not= :unconstrained %) (:intent-reasons candidate))))
+
+(defn resolve-plan
+  "Resolve an evidence plan from an explicit override or an advisory model
+  prior plus retrieved structure. The advisory result never changes the
+  candidate pool. Unsupported advice leaves the plan adaptive."
+  [plan candidates {:keys [advisory exact-relationship-count
+                           minimum-advisory-margin]}]
+  (if (not= :auto (:requested-seed-mode plan))
+    (assoc plan :planning-authority :caller
+                :advisory advisory)
+    (let [minimum-margin (double (or minimum-advisory-margin 0.0))
+          margin (double (or (:margin advisory) 0.0))
+          confident? (>= margin minimum-margin)
+          suggestion (when (and (= :available (:status advisory)) confident?)
+                       (:suggested-shape advisory))
+          qualified-count (count (filter materially-qualified? candidates))
+          relationship-count (long (or exact-relationship-count 0))
+          supported?
+          (case suggestion
+            :lookup (and (< qualified-count 2) (zero? relationship-count))
+            :set (>= qualified-count 2)
+            :flow (pos? relationship-count)
+            false)
+          shape (if supported? suggestion :adaptive)
+          seed-mode (if (= :lookup shape) :single :multi)
+          max-seeds (case shape
+                      :lookup 1
+                      :flow (min 2 (:max-seeds plan))
+                      (:max-seeds plan))]
+      (assoc plan
+             :shape shape
+             :seed-mode seed-mode
+             :max-seeds max-seeds
+             :reason (cond
+                       (not= :available (:status advisory))
+                       :advisory-unavailable
+                       (not confident?) :advisory-below-margin
+                       (nil? suggestion) :advisory-invalid
+                       supported? :advisory-structure-agreement
+                       :else :advisory-not-structurally-supported)
+             :planning-authority (if supported? :model-plus-structure
+                                     :shape-neutral-fallback)
+             :structural-support
+             {:qualified-candidates qualified-count
+              :exact-relationships relationship-count
+              :advisory-margin margin
+              :minimum-advisory-margin minimum-margin
+              :advisory-confident? confident?
+              :supports-advice? supported?}
+             :advisory advisory))))
 
 (defn- candidate-text [candidate]
   (str/join " " (keep candidate

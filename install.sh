@@ -6,10 +6,13 @@ VERSION=${LLM_CONTEXT_VERSION:-latest}
 NEXT_PLAID_VERSION="1.6.4"
 MODEL_ID="lightonai/LateOn-Code"
 MODEL_REVISION="734b659a57935ef50562d79581c3ff1f8d825c93"
+ROUTER_MODEL_ID="mixedbread-ai/mxbai-edge-colbert-v0-32m"
+ROUTER_MODEL_REVISION="963e23afa1478d8bcc12e5d7115adcfdbd22c3af"
 DEFAULT_INSTALL_DIR="${HOME}/.local/bin"
 INSTALL_DIR=${LLM_CONTEXT_INSTALL_DIR:-"$DEFAULT_INSTALL_DIR"}
 MODEL_CACHE_ROOT=${LLM_CONTEXT_MODEL_CACHE:-"${HOME}/.cache/llm-context/models"}
 MODEL_DIR="${MODEL_CACHE_ROOT}/lightonai--LateOn-Code/${MODEL_REVISION}"
+ROUTER_MODEL_DIR="${MODEL_CACHE_ROOT}/mixedbread-ai--mxbai-edge-colbert-v0-32m/${ROUTER_MODEL_REVISION}"
 
 if [ -n "${LLM_CONTEXT_RELEASE_URL:-}" ]; then
   RELEASE_URL=${LLM_CONTEXT_RELEASE_URL%/}
@@ -154,6 +157,46 @@ if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
       "eedf90bb3b71b7500a973e140b72a736c4c5ca4b6746c1f69fcc64b29924a8d5" ||
       fail "LateOn-Code model checksum verification failed"
   fi
+
+  if verify_hash "$ROUTER_MODEL_DIR/model_int8.onnx" \
+       "264ba680e960af9fffb4f78c3af1e4ff92520678b8e136c79434d88fb2549e1b" &&
+     verify_hash "$ROUTER_MODEL_DIR/tokenizer.json" \
+       "594291000b476c98ed600cbb1914ff128c79642a9433aac86213c7a5562d7c1a" &&
+     verify_hash "$ROUTER_MODEL_DIR/config_sentence_transformers.json" \
+       "0c4eb4090ff55ddee69380ad5ea88a3a89500651996a56953af72bafdb7965b6" &&
+     verify_hash "$ROUTER_MODEL_DIR/config.json" \
+       "a60a035a715a686dca530cf41da553a571e26ea45288d04d750b9da1a27c268d" &&
+     verify_hash "$ROUTER_MODEL_DIR/onnx_config.json" \
+       "e10f017e4a8355f6b15f5be5f67295c90d5b25e487568bf0b0d9ee3259dc0eb7"; then
+    ROUTER_MODEL_READY=1
+    printf 'Using verified Mixedbread query router at %s\n' "$ROUTER_MODEL_DIR"
+  else
+    ROUTER_MODEL_READY=0
+    ROUTER_MODEL_URL_BASE=${LLM_CONTEXT_QUERY_ROUTER_MODEL_URL:-"https://huggingface.co/${ROUTER_MODEL_ID}/resolve/${ROUTER_MODEL_REVISION}"}
+    mkdir -p "$TEMP_DIR/router-model"
+    printf 'Downloading pinned Mixedbread INT8 query router (about 33 MB)...\n'
+    download "$ROUTER_MODEL_URL_BASE/model_int8.onnx?download=true" \
+      "$TEMP_DIR/router-model/model_int8.onnx"
+    download "$ROUTER_MODEL_URL_BASE/tokenizer.json?download=true" \
+      "$TEMP_DIR/router-model/tokenizer.json"
+    download "$ROUTER_MODEL_URL_BASE/config_sentence_transformers.json?download=true" \
+      "$TEMP_DIR/router-model/config_sentence_transformers.json"
+    download "$ROUTER_MODEL_URL_BASE/config.json?download=true" \
+      "$TEMP_DIR/router-model/config.json"
+    download "$ROUTER_MODEL_URL_BASE/onnx_config.json?download=true" \
+      "$TEMP_DIR/router-model/onnx_config.json"
+    verify_hash "$TEMP_DIR/router-model/model_int8.onnx" \
+      "264ba680e960af9fffb4f78c3af1e4ff92520678b8e136c79434d88fb2549e1b" &&
+    verify_hash "$TEMP_DIR/router-model/tokenizer.json" \
+      "594291000b476c98ed600cbb1914ff128c79642a9433aac86213c7a5562d7c1a" &&
+    verify_hash "$TEMP_DIR/router-model/config_sentence_transformers.json" \
+      "0c4eb4090ff55ddee69380ad5ea88a3a89500651996a56953af72bafdb7965b6" &&
+    verify_hash "$TEMP_DIR/router-model/config.json" \
+      "a60a035a715a686dca530cf41da553a571e26ea45288d04d750b9da1a27c268d" &&
+    verify_hash "$TEMP_DIR/router-model/onnx_config.json" \
+      "e10f017e4a8355f6b15f5be5f67295c90d5b25e487568bf0b0d9ee3259dc0eb7" ||
+      fail "Mixedbread query-router model checksum verification failed"
+  fi
 fi
 
 mkdir -p "$INSTALL_DIR"
@@ -221,14 +264,35 @@ if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
       fail "could not install the LateOn-Code model snapshot"
     fi
   fi
+  if [ "$ROUTER_MODEL_READY" -eq 0 ]; then
+    ROUTER_MODEL_PARENT=$(dirname "$ROUTER_MODEL_DIR")
+    ROUTER_MODEL_STAGED="${ROUTER_MODEL_DIR}.new.$$"
+    ROUTER_MODEL_BACKUP="${ROUTER_MODEL_DIR}.previous.$$"
+    mkdir -p "$ROUTER_MODEL_PARENT"
+    mkdir "$ROUTER_MODEL_STAGED"
+    cp "$TEMP_DIR/router-model/"* "$ROUTER_MODEL_STAGED/"
+    if [ -d "$ROUTER_MODEL_DIR" ]; then
+      mv "$ROUTER_MODEL_DIR" "$ROUTER_MODEL_BACKUP"
+    fi
+    if mv "$ROUTER_MODEL_STAGED" "$ROUTER_MODEL_DIR"; then
+      if [ -d "$ROUTER_MODEL_BACKUP" ]; then
+        rm -rf -- "$ROUTER_MODEL_BACKUP"
+      fi
+    else
+      if [ -d "$ROUTER_MODEL_BACKUP" ]; then
+        mv "$ROUTER_MODEL_BACKUP" "$ROUTER_MODEL_DIR"
+      fi
+      fail "could not install the Mixedbread query-router model snapshot"
+    fi
+  fi
 fi
 
 INSTALLED_VERSION=$("$INSTALL_DIR/llm-context" version)
 printf 'Installed llm-context %s at %s\n' "$INSTALLED_VERSION" "$INSTALL_DIR/llm-context"
 printf 'Installed user guide at %s\n' "$INSTALL_DIR/USER-GUIDE.md"
 if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
-  printf 'Installed NextPlaid API %s and LateOn-Code at %s\n' \
-    "$NEXT_PLAID_VERSION" "$MODEL_DIR"
+  printf 'Installed NextPlaid API %s, LateOn-Code at %s, and query router at %s\n' \
+    "$NEXT_PLAID_VERSION" "$MODEL_DIR" "$ROUTER_MODEL_DIR"
 fi
 
 case ":${PATH}:" in

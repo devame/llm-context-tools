@@ -47,9 +47,10 @@ irm https://raw.githubusercontent.com/devame/llm-context-tools/main/install.ps1 
 
 Both installers require Java 23 or newer and verify every downloaded release
 artifact. By default they install the jar, NextPlaid API 1.6.4, ONNX Runtime
-1.23.0, and the five files needed by the immutable INT8 LateOn-Code snapshot.
-The model download is about 154 MB. No Docker, Python, Rust, Datalevin server,
-separate clj-kondo executable, Janet executable, or model manager is required.
+1.23.0, the immutable INT8 LateOn-Code snapshot, and the immutable 32M
+Mixedbread query router. The model downloads total about 187 MB (154 MB plus
+33 MB). No Docker, Python, Rust, Datalevin server, separate clj-kondo
+executable, Janet executable, or model manager is required.
 
 Executables are installed once per user (`~/.local/bin` on Unix and the local
 application-data Programs directory on Windows), and the immutable model is
@@ -146,15 +147,25 @@ multi-vector index. It preserves exact identifiers, rejects semantic
 candidates whose content hash or model revision is stale, and falls back to
 Datalevin whenever the sidecar is unavailable.
 
-`context --intent` performs that freshness-safe hybrid retrieval first, builds
-an inspectable lookup/set/flow query plan, and structurally reranks the bounded
-candidate pool without rewriting model scores. Lookup questions select one
-seed; set and flow questions can select bounded, file-diverse roots under one
-shared traversal and token budget. Every relationship admitted afterward is
-still an exact canonical graph edge. Without the resident service it falls
-back to Datalevin retrieval. Set packets also carry a compact, explicitly
-bounded inventory of structurally qualified candidates; inventory entries do
-not become traversal roots or inferred graph relationships.
+`context --intent` starts with shape-neutral, freshness-safe hybrid retrieval.
+In parallel, a resident 32M Mixedbread model scores lookup, set, and flow answer
+shapes. The model is advisory: llm-context accepts a flow only when retrieved
+roots have exact graph relationships, accepts a set only when several roots
+qualify, and otherwise retains an adaptive multi-root plan. Explicit
+`--seed-mode` choices remain authoritative. The model never filters the
+candidate pool, and its three scores, margin, latency, revision, structural
+support, and final planning authority remain inspectable in retrieval
+provenance. The router reuses NextPlaid and a 33 MB INT8 ONNX artifact; it does
+not require Python or start a model per query.
+
+After planning, candidates are structurally reranked without rewriting model
+scores. Accepted lookup plans select one seed; set and flow plans select
+bounded, file-diverse roots under one shared traversal and token budget. Every
+relationship admitted afterward is still an exact canonical graph edge.
+Without either resident model, retrieval falls back to Datalevin and planning
+stays adaptive. Set packets also carry a compact, explicitly bounded inventory
+of structurally qualified candidates; inventory entries do not become
+traversal roots or inferred graph relationships.
 Intent context defaults to `--source-preference auto`: ordinary implementation
 questions stably prefer production paths, while requests explicitly about
 tests prefer test paths. Exact identifier matches retain priority, scores are
@@ -213,9 +224,16 @@ Use it as a read-only source validation gate.
    :model-revision "734b659a57935ef50562d79581c3ff1f8d825c93"
    :quantization :int8}}
 
- :context {:default-max-tokens 8000
-           :trace-depth 4
-           :trace-limit 200}}
+ :context
+ {:default-max-tokens 8000
+  :trace-depth 4
+  :trace-limit 200
+  :query-router
+  {:enabled true
+   :model "mixedbread-ai/mxbai-edge-colbert-v0-32m"
+   :model-revision "963e23afa1478d8bcc12e5d7115adcfdbd22c3af"
+   :query-timeout-ms 250
+   :minimum-margin 0.02}}}
 ```
 
 Set `:providers []` for a graph-only installation. There is intentionally
@@ -233,8 +251,9 @@ silently ignored.
 
 The project database lives under `.llm-context/db/`. Datalevin is the only
 source of truth. The disposable LateOn index lives under
-`.llm-context/semantic/next-plaid/`. JSONL, JSON, EDN, and Markdown are
-deterministic projections for interoperability, debugging, and artifacts.
+`.llm-context/semantic/next-plaid/`; the three-document router index lives
+under `.llm-context/query-router/next-plaid/`. JSONL, JSON, EDN, and Markdown
+are deterministic projections for interoperability, debugging, and artifacts.
 
 Release `0.9.0` introduces graph format 3. Existing generated graphs must be
 rebuilt once with `llm-context analyze --full`; source and configuration files
@@ -252,7 +271,8 @@ llm-context service start
 
 The coordinator watches included source trees, debounces changes, runs the same
 semantic-fingerprint analyzer as the CLI, drains durable LateOn jobs in the background,
-and supervises a loopback-only NextPlaid child. Query, context, and export
+and supervises loopback-only NextPlaid children for retrieval and advisory
+query planning. Query, context, and export
 commands automatically use the warm service. A random token in the ignored
 `.llm-context/service.edn` descriptor authenticates local requests. Structural
 commands and lexical search remain available when the model is loading or

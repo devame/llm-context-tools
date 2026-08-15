@@ -9,6 +9,9 @@
 (def onnx-runtime-version "1.23.0")
 (def model-id "lightonai/LateOn-Code")
 (def model-revision "734b659a57935ef50562d79581c3ff1f8d825c93")
+(def query-router-model-id "mixedbread-ai/mxbai-edge-colbert-v0-32m")
+(def query-router-model-revision
+  "963e23afa1478d8bcc12e5d7115adcfdbd22c3af")
 
 (def model-files
   {"model_int8.onnx"
@@ -22,6 +25,18 @@
    "onnx_config.json"
    "eedf90bb3b71b7500a973e140b72a736c4c5ca4b6746c1f69fcc64b29924a8d5"})
 
+(def query-router-model-files
+  {"model_int8.onnx"
+   "264ba680e960af9fffb4f78c3af1e4ff92520678b8e136c79434d88fb2549e1b"
+   "tokenizer.json"
+   "594291000b476c98ed600cbb1914ff128c79642a9433aac86213c7a5562d7c1a"
+   "config_sentence_transformers.json"
+   "0c4eb4090ff55ddee69380ad5ea88a3a89500651996a56953af72bafdb7965b6"
+   "config.json"
+   "a60a035a715a686dca530cf41da553a571e26ea45288d04d750b9da1a27c268d"
+   "onnx_config.json"
+   "e10f017e4a8355f6b15f5be5f67295c90d5b25e487568bf0b0d9ee3259dc0eb7"})
+
 (defn sha256 [^Path path]
   (let [digest (MessageDigest/getInstance "SHA-256")]
     (with-open [input
@@ -34,9 +49,7 @@
       (.transferTo input (java.io.OutputStream/nullOutputStream)))
     (.formatHex (HexFormat/of) (.digest digest))))
 
-(defn verify-model
-  "Return missing and mismatched files for an immutable model directory."
-  [^Path directory]
+(defn- verify-files [^Path directory files]
   (reduce-kv
    (fn [result filename expected]
      (let [path (.resolve directory filename)]
@@ -49,4 +62,14 @@
 
          :else result)))
    {:missing [] :mismatched []}
-   model-files))
+   files))
+
+(defn verify-model
+  "Return missing and mismatched files for the immutable LateOn directory."
+  [^Path directory]
+  (verify-files directory model-files))
+
+(defn verify-query-router-model
+  "Return missing and mismatched files for the immutable router directory."
+  [^Path directory]
+  (verify-files directory query-router-model-files))

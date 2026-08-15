@@ -20,12 +20,22 @@
              (count (:missing result)))))))
 
 (deftest pinned-versions-match-the-runtime-contract
-  (let [settings (get-in (config/defaults) [:semantic :lateon-code])]
+  (let [defaults (config/defaults)
+        settings (get-in defaults [:semantic :lateon-code])
+        router (get-in defaults [:context :query-router])]
     (is (= "1.6.4" artifacts/next-plaid-version))
+    (is (= "mixedbread-ai/mxbai-edge-colbert-v0-32m"
+           artifacts/query-router-model-id))
+    (is (= 40 (count artifacts/query-router-model-revision)))
     (is (= "1.23.0" artifacts/onnx-runtime-version))
     (is (= artifacts/next-plaid-version
            (:next-plaid-version settings)))
     (is (= artifacts/model-id (:model settings)))
     (is (= artifacts/model-revision (:model-revision settings)))
+    (is (= artifacts/query-router-model-id (:model router)))
+    (is (= artifacts/query-router-model-revision
+           (:model-revision router)))
+    (is (= artifacts/next-plaid-version (:next-plaid-version router)))
     (is (= 40 (count artifacts/model-revision)))
-    (is (= 5 (count artifacts/model-files)))))
+    (is (= 5 (count artifacts/model-files)))
+    (is (= 5 (count artifacts/query-router-model-files)))))

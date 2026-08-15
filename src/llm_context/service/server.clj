@@ -6,6 +6,7 @@
             [llm-context.context :as context]
             [llm-context.export :as export]
             [llm-context.intent :as intent]
+            [llm-context.intent.router :as intent-router]
             [llm-context.query :as query]
             [llm-context.semantic.reconcile :as semantic-reconcile]
             [llm-context.semantic.runtime :as semantic-runtime]
@@ -59,7 +60,8 @@
 (defn- semantic-status [graph runtime-state]
   (let [runtime (select-keys runtime-state
                              [:status :reason :detail :endpoint :log-path
-                              :worker-status :worker-detail :worker-progress])]
+                              :worker-status :worker-detail :worker-progress
+                              :query-router-status :query-router-detail])]
     (let [summary (semantic-state/semantic-summary
                    graph semantic-reconcile/provider
                    (System/currentTimeMillis))
@@ -160,6 +162,16 @@
              (ex-info "The project graph changed repeatedly during the read"
                       {:exit-code 1 :type :graph/read-retry-exhausted}))))))))
 
+(defn- advisory-attempt [router query]
+  (if router
+    (try
+      (intent-router/classify router query)
+      (catch Throwable error
+        {:provider :mixedbread-32m :status :failed
+         :detail (.getMessage error)}))
+    {:provider :mixedbread-32m :status :unavailable
+     :reason :router-not-ready}))
+
 (defn- dispatch [project settings graph generation runtime-state request]
   (let [runtime @runtime-state]
     (case (:op request)
@@ -182,22 +194,29 @@
                                           :candidate-count])
                         :multi-candidate-count
                         (get-in settings [:context :intent-candidate-count])})
-            semantic-attempt
-            (if (and (= :hybrid mode) (not intent-rerank?)
-                     (nil? semantic-timeout-ms))
-              ;; Keep the historical arity on the default path for callers
-              ;; that instrument the resident service.
-              (query/semantic-search-attempt (:client runtime) settings term)
-              (query/semantic-search-attempt
-               (:client runtime) settings term
-               {:mode mode :semantic-timeout-ms semantic-timeout-ms
-                :candidate-count (:candidate-count plan)}))]
+            semantic-future
+            (future
+              (if (and (= :hybrid mode) (not intent-rerank?)
+                       (nil? semantic-timeout-ms))
+                ;; Keep the historical arity on the default path for callers
+                ;; that instrument the resident service.
+                (query/semantic-search-attempt (:client runtime) settings term)
+                (query/semantic-search-attempt
+                 (:client runtime) settings term
+                 {:mode mode :semantic-timeout-ms semantic-timeout-ms
+                  :candidate-count (:candidate-count plan)})))
+            advisory-future
+            (when intent-rerank?
+              (future (advisory-attempt (:query-router runtime) term)))
+            semantic-attempt @semantic-future
+            advisory (when advisory-future @advisory-future)]
         (read-consistently
          graph generation true
          #(query/search-explain-with-attempt
            % settings term semantic-attempt
            {:mode mode :source-preference source-preference
             :intent-rerank? intent-rerank?
+            :intent-advisory advisory
             :seed-mode (when intent-rerank?
                          (get-in settings [:context :intent-seed-mode]))})))
       (read-consistently
@@ -236,12 +255,19 @@
                               :multi-candidate-count
                               (get-in settings [:context
                                                 :intent-candidate-count])})
-                  semantic-attempt
-                  (query/semantic-search-attempt
-                   (:client runtime) settings term
-                   {:mode :hybrid
-                    :semantic-timeout-ms (:semantic-timeout-ms options)
-                    :candidate-count (:candidate-count plan)})
+                  semantic-future
+                  (future
+                    (query/semantic-search-attempt
+                     (:client runtime) settings term
+                     {:mode :hybrid
+                      :semantic-timeout-ms (:semantic-timeout-ms options)
+                      :candidate-count (:candidate-count plan)}))
+                  advisory-future
+                  (when (:intent-rerank? options)
+                    (future
+                      (advisory-attempt (:query-router runtime) term)))
+                  semantic-attempt @semantic-future
+                  advisory (when advisory-future @advisory-future)
                   packet
                   (read-consistently
                    graph generation true
@@ -251,6 +277,7 @@
                             view settings term semantic-attempt
                             {:source-preference (:source-preference options)
                              :intent-rerank? (:intent-rerank? options)
+                             :intent-advisory advisory
                              :seed-mode (:seed-mode options)
                              :max-seeds (:max-seeds options)})
                            resolution
@@ -364,8 +391,9 @@
   "Run a foreground loopback-only service for one project."
   ([project]
    (start! project {}))
-  ([project {:keys [runtime-factory]
-             :or {runtime-factory semantic-runtime/start!}}]
+  ([project {:keys [runtime-factory router-factory]
+             :or {runtime-factory semantic-runtime/start!
+                  router-factory intent-router/start!}}]
    (let [descriptor-path (client/descriptor-path project)]
     (when (client/available? project)
       (throw (ex-info "A service is already running for this project"
@@ -381,7 +409,11 @@
           runtime-state (atom {:status (if semantic-enabled?
                                          :starting :disabled)
                                :worker-status (if semantic-enabled?
-                                                :starting :disabled)})
+                                                :starting :disabled)
+                               :query-router-status
+                               (if (get-in settings
+                                           [:context :query-router :enabled])
+                                 :starting :disabled)})
           worker-state (atom nil)]
       (with-open [lock-channel channel
                   service-lock lock]
@@ -405,16 +437,34 @@
                   (future
                     (try
                       (let [runtime (runtime-factory project settings)]
-                        (reset! runtime-state
-                                (assoc runtime :worker-status
-                                       (if (= :ready (:status runtime))
-                                         :starting :not-running))))
+                        (swap! runtime-state
+                               merge
+                               (assoc runtime :worker-status
+                                      (if (= :ready (:status runtime))
+                                        :starting :not-running))))
                       (catch Throwable error
-                        (reset! runtime-state
-                                {:status :failed
-                                 :reason :startup-failed
-                                 :detail (.getMessage error)
-                                 :worker-status :not-running})))))
+                        (swap! runtime-state
+                               merge
+                               {:status :failed
+                                :reason :startup-failed
+                                :detail (.getMessage error)
+                                :worker-status :not-running})))))
+                router-future
+                (when (get-in settings [:context :query-router :enabled])
+                  (future
+                    (try
+                      (let [router-runtime (router-factory project settings)]
+                        (swap! runtime-state assoc
+                               :query-router-status (:status router-runtime)
+                               :query-router (:client router-runtime)
+                               :query-router-runtime router-runtime))
+                      (catch Throwable error
+                        (swap! runtime-state assoc
+                               :query-router-status :failed
+                               :query-router-detail (.getMessage error)
+                               :query-router
+                               (intent-router/unavailable
+                                :startup-failed (.getMessage error)))))))
                 worker-future
                 (when semantic-enabled?
                   (future
@@ -507,7 +557,12 @@
                 (when (and runtime-future
                            (not (future-done? runtime-future)))
                   (future-cancel runtime-future))
+                (when (and router-future
+                           (not (future-done? router-future)))
+                  (future-cancel router-future))
                 (Files/deleteIfExists descriptor-path)))))
         (finally
+          (when-let [router-runtime (:query-router-runtime @runtime-state)]
+            (intent-router/stop! router-runtime))
           (semantic-runtime/stop! @runtime-state))))))
    0))

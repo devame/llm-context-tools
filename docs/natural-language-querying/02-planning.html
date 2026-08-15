@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Planning the question · llm-context visual guide</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header"><a class="brand" href="index.html">llm-context · visual guide</a><span class="step">Page 2 of 7</span></header>
+  <main class="page">
+    <p class="eyebrow">Concept 02</p>
+    <h1>Turning a question into a simple plan</h1>
+    <div class="diagram-stack">
+      <figure><img src="assets/03-query-plan.svg" alt="A question becoming words, answer size, related ideas and a simple plan"><figcaption>How the question is understood</figcaption></figure>
+      <section class="query-explorer" aria-labelledby="query-explorer-title">
+        <div class="query-explorer-heading">
+          <p class="eyebrow">Try the question sorter</p>
+          <h2 id="query-explorer-title">Click a question to see where it goes</h2>
+          <p class="query-explorer-help">These questions are about the same feature and can retrieve the same ten candidates. Click each wording to see why those candidates must be assembled differently.</p>
+        </div>
+        <div class="query-options" role="group" aria-label="Example questions">
+          <button class="query-option" type="button" data-route="lookup" aria-pressed="true">
+            <span class="query-option-type">One place (lookup)</span>
+            <span>Where is password reset implemented?</span>
+          </button>
+          <button class="query-option" type="button" data-route="set" aria-pressed="false">
+            <span class="query-option-type">Several places (set)</span>
+            <span>What modules participate in password reset?</span>
+          </button>
+          <button class="query-option" type="button" data-route="flow" aria-pressed="false">
+            <span class="query-option-type">A process (flow)</span>
+            <span>How does password reset work from request to completion?</span>
+          </button>
+        </div>
+        <figure class="interactive-figure">
+          <svg class="query-routing-diagram" viewBox="0 0 1200 900" role="img" aria-labelledby="query-routing-title query-routing-description">
+            <title id="query-routing-title">Interactive question-sorting diagram</title>
+            <desc id="query-routing-description">Three questions about password reset retrieve the same candidates, but their wording requires evidence for one place, several places, or a process. The selected evidence-building path is highlighted.</desc>
+            <defs>
+              <marker id="query-route-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z"></path>
+              </marker>
+            </defs>
+
+            <path class="query-route route-common" d="M600 104 V140" marker-end="url(#query-route-arrow)"></path>
+            <path class="query-route route-common" d="M600 260 V310" marker-end="url(#query-route-arrow)"></path>
+            <path class="query-route route-lookup" d="M530 412 C430 462 300 500 205 570" marker-end="url(#query-route-arrow)"></path>
+            <path class="query-route route-set" d="M600 442 V570" marker-end="url(#query-route-arrow)"></path>
+            <path class="query-route route-flow" d="M670 412 C770 462 900 500 995 570" marker-end="url(#query-route-arrow)"></path>
+
+            <text class="query-branch-label route-lookup" x="235" y="492">One principal implementation</text>
+            <text class="query-branch-label route-set" x="600" y="510">Several participating modules</text>
+            <text class="query-branch-label route-flow" x="965" y="492">Ordered request-to-completion path</text>
+
+            <g class="query-node query-node-question">
+              <rect x="470" y="34" width="260" height="70" rx="12"></rect>
+              <text x="600" y="76">QUESTION</text>
+            </g>
+            <g class="query-node query-node-candidates">
+              <rect x="300" y="140" width="600" height="120" rx="12"></rect>
+              <text x="600" y="184">SAME SEMANTIC RETRIEVAL RESULTS</text>
+              <text class="query-node-detail" x="600" y="218">Ten password-reset candidates: handler · token · email · user update · tests…</text>
+            </g>
+            <g class="query-node query-node-decision">
+              <polygon points="600,310 720,376 600,442 480,376"></polygon>
+              <text x="600" y="368">What kind of answer</text>
+              <text x="600" y="394">is needed?</text>
+            </g>
+            <g class="query-node query-node-lookup" data-target="lookup">
+              <rect x="55" y="570" width="300" height="150" rx="12"></rect>
+              <text x="205" y="625">ONE PLACE (LOOKUP)</text>
+              <text class="query-node-detail" x="205" y="661">Keep one dominant</text>
+              <text class="query-node-detail" x="205" y="687">implementation</text>
+            </g>
+            <g class="query-node query-node-set" data-target="set">
+              <rect x="450" y="570" width="300" height="150" rx="12"></rect>
+              <text x="600" y="625">SEVERAL PLACES (SET)</text>
+              <text class="query-node-detail" x="600" y="661">Keep a diverse group</text>
+              <text class="query-node-detail" x="600" y="687">of modules</text>
+            </g>
+            <g class="query-node query-node-flow" data-target="flow">
+              <rect x="845" y="570" width="300" height="150" rx="12"></rect>
+              <text x="995" y="625">A PROCESS (FLOW)</text>
+              <text class="query-node-detail" x="995" y="661">Keep entry points, then follow</text>
+              <text class="query-node-detail" x="995" y="687">calls and other code links</text>
+            </g>
+            <g class="query-node query-node-takeaway">
+              <rect x="155" y="780" width="890" height="92" rx="12"></rect>
+              <text x="600" y="817">The candidates can be identical, but the required evidence is not.</text>
+              <text class="query-node-detail" x="600" y="848">Question wording changes what is retained, diversified, or traversed—not what the code means.</text>
+            </g>
+          </svg>
+          <figcaption id="query-route-status" aria-live="polite">Selected route: lookup · one main symbol</figcaption>
+        </figure>
+      </section>
+      <figure><img src="assets/05-command-paths.svg" alt="Difference between query search and context intent command paths"><figcaption>Two command paths</figcaption></figure>
+      <figure><img src="assets/06-normalization.svg" alt="Question normalization, term extraction and software vocabulary expansion"><figcaption>Normalizing words without inventing facts</figcaption></figure>
+      <figure><img src="assets/07-responsibilities.svg" alt="Separate responsibilities of the deterministic planner, semantic retriever and answer model"><figcaption>Which component does what</figcaption></figure>
+    </div>
+  </main>
+  <script>
+    const queryExplorer = document.querySelector(".query-explorer");
+    if (queryExplorer) {
+      const routeNames = {
+        lookup: "one place · one main code piece",
+        set: "several places · a small group of code pieces",
+        flow: "a process · starting point and code links",
+      };
+      const options = [...queryExplorer.querySelectorAll("[data-route]")];
+      const routeParts = [...queryExplorer.querySelectorAll(".query-route, .query-branch-label")];
+      const targets = [...queryExplorer.querySelectorAll("[data-target]")];
+      const status = queryExplorer.querySelector("#query-route-status");
+
+      function selectRoute(route) {
+        options.forEach((option) => {
+          option.setAttribute("aria-pressed", String(option.dataset.route === route));
+        });
+        routeParts.forEach((part) => {
+          part.classList.toggle("is-active", part.classList.contains(`route-${route}`));
+        });
+        targets.forEach((target) => {
+          target.classList.toggle("is-active", target.dataset.target === route);
+        });
+        status.textContent = `Selected route: ${routeNames[route]}`;
+      }
+
+      options.forEach((option) => {
+        option.addEventListener("click", () => selectRoute(option.dataset.route));
+      });
+      selectRoute("lookup");
+    }
+  </script>
+  <nav class="pager" aria-label="Page navigation"><a href="01-indexing.html">← Indexing</a><a class="next" href="03-retrieval.html">Next · Retrieval →</a></nav>
+</body>
+</html>

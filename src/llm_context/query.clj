@@ -301,13 +301,38 @@
            (take limit)
            vec))))
 
+(defn- exact-relationship-count
+  "Count exact graph edges among a bounded prefix of retrieved candidates.
+  This is structural support for a flow plan, not a relevance score."
+  [graph candidates]
+  (let [ids (->> candidates
+                 (filter #(and (:intent-qualified? %)
+                               (pos? (double (:intent-score % 0.0)))))
+                 (take 12) (map :id) distinct vec)]
+    (if (< (count ids) 2)
+      0
+      (or (some-> (store/query
+                   graph
+                   '[:find (count ?edge)
+                     :in $ [?from-id ...] [?to-id ...]
+                     :where
+                     [?from :symbol/id ?from-id]
+                     [?to :symbol/id ?to-id]
+                     [?edge :edge/from ?from]
+                     [?edge :edge/to ?to]
+                     [?edge :edge/resolution :resolution/exact]]
+                   [ids ids])
+                  ffirst long)
+          0))))
+
 (defn search-explain-with-attempt
   "Fuse a completed semantic attempt with current lexical and graph state."
   ([graph config term semantic-attempt]
    (search-explain-with-attempt
     graph config term semantic-attempt {}))
   ([graph config term semantic-attempt options-or-mode]
-   (let [{:keys [mode source-preference intent-rerank? seed-mode max-seeds]}
+   (let [{:keys [mode source-preference intent-rerank? seed-mode max-seeds
+                 intent-advisory]}
          (if (map? options-or-mode)
            options-or-mode
            {:mode options-or-mode})
@@ -352,7 +377,18 @@
                     (intent/rerank term (:results preferred) plan)
                     {:results (:results preferred)
                      :provider :none :status :not-requested
-                     :reordered? false})]
+                     :reordered? false})
+         resolved-plan
+         (if intent-rerank?
+           (intent/resolve-plan
+            plan (:results reranked)
+            {:advisory (or intent-advisory
+                           {:provider :none :status :not-requested})
+             :minimum-advisory-margin
+             (get-in config [:context :query-router :minimum-margin])
+             :exact-relationship-count
+             (exact-relationship-count graph (:results reranked))})
+           plan)]
      (assoc response
             :results (:results reranked)
             :retrieval
@@ -362,7 +398,8 @@
                    :source-preference-reason reason
                    :source-role-counts (:role-counts preferred)
                    :source-preference-reordered? (:reordered? preferred)
-                   :query-plan (dissoc plan :query-terms :expanded-terms)
+                   :query-plan (dissoc resolved-plan
+                                       :query-terms :expanded-terms)
                    :reranker {:provider (:provider reranked)
                               :status (:status reranked)
                               :reordered? (:reordered? reranked)})))))
@@ -373,7 +410,7 @@
   ([graph semantic-client config term {:keys [mode source-preference
                                               intent-rerank?
                                               semantic-timeout-ms seed-mode
-                                              max-seeds]
+                                              max-seeds intent-advisory]
                                        :or {mode retrieval-mode/default
                                             source-preference :none}}]
    (let [mode (retrieval-mode/normalize mode)
@@ -401,7 +438,7 @@
         :candidate-count (:semantic-candidate-count plan)})
       {:mode mode :source-preference source-preference
        :intent-rerank? intent-rerank? :seed-mode seed-mode
-       :max-seeds max-seeds}))))
+       :max-seeds max-seeds :intent-advisory intent-advisory}))))
 
 (defn callers [graph target]
   (->> (store/query

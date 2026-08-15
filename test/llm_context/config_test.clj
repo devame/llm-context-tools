@@ -31,6 +31,10 @@
     (is (= 4 (get-in loaded [:context :intent-max-seeds])))
     (is (true? (get-in loaded [:context :intent-rerank])))
     (is (= 100 (get-in loaded [:context :intent-candidate-count])))
+    (is (= "mixedbread-ai/mxbai-edge-colbert-v0-32m"
+           (get-in loaded [:context :query-router :model])))
+    (is (= 250 (get-in loaded [:context :query-router :query-timeout-ms])))
+    (is (= 0.02 (get-in loaded [:context :query-router :minimum-margin])))
     (is (= [] (get-in loaded [:context :source-role-overrides])))))
 
 (deftest trace-bounds-must-be-positive

@@ -21,12 +21,13 @@
                                         (make-array java.nio.file.attribute.FileAttribute 0))
         checks (doctor/check (project/context (str root)) (config/defaults))]
     (is (:ok? (first (filter #(= :datalevin (:check %)) checks))))
-    (is (= #{:next-plaid-api :onnx-runtime :lateon-model :project-service}
+    (is (= #{:next-plaid-api :onnx-runtime :lateon-model
+             :query-router-model :project-service}
            (->> checks
                 (remove :required?)
                 (map :check)
                 (filter #{:next-plaid-api :onnx-runtime
-                          :lateon-model :project-service})
+                          :lateon-model :query-router-model :project-service})
                 set)))))
 
 (deftest failed-semantic-worker-makes-project-service-check-actionable

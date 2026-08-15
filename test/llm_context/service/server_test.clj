@@ -3,6 +3,7 @@
             [llm-context.analysis.full :as full]
             [llm-context.analysis.incremental :as incremental]
             [llm-context.context :as context]
+            [llm-context.intent.router :as intent-router]
             [llm-context.query :as query]
             [llm-context.semantic.fake-index :as fake]
             [llm-context.semantic.worker :as semantic-worker]
@@ -29,6 +30,9 @@
         (>= attempt 100) false
         :else (do (Thread/sleep 20) (recur (inc attempt)))))))
 
+(defn- router-factory [_ _]
+  {:status :disabled :client (intent-router/unavailable :test)})
+
 (deftest authenticated-loopback-service-round-trip
   (let [root (Files/createTempDirectory "llm-context-service-"
                                         (make-array java.nio.file.attribute.FileAttribute 0))
@@ -40,7 +44,8 @@
         running (future
                   (with-out-str
                     (server/start! project
-                                   {:runtime-factory runtime-factory})))]
+                                   {:runtime-factory runtime-factory
+                                    :router-factory router-factory})))]
     (is (await-service project))
     (let [descriptor (client/descriptor project)]
       (if (transport/windows?)
@@ -56,7 +61,8 @@
     (is (= {:status :unavailable
             :reason :model-missing
             :detail "/missing/model"
-            :worker-status :not-running}
+            :worker-status :not-running
+            :query-router-status :disabled}
            (get-in (client/request project {:op :semantic-status})
                    [:value :runtime])))
     (is (= 0 (get-in (client/request project
@@ -85,7 +91,8 @@
         running (future
                   (with-out-str
                     (server/start! project
-                                   {:runtime-factory runtime-factory})))]
+                                   {:runtime-factory runtime-factory
+                                    :router-factory router-factory})))]
     (is (await-service project))
     (is (await-semantic-status project :ready))
     (is (= :ready
@@ -126,7 +133,8 @@
       (let [running (future
                       (with-out-str
                         (server/start! project
-                                       {:runtime-factory runtime-factory})))]
+                                       {:runtime-factory runtime-factory
+                                        :router-factory router-factory})))]
         (is (= true (deref entered 5000 false)))
         (let [status (client/request project {:op :semantic-status}
                                      {:request-timeout 1000})]
@@ -148,7 +156,8 @@
         running (future
                   (with-out-str
                     (server/start! project
-                                   {:runtime-factory runtime-factory})))]
+                                   {:runtime-factory runtime-factory
+                                    :router-factory router-factory})))]
     (is (await-service project))
     ;; Model the case where another network namespace can see the project but
     ;; cannot contact its advertised endpoint. Ownership must not depend only
@@ -157,7 +166,8 @@
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo
            #"already owns this project"
-           (server/start! project {:runtime-factory runtime-factory}))))
+           (server/start! project {:runtime-factory runtime-factory
+                                   :router-factory router-factory}))))
     (is (= {:ok true :value :stopping}
            (client/request project {:op :stop})))
     (is (not= ::timeout (deref running 5000 ::timeout)))))
@@ -177,7 +187,8 @@
       (let [running (future
                       (with-out-str
                         (server/start! project
-                                       {:runtime-factory runtime-factory})))]
+                                       {:runtime-factory runtime-factory
+                                        :router-factory router-factory})))]
         (is (await-service project))
         (loop [attempt 0]
           (let [runtime
@@ -211,7 +222,8 @@
       (let [running (future
                       (with-out-str
                         (server/start! project
-                                       {:runtime-factory runtime-factory})))]
+                                       {:runtime-factory runtime-factory
+                                        :router-factory router-factory})))]
         (is (await-service project))
         (let [slow (future
                      (client/request

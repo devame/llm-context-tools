@@ -9,6 +9,7 @@ selected EDN ─> data facts ──────────┘                  
                          ┌───────────────────────────────────────────┤
                          ├─> bounded Datalog queries and traversal
                          ├─> durable LateOn indexing jobs
+                         ├─> advisory 32M query-shape scoring
                          └─> deterministic exports
 ```
 
@@ -67,7 +68,8 @@ and queues documents for a versioned NextPlaid index.
   project build classpath, and macros are never executed.
 - Dynamic Clojure and Janet calls stay diagnostic instead of being guessed.
 - LateOn improves retrieval but adds local model disk, memory, and background
-  indexing cost.
+  indexing cost. The advisory 32M router adds a second small resident inference
+  process; it runs concurrently with retrieval and may be disabled independently.
 
 These constraints favor a smaller graph with defensible evidence over broad
 language coverage and noisy apparent connectivity.

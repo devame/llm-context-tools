@@ -104,6 +104,34 @@
       (is (= #{"symbol:caller"}
              (set (map :id (query/entry-points graph))))))))
 
+(deftest advisory-flow-plan-requires-an-exact-candidate-relationship
+  (let [{:keys [project file entities]} (fixture)
+        candidates [{:id "symbol:caller" :name "caller"
+                     :qualified-name "sample/caller" :file "src/a.clj"}
+                    {:id "symbol:callee" :name "callee"
+                     :qualified-name "sample/callee" :file "src/b.clj"}]
+        advisory {:provider :mixedbread-32m :status :available
+                  :suggested-shape :flow
+                  :scores {:flow 10.0 :lookup 9.9 :set 9.8}
+                  :margin 0.1}]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-file! graph file entities)
+      (with-redefs [query/symbols (fn [_ _ limit]
+                                    (is (= 100 limit))
+                                    candidates)]
+        (let [response
+              (query/search-explain-with-attempt
+               graph (config/defaults) "follow caller into callee"
+               {:mode :fts-only :status :not-requested :candidates []}
+               {:mode :fts-only :intent-rerank? true
+                :intent-advisory advisory})
+              plan (get-in response [:retrieval :query-plan])]
+          (is (= :flow (:shape plan)))
+          (is (= :model-plus-structure (:planning-authority plan)))
+          (is (= 1 (get-in plan [:structural-support
+                                 :exact-relationships])))
+          (is (= advisory (:advisory plan))))))))
+
 (defn trace-fixture [unrelated-count]
   (let [root (Files/createTempDirectory "llm-context-trace-"
                                         (make-array java.nio.file.attribute.FileAttribute 0))

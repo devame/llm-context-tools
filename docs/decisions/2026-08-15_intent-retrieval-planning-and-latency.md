@@ -266,6 +266,38 @@ suite before adoption.
 
 ## Configuration and interfaces
 
+### Implemented query-routing amendment — 2026-08-15
+
+The phrase-based automatic shape detector described earlier in this decision
+has been removed from the production path. Its 41.7% balanced-corpus accuracy
+made a default-to-lookup policy unsafe for unfamiliar wording.
+
+Automatic requests now begin with an `:adaptive` multi-root retrieval plan and
+the full configured candidate budget. In parallel with repository retrieval,
+the resident `mixedbread-ai/mxbai-edge-colbert-v0-32m` INT8 ONNX model scores
+three immutable route descriptions. The result is a prior, not a gate:
+
+- all candidates are generated and fused before shape resolution;
+- a set prior requires at least two structurally qualified candidates;
+- a flow prior requires an exact canonical graph edge among bounded leading
+  candidates;
+- the top-two model score margin must meet the configurable 0.02 default;
+- unsupported, timed-out, unavailable, or invalid advice leaves the plan
+  adaptive;
+- explicit single or multi caller options remain authoritative.
+
+NextPlaid hosts the 33 MB router model in a second resident process and a
+three-document disposable index. Retrieval and routing execute concurrently,
+so warm router latency is normally hidden beneath repository retrieval. The
+plan records all route scores, score margin, model revision, router latency,
+structural support, and final planning authority.
+
+Calibration with the exact NextPlaid ONNX runtime accepted 35 of the 72 frozen
+questions at the 0.02 margin and classified 34 of those correctly (97.1%). A
+0.06 margin accepted 12 of 72 correctly, but its low coverage was not useful as
+the default. These are routing-only development measurements, not final-answer
+quality claims.
+
 Proposed project defaults:
 
 ```edn

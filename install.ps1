@@ -5,6 +5,8 @@ $Version = if ($env:LLM_CONTEXT_VERSION) { $env:LLM_CONTEXT_VERSION } else { "la
 $NextPlaidVersion = "1.6.4"
 $ModelId = "lightonai/LateOn-Code"
 $ModelRevision = "734b659a57935ef50562d79581c3ff1f8d825c93"
+$RouterModelId = "mixedbread-ai/mxbai-edge-colbert-v0-32m"
+$RouterModelRevision = "963e23afa1478d8bcc12e5d7115adcfdbd22c3af"
 $InstallDir = if ($env:LLM_CONTEXT_INSTALL_DIR) {
     $env:LLM_CONTEXT_INSTALL_DIR
 } else {
@@ -16,6 +18,7 @@ $ModelCacheRoot = if ($env:LLM_CONTEXT_MODEL_CACHE) {
     Join-Path $env:LOCALAPPDATA "llm-context\models"
 }
 $ModelDir = Join-Path (Join-Path $ModelCacheRoot "lightonai--LateOn-Code") $ModelRevision
+$RouterModelDir = Join-Path (Join-Path $ModelCacheRoot "mixedbread-ai--mxbai-edge-colbert-v0-32m") $RouterModelRevision
 
 if ($env:LLM_CONTEXT_RELEASE_URL) {
     $ReleaseUrl = $env:LLM_CONTEXT_RELEASE_URL.TrimEnd("/")
@@ -138,6 +141,40 @@ try {
                 }
             }
         }
+
+        $RouterModelHashes = [ordered]@{
+            "model_int8.onnx" = "264ba680e960af9fffb4f78c3af1e4ff92520678b8e136c79434d88fb2549e1b"
+            "tokenizer.json" = "594291000b476c98ed600cbb1914ff128c79642a9433aac86213c7a5562d7c1a"
+            "config_sentence_transformers.json" = "0c4eb4090ff55ddee69380ad5ea88a3a89500651996a56953af72bafdb7965b6"
+            "config.json" = "a60a035a715a686dca530cf41da553a571e26ea45288d04d750b9da1a27c268d"
+            "onnx_config.json" = "e10f017e4a8355f6b15f5be5f67295c90d5b25e487568bf0b0d9ee3259dc0eb7"
+        }
+        $RouterModelReady = $true
+        foreach ($ModelFile in $RouterModelHashes.Keys) {
+            if (-not (Test-FileHash (Join-Path $RouterModelDir $ModelFile) $RouterModelHashes[$ModelFile])) {
+                $RouterModelReady = $false
+                break
+            }
+        }
+        if ($RouterModelReady) {
+            Write-Host "Using verified Mixedbread query router at $RouterModelDir"
+        } else {
+            $RouterModelDownload = Join-Path $TempDir "router-model"
+            New-Item -ItemType Directory -Path $RouterModelDownload | Out-Null
+            $RouterModelUrlBase = if ($env:LLM_CONTEXT_QUERY_ROUTER_MODEL_URL) {
+                $env:LLM_CONTEXT_QUERY_ROUTER_MODEL_URL.TrimEnd("/")
+            } else {
+                "https://huggingface.co/$RouterModelId/resolve/$RouterModelRevision"
+            }
+            Write-Host "Downloading pinned Mixedbread INT8 query router (about 33 MB)..."
+            foreach ($ModelFile in $RouterModelHashes.Keys) {
+                $Destination = Join-Path $RouterModelDownload $ModelFile
+                Receive-File "$RouterModelUrlBase/$ModelFile`?download=true" $Destination
+                if (-not (Test-FileHash $Destination $RouterModelHashes[$ModelFile])) {
+                    throw "Mixedbread query-router model checksum verification failed for $ModelFile"
+                }
+            }
+        }
     }
 
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
@@ -185,6 +222,27 @@ try {
                 throw
             }
         }
+        if (-not $RouterModelReady) {
+            $RouterModelParent = Split-Path -Parent $RouterModelDir
+            $RouterModelStaged = "$RouterModelDir.new.$PID"
+            $RouterModelBackup = "$RouterModelDir.previous.$PID"
+            New-Item -ItemType Directory -Force -Path $RouterModelParent | Out-Null
+            Copy-Item -Recurse -LiteralPath $RouterModelDownload -Destination $RouterModelStaged
+            if (Test-Path -LiteralPath $RouterModelDir) {
+                Move-Item -LiteralPath $RouterModelDir -Destination $RouterModelBackup
+            }
+            try {
+                Move-Item -LiteralPath $RouterModelStaged -Destination $RouterModelDir
+                if (Test-Path -LiteralPath $RouterModelBackup) {
+                    Remove-Item -Recurse -Force -LiteralPath $RouterModelBackup
+                }
+            } catch {
+                if (Test-Path -LiteralPath $RouterModelBackup) {
+                    Move-Item -LiteralPath $RouterModelBackup -Destination $RouterModelDir
+                }
+                throw
+            }
+        }
     }
 
     $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -204,7 +262,7 @@ try {
     Write-Host "Installed llm-context $InstalledVersion at $Launcher"
     Write-Host "Installed user guide at $(Join-Path $InstallDir 'USER-GUIDE.md')"
     if ($InstallSemantic) {
-        Write-Host "Installed NextPlaid API $NextPlaidVersion and LateOn-Code at $ModelDir"
+        Write-Host "Installed NextPlaid API $NextPlaidVersion, LateOn-Code at $ModelDir, and query router at $RouterModelDir"
     }
 
     Write-Host "New terminals can run: llm-context doctor"
