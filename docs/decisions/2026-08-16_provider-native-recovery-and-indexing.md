@@ -232,7 +232,12 @@ Datalog value-membership query reduced unchanged Metabase replay to roughly
 AVE identity indexes once into an ordinary detached identity-to-EID map and
 reuses it for batch comparison and stale detection. It does not retain the
 immutable database value; attributes and reference identities remain bounded
-per batch. Incremental writes keep their existing targeted lookup path.
+per batch. Complete stored entities are read with Datalevin's native
+`pull-many` API rather than a generic three-variable Datalog query. On the
+59652-document Metabase qualification repository this raised unchanged replay
+from roughly 62 entities/second after identity-index reuse to roughly 8100
+entities/second, while preserving bounded per-batch memory and zero graph
+growth. Incremental writes keep their existing targeted lookup path.
 
 ### Phase 2: provider-native graph maintenance
 
@@ -279,6 +284,16 @@ ordinary leased job and is recovered through delete-await-submit-verify.
 
 GPU acceleration remains an encoder concern. It does not change queue,
 generation, or visibility semantics.
+
+Pinned-provider workload tuning confirmed that update size dominates semantic
+throughput because each replacement batch performs delete, upload, and exact
+visibility barriers. Increasing the Metabase qualification configuration from
+32 to 512 documents per update raised observed throughput from about 41 to
+roughly 344-376 documents/minute with zero failed jobs and stable disk use.
+Increasing the CUDA encoder micro-batch from one to two was rejected: it used
+more GPU memory and reduced observed throughput. These are workload
+measurements, not new universal defaults; deployments retain explicit control
+through `:update-batch-size`, `:update-timeout-ms`, and accelerator settings.
 
 ### Phase 4: host-native supervision and cleanup
 
