@@ -427,40 +427,53 @@
     (if (empty? prepared)
       {:results immediate
        :metrics {:submitted-documents 0 :submitted-chunks 0
+                 :reused-documents 0
                  :upload-batches 0 :delete-ms 0
                  :upload-ms 0 :visibility-ms 0}}
       (try
         (let [jobs (mapv :job prepared)
               _ (renew-leases! worker jobs)
-              symbols (mapv (comp :symbol-id :desired) prepared)
+              visible (visible-documents worker prepared)
+              reusable (filterv #(desired-visible? visible (:desired %))
+                                prepared)
+              replacements (filterv #(not (desired-visible?
+                                            visible (:desired %)))
+                                    prepared)
+              replacement-jobs (mapv :job replacements)
+              symbols (mapv (comp :symbol-id :desired) replacements)
               delete-start (System/nanoTime)
-              existing (visible-documents worker prepared)
-              _ (when (seq existing)
+              existing-symbols (set (map :symbol-id visible))
+              _ (when (some existing-symbols symbols)
                   (index/delete-symbols! (:client worker) symbols)
-                  (await-documents! worker prepared empty?
+                  (await-documents! worker replacements empty?
                                     "batched replacement deletion"))
               delete-ms (long (/ (- (System/nanoTime) delete-start) 1000000))
-              chunks (vec (mapcat (comp :chunks :desired) prepared))
+              chunks (vec (mapcat (comp :chunks :desired) replacements))
               batches (mapv vec
                             (partition-all
                              (:update-batch-size (:settings worker)) chunks))
               upload-start (System/nanoTime)
-              accepted-documents (submit-update-batches! worker jobs batches)
+              accepted-documents (if (seq batches)
+                                   (submit-update-batches!
+                                    worker replacement-jobs batches)
+                                   0)
               upload-ms (long (/ (- (System/nanoTime) upload-start) 1000000))
               visibility-start (System/nanoTime)
-              _ (await-documents!
-                 worker prepared
-                 #(every? (fn [{:keys [desired]}]
-                            (desired-visible? % desired))
-                          prepared)
-                 "batched upsert visibility")
+              _ (when (seq replacements)
+                  (await-documents!
+                   worker replacements
+                   #(every? (fn [{:keys [desired]}]
+                              (desired-visible? % desired))
+                            replacements)
+                   "batched upsert visibility"))
               visibility-ms
               (long (/ (- (System/nanoTime) visibility-start) 1000000))
               results
               (into immediate (complete-prepared! worker prepared))]
           {:results results
-           :metrics {:submitted-documents (count prepared)
+           :metrics {:submitted-documents (count replacements)
                      :accepted-documents accepted-documents
+                     :reused-documents (count reusable)
                      :submitted-chunks (count chunks)
                      :upload-batches (count batches)
                      :delete-ms delete-ms
@@ -472,6 +485,7 @@
                  (mapv #(retry-job! worker (:job %) error) prepared))
            :metrics {:submitted-documents 0 :submitted-chunks 0
                      :accepted-documents 0
+                     :reused-documents 0
                      :upload-batches 0 :delete-ms 0
                      :upload-ms 0 :visibility-ms 0}})))))
 
@@ -615,6 +629,8 @@
                                (:submitted-documents result 0))
                        (update :accepted-documents +
                                (:accepted-documents result 0))
+                       (update :reused-documents +
+                               (:reused-documents result 0))
                        (update :submitted-chunks +
                                (:submitted-chunks result 0))
                        (update :upload-batches + (:upload-batches result 0))
@@ -669,6 +685,7 @@
     :progress (atom {:started-at (now-fn)
                      :leased 0 :completed 0 :retried 0 :failed 0
                      :submitted-documents 0 :accepted-documents 0
+                     :reused-documents 0
                      :submitted-chunks 0
                      :upload-batches 0 :delete-ms 0
                      :upload-ms 0 :visibility-ms 0})

@@ -78,6 +78,31 @@
                      [:watermark
                       :semantic.watermark/index-generation])))))))
 
+(deftest worker-reuses-provider-documents-after-operational-state-loss
+  (let [{:keys [project]} (fixture)
+        client (fake/create)]
+    (store/with-store [graph project settings]
+      (let [first-worker (test-worker graph project client)]
+        (worker/prepare! first-worker)
+        (is (= 2 (:completed (worker/process-once! first-worker)))))
+      ;; Simulate loss of derived Datalevin queue/index records while the
+      ;; provider's exact, generation-scoped documents remain intact.
+      (store/reset-semantic-state! graph)
+      (reconcile/mark-full! graph)
+      (let [replacement-worker (test-worker graph project client)
+            _ (worker/prepare! replacement-worker)
+            operations-before (count (:operations (fake/snapshot client)))
+            result (worker/process-once! replacement-worker)
+            new-operations (drop operations-before
+                                 (:operations (fake/snapshot client)))]
+        (is (= 2 (:completed result)))
+        (is (= 2 (:reused-documents result)))
+        (is (zero? (:submitted-documents result)))
+        (is (zero? (:accepted-documents result)))
+        (is (empty? new-operations))
+        (is (= 2 (count (state/indexed-records
+                         graph reconcile/provider))))))))
+
 (deftest missing-index-generation-fails-closed-and-requeues-all-symbols
   (let [{:keys [project]} (fixture)
         client (fake/create)]
