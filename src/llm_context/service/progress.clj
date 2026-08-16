@@ -71,7 +71,7 @@
              :state :interrupted
              :updated-at (now)
              :finished-at (now)
-             :last-error "The service stopped during analysis")
+             :last-error "The previous analysis process stopped before completion")
       (write-atomically! (path project) @state))
     {:project project :state state}))
 

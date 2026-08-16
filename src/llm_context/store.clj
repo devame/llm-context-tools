@@ -3,7 +3,8 @@
             [datalevin.core :as d]
             [llm-context.model.schema :as schema])
   (:import [java.io Closeable]
-           [java.nio.file Files LinkOption Path]))
+           [java.nio.file AtomicMoveNotSupportedException Files LinkOption Path
+            StandardCopyOption]))
 
 (defprotocol GraphStore
   (database [store] "Return an immutable database value for querying.")
@@ -231,19 +232,6 @@
   (validate-relationships! (database store) entities true)
   entities)
 
-(defn- transact-batches!
-  [connection items batch-size tx-fn phase on-progress]
-  (let [batches (vec (partition-all batch-size items))
-        total (count items)]
-    (loop [remaining batches
-           completed 0]
-      (when-let [batch (first remaining)]
-        (d/transact! connection (vec (tx-fn batch)))
-        (let [next-completed (+ completed (count batch))]
-          (when on-progress
-            (on-progress {:phase phase :completed next-completed :total total}))
-          (recur (next remaining) next-completed))))))
-
 (defn- entities->tx
   "Assign explicit entity/temp IDs so references within one transaction never
   create partial lookup-ref placeholders. Identities in force-new are recreated
@@ -341,6 +329,7 @@
 
 (def graph-metadata-key "analysis-format")
 (def ^:private graph-update-analyzer-name "update-in-progress")
+(def replacement-strategy "identity-convergence-v1")
 
 (defn graph-metadata
   "Return the persisted analyzer/graph compatibility contract, or nil before
@@ -405,7 +394,8 @@
    (:connection store)
    [{:llm-context/meta-key graph-metadata-key
      :llm-context/graph-format schema/graph-format-version
-     :llm-context/analyzer-name graph-update-analyzer-name}]))
+     :llm-context/analyzer-name graph-update-analyzer-name
+     :llm-context/replacement-strategy replacement-strategy}]))
 
 (defn write-graph-metadata!
   [store {:keys [analyzer-name analyzer-version janet-catalog-version
@@ -417,6 +407,7 @@
    [(cond-> {:llm-context/meta-key graph-metadata-key
              :llm-context/graph-format schema/graph-format-version
              :llm-context/analyzer-name analyzer-name
+             :llm-context/replacement-strategy replacement-strategy
              :llm-context/analyzer-version analyzer-version
              :llm-context/janet-catalog-version janet-catalog-version
              :llm-context/semantic-document-version semantic-document-version
@@ -576,6 +567,123 @@
                (get attributes eid)))))
    entities))
 
+(defn- stale-canonical-eids
+  "Find canonical identities absent from a complete proposed snapshot without
+  retaining a second full graph in memory. Operational semantic entities do
+  not have :entity/type and are intentionally outside this replacement."
+  [db asserted-identities]
+  (reduce
+   (fn [stale attribute]
+     (reduce
+      (fn [result [eid value]]
+        (if (contains? asserted-identities [attribute value])
+          result
+          (conj result eid)))
+      stale
+      (d/q '[:find ?entity ?value
+             :in $ ?attribute
+             :where [?entity :entity/type _]
+                    [?entity ?attribute ?value]]
+           db attribute)))
+   []
+   canonical-identity-attributes))
+
+(defn- transaction-value-weight [attribute value]
+  (cond
+    (coll? value) (max 1 (count value))
+    ;; Full-text indexing expands long documents internally. Approximate that
+    ;; work so a few documented symbols cannot dominate one native write.
+    (and (contains? #{:symbol/search-text :aggregate/search-text} attribute)
+         (string? value))
+    (max 1 (long (Math/ceil (/ (count value) 128.0))))
+    :else 1))
+
+(defn- entity-transaction-weight [entity]
+  (reduce-kv
+   (fn [weight attribute value]
+     (+ weight (transaction-value-weight attribute value)))
+   0
+   (schema/with-derived-attributes entity)))
+
+(defn- take-weighted-batch
+  [entities max-count max-weight]
+  (loop [remaining entities
+         batch []
+         weight 0]
+    (if-let [entity (first remaining)]
+      (let [entity-weight (entity-transaction-weight entity)
+            exceeds? (or (>= (count batch) max-count)
+                         (and (seq batch)
+                              (> (+ weight entity-weight) max-weight)))]
+        (if exceeds?
+          [batch remaining weight]
+          (recur (next remaining) (conj batch entity)
+                 (+ weight entity-weight))))
+      [batch nil weight])))
+
+(defn- transact-upsert-batches!
+  [connection entities batch-size max-transaction-weight before-transaction
+   on-progress]
+  (let [total (count entities)]
+    (loop [remaining (seq entities)
+           completed 0]
+      (when (seq remaining)
+        (let [[batch next-remaining transaction-weight]
+              (take-weighted-batch remaining batch-size
+                                   max-transaction-weight)
+              db (d/db connection)
+              existing-eids
+              (existing-identity-eids db (map entity-identity batch))
+              attributes (attributes-by-eid db (vals existing-eids))
+              stale-attributes
+              (stale-attribute-tx batch existing-eids attributes)
+              assertions (entities->tx db batch #{} existing-eids)
+              next-completed (+ completed (count batch))]
+          (when before-transaction
+            (before-transaction {:phase :upsert
+                                 :completed completed :total total}))
+          (d/transact! connection
+                       (vec (concat stale-attributes assertions)))
+          (when on-progress
+            (on-progress {:phase :upsert
+                          :completed next-completed :total total
+                          :transaction-weight transaction-weight
+                          :max-transaction-weight
+                          max-transaction-weight}))
+          (recur next-remaining next-completed))))))
+
+(defn- transact-stale-cleanup-batches!
+  "Remove stale canonical entities as explicit datoms. Datalevin expands
+  retractEntity inside one native transaction; bounding only the number of
+  entities therefore does not bound LMDB dirty pages. Explicit datoms make the
+  cleanup transaction size observable and avoid that native expansion path."
+  [connection eids batch-size before-transaction on-progress]
+  (let [total (count eids)
+        ;; An entity can own many derived search grams. Keep cleanup batches
+        ;; deliberately smaller than assertion batches even when callers tune
+        ;; the latter for throughput.
+        cleanup-batch-size (min batch-size 100)]
+    (loop [remaining (seq (partition-all cleanup-batch-size eids))
+           completed 0]
+      (when-let [batch (first remaining)]
+        (let [attributes (attributes-by-eid (d/db connection) batch)
+              tx (mapcat
+                  (fn [eid]
+                    (map (fn [[attribute value]]
+                           [:db/retract eid attribute value])
+                         (get attributes eid)))
+                  batch)]
+          (when (seq tx)
+            (when before-transaction
+              (before-transaction {:phase :cleanup
+                                   :completed completed :total total}))
+            (d/transact! connection (vec tx))))
+        (let [next-completed (+ completed (count batch))]
+          (when on-progress
+            (on-progress {:phase :cleanup
+                          :completed next-completed :total total}))
+          (recur (next remaining) next-completed))))))
+
 (def ^:private identity-pull
   (into [:db/id] canonical-identity-attributes))
 
@@ -652,27 +760,34 @@
   (replace-all! [this entities]
     (replace-all! this entities {}))
 
-  (replace-all! [_ entities {:keys [batch-size on-progress]
-                             :or {batch-size 100}}]
+  (replace-all! [_ entities {:keys [batch-size max-transaction-weight
+                                    before-transaction on-progress]
+                             :or {batch-size 100
+                                  max-transaction-weight 4000}}]
     (when-not (pos-int? batch-size)
       (throw (ex-info "Full replacement batch size must be positive"
                       {:batch-size batch-size})))
+    (when-not (pos-int? max-transaction-weight)
+      (throw (ex-info "Full replacement transaction weight must be positive"
+                      {:max-transaction-weight max-transaction-weight})))
     (doseq [entity entities]
       (schema/validate-entity! entity))
     (validate-identities! entities)
     (validate-relationships! (d/db connection) entities true)
     (let [ordered (vec (dependency-order entities))
-          existing (vec (d/q '[:find [?entity ...]
-                               :where [?entity :entity/type _]]
-                             (d/db connection)))]
-      (transact-batches! connection existing batch-size
-                         #(map (fn [eid] [:db/retractEntity eid]) %)
-                         :retract on-progress)
-      (transact-batches! connection ordered batch-size
-                         (fn [batch]
-                           (entities->tx (d/db connection) batch
-                                         (set (map entity-identity batch))))
-                         :assert on-progress)))
+          asserted-identities (set (map entity-identity ordered))]
+      ;; Upsert first. This restores any identities lost by an interrupted
+      ;; earlier replacement and is safe to repeat after every committed batch.
+      (transact-upsert-batches! connection ordered batch-size
+                                max-transaction-weight before-transaction
+                                on-progress)
+      ;; Compute removals only after the desired snapshot has landed. A retry
+      ;; can therefore never mistake an as-yet-unrestored desired identity for
+      ;; stale data.
+      (let [stale (stale-canonical-eids (d/db connection)
+                                        asserted-identities)]
+        (transact-stale-cleanup-batches! connection stale batch-size
+                                         before-transaction on-progress))))
 
   (replace-file! [_ file entities]
     (schema/validate-entity! file)
@@ -762,11 +877,61 @@
   (close [_]
     (d/close connection)))
 
+(defn database-path ^Path
+  [{:keys [^Path root]} config]
+  (.normalize (.resolve root (get-in config [:store :path]))))
+
+(defn- move-directory! [^Path source ^Path target]
+  (try
+    (Files/move source target
+                (into-array java.nio.file.CopyOption
+                            [StandardCopyOption/ATOMIC_MOVE]))
+    (catch AtomicMoveNotSupportedException _
+      (Files/move source target
+                  (make-array java.nio.file.CopyOption 0)))))
+
+(defn recover-legacy-full-replacement!
+  "Archive a fail-closed database produced by the former erase-first full
+  replacement. Its canonical and derived indexes may be only partly erased,
+  so the identity-convergence writer must start from a fresh Datalevin
+  directory. Current-strategy interruptions are already idempotent and resume
+  in place. The caller must ensure no resident service owns the project."
+  [project config]
+  (let [path (database-path project config)]
+    (if-not (Files/exists path (make-array LinkOption 0))
+      {:status :absent}
+      (let [connection (d/get-conn (str path) schema/datalevin-schema)
+            metadata
+            (try
+              (d/q '[:find (pull ?meta [*]) .
+                     :in $ ?key
+                     :where [?meta :llm-context/meta-key ?key]]
+                   (d/db connection) graph-metadata-key)
+              (finally
+                (d/close connection)))
+            legacy?
+            (and (= graph-update-analyzer-name
+                    (:llm-context/analyzer-name metadata))
+                 (not= replacement-strategy
+                       (:llm-context/replacement-strategy metadata)))]
+        (if-not legacy?
+          {:status :resumable}
+          (let [recovery-dir (.resolve (.getParent path) "recovery")
+                archive
+                (.resolve
+                 recovery-dir
+                 (str (.getFileName path) "-legacy-interrupted-"
+                      (System/currentTimeMillis)))]
+            (Files/createDirectories
+             recovery-dir
+             (make-array java.nio.file.attribute.FileAttribute 0))
+            (move-directory! path archive)
+            {:status :archived :path archive}))))))
+
 (defn open
   "Open the embedded Datalevin database configured for a project."
-  [{:keys [^Path root]} config]
-  (let [configured (get-in config [:store :path])
-        path (.normalize (.resolve root configured))]
+  [project config]
+  (let [path (database-path project config)]
     (Files/createDirectories path (make-array java.nio.file.attribute.FileAttribute 0))
     (let [connection (d/get-conn (str path) schema/datalevin-schema)]
       (try

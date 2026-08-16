@@ -12,6 +12,10 @@
   (let [loaded (config/load-config (temp-project))]
     (is (= ["."] (get-in loaded [:analysis :include])))
     (is (= ".llm-context/db" (get-in loaded [:store :path])))
+    (is (= 4000 (get-in loaded [:store :max-transaction-weight])))
+    (is (= 10737418240
+           (get-in loaded [:store :minimum-free-space-bytes])))
+    (is (nil? (get-in loaded [:store :free-space-probe-path])))
     (is (= "lightonai/LateOn-Code"
            (get-in loaded [:semantic :lateon-code :model])))
     (is (= 40
@@ -53,6 +57,20 @@
       (is (= #{":context/:trace-depth must be a positive integer"
                ":context/:trace-limit must be a positive integer"}
              (set (:errors (ex-data error))))))))
+
+(deftest storage-safety-settings-are-validated
+  (let [context (temp-project)]
+    (spit (str (:config-file context))
+          (pr-str {:store {:minimum-free-space-bytes -1
+                           :free-space-probe-path ""}}))
+    (let [errors (:errors
+                  (ex-data
+                   (try (config/load-config context)
+                        nil
+                        (catch clojure.lang.ExceptionInfo error error))))]
+      (is (= #{":store/:minimum-free-space-bytes must be a non-negative integer"
+               ":store/:free-space-probe-path must be nil or a non-blank path"}
+             (set errors))))))
 
 (deftest user-configuration-deep-merges
   (let [context (temp-project)]

@@ -65,6 +65,19 @@
     (not (string? (get-in config [:store :path])))
     (conj ":store/:path must be a path string")
 
+    (not (pos-int? (get-in config [:store :max-transaction-weight])))
+    (conj ":store/:max-transaction-weight must be a positive integer")
+
+    (not (and (integer? (get-in config [:store :minimum-free-space-bytes]))
+              (not (neg? (get-in config
+                                 [:store :minimum-free-space-bytes])))))
+    (conj ":store/:minimum-free-space-bytes must be a non-negative integer")
+
+    (not (or (nil? (get-in config [:store :free-space-probe-path]))
+             (non-blank-string?
+              (get-in config [:store :free-space-probe-path]))))
+    (conj ":store/:free-space-probe-path must be nil or a non-blank path")
+
     (not (boolean? (get-in config [:service :watch])))
     (conj ":service/:watch must be true or false")
 

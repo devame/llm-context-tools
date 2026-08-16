@@ -536,21 +536,163 @@
                                        (str "sample/function-" index)
                                        (inc index)))
                       (range 205))
-        events (atom [])]
+        events (atom [])
+        guarded (atom [])]
     (store/with-store [graph project (config/defaults)]
       (store/replace-all! graph
                           (concat symbols [file-b file-a])
                           {:batch-size 100
+                           :max-transaction-weight 400
+                           :before-transaction #(swap! guarded conj %)
                            :on-progress #(swap! events conj %)})
-      (is (= [{:phase :assert :completed 100 :total 207}
-              {:phase :assert :completed 200 :total 207}
-              {:phase :assert :completed 207 :total 207}]
-             @events))
+      (is (seq @events))
+      (is (= (count @events) (count @guarded)))
+      (is (every? #(= :upsert (:phase %)) @guarded))
+      (is (every? #(= :upsert (:phase %)) @events))
+      (is (= 207 (:completed (last @events))))
+      (is (every? #(<= (:transaction-weight %) 400) @events))
       (is (= 207
              (count (store/query graph
                                  '[:find [?entity ...]
                                    :where [?entity :entity/type _]]
                                  [])))))))
+
+(deftest interrupted-whole-graph-replacement-converges-on-retry
+  (let [project (temp-project)
+        old-file (file-entity "src/a.clj" "old")
+        desired-file (file-entity "src/a.clj" "new")
+        retained (assoc (symbol-entity old-file "sample/retained" 1)
+                        :symbol/doc "obsolete documentation")
+        desired-retained (dissoc retained :symbol/doc)
+        added (symbol-entity desired-file "sample/added" 2)
+        stale-file (file-entity "src/stale.clj" "stale")
+        stale-symbol (symbol-entity stale-file "sample/stale" 1)
+        desired [desired-file desired-retained added]
+        desired-identities
+        #{(:file/id desired-file)
+          (:symbol/id desired-retained)
+          (:symbol/id added)}]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-all! graph
+                          [old-file retained stale-file stale-symbol])
+      (let [retained-eid
+            (d/q '[:find ?entity .
+                   :in $ ?id
+                   :where [?entity :symbol/id ?id]]
+                 (store/database graph) (:symbol/id retained))]
+        (d/transact!
+         (:connection graph)
+         [{:semantic.dirty/id "dirty:resume"
+           :semantic.dirty/provider :lateon-code
+           :semantic.dirty/file-id (:file/id old-file)
+           :semantic.dirty/operation :upsert
+           :semantic.dirty/created-at 1}])
+        ;; The progress callback runs after a durable batch. Model an abrupt
+        ;; stop there, then repeat the exact complete snapshot.
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo #"simulated interruption"
+             (store/replace-all!
+              graph desired
+              {:batch-size 1
+               :on-progress
+               (fn [{:keys [phase completed]}]
+                 (when (and (= :upsert phase) (= 1 completed))
+                   (throw (ex-info "simulated interruption" {}))))})))
+        (store/replace-all! graph desired {:batch-size 1})
+        (is (= desired-identities
+               (set
+                (concat
+                 (store/query graph
+                              '[:find [?id ...] :where [_ :file/id ?id]] [])
+                 (store/query graph
+                              '[:find [?id ...] :where [_ :symbol/id ?id]]
+                              [])))))
+        (is (= retained-eid
+               (d/q '[:find ?entity .
+                      :in $ ?id
+                      :where [?entity :symbol/id ?id]]
+                    (store/database graph) (:symbol/id retained))))
+        (is (nil? (:symbol/doc
+                   (d/pull (store/database graph) '[*] retained-eid))))
+        (is (= "dirty:resume"
+               (d/q '[:find ?id .
+                      :where [_ :semantic.dirty/id ?id]]
+                    (store/database graph))))))))
+
+(deftest whole-graph-stale-cleanup-avoids-native-retract-entity-expansion
+  (let [project (temp-project)
+        file (file-entity "src/cleanup.clj" "source")
+        symbols (mapv #(symbol-entity file (str "sample/stale-" %) (inc %))
+                      (range 205))]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-all! graph (cons file symbols))
+      (let [eids (vec
+                  (store/query
+                   graph
+                   '[:find [?entity ...]
+                     :where [?entity :symbol/id _]] []))
+            transactions (atom [])]
+        (with-redefs [d/transact!
+                      (fn [_ tx]
+                        (swap! transactions conj tx)
+                        nil)]
+          (#'store/transact-stale-cleanup-batches!
+           (:connection graph) eids 1000 nil nil))
+        (is (= 3 (count @transactions)))
+        (is (every? #(<= (count %) 10000) @transactions))
+        (is (every?
+             (fn [tx]
+               (every? #(= :db/retract (first %)) tx))
+             @transactions))))))
+
+(deftest legacy-interrupted-full-replacement-is-archived-before-rebuild
+  (let [project (temp-project)
+        settings (config/defaults)
+        file (file-entity "src/legacy.clj" "legacy")
+        db-path (store/database-path project settings)]
+    (store/with-store [graph project settings]
+      (store/replace-all! graph [file])
+      ;; Reproduce the marker written by the former erase-first implementation,
+      ;; which predates the durable replacement-strategy attribute.
+      (d/transact! (:connection graph)
+                   [{:llm-context/meta-key store/graph-metadata-key
+                     :llm-context/graph-format schema/graph-format-version
+                     :llm-context/analyzer-name "update-in-progress"}]))
+    (let [{:keys [status path]}
+          (store/recover-legacy-full-replacement! project settings)]
+      (is (= :archived status))
+      (is (Files/exists path (make-array java.nio.file.LinkOption 0)))
+      (is (not (Files/exists db-path
+                             (make-array java.nio.file.LinkOption 0))))
+      ;; Recovery is a move, not a deletion: the interrupted graph remains
+      ;; inspectable while the configured path starts cleanly.
+      (let [connection (d/get-conn (str path) schema/datalevin-schema)]
+        (try
+          (is (= #{(:file/id file)}
+                 (set (d/q '[:find [?id ...]
+                             :where [_ :file/id ?id]]
+                           (d/db connection)))))
+          (finally
+            (d/close connection))))
+      (store/with-store [fresh project settings]
+        (is (= :empty (store/graph-state fresh)))))))
+
+(deftest current-interrupted-full-replacement-resumes-in-place
+  (let [project (temp-project)
+        settings (config/defaults)
+        file (file-entity "src/current.clj" "current")
+        db-path (store/database-path project settings)]
+    (store/with-store [graph project settings]
+      (store/replace-all! graph [file])
+      (store/begin-full-replacement! graph))
+    (is (= {:status :resumable}
+           (store/recover-legacy-full-replacement! project settings)))
+    (is (Files/exists db-path (make-array java.nio.file.LinkOption 0)))
+    (store/with-store [graph project settings]
+      (is (= :unavailable (store/graph-state graph)))
+      (is (= store/replacement-strategy
+             (:llm-context/replacement-strategy
+              (store/graph-metadata graph)))))))
 
 (deftest target-file-replacement-preserves-inbound-evidence
   (let [project (temp-project)

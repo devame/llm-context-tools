@@ -484,6 +484,7 @@
           worker-state (atom nil)]
       (with-open [service-lock service-lease]
        (try
+        (store/recover-legacy-full-replacement! project settings)
         (with-open [graph (store/open project settings)
                     server (transport/open-listener project)]
           ;; Capture a last committed snapshot before any later analysis can

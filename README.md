@@ -227,7 +227,10 @@ Use it as a read-only source validation gate.
             "dist" "build" "out" ".shadow-cljs" ".cljs_node_repl" ".lsp"]
   :max-file-bytes 1048576}
 
- :store {:path ".llm-context/db"}
+ :store {:path ".llm-context/db"
+         :max-transaction-weight 4000
+         :minimum-free-space-bytes 10737418240
+         :free-space-probe-path nil}
 
  :service {:watch true
            :watch-initial true
@@ -266,6 +269,15 @@ Use it as a read-only source validation gate.
 Set `:providers []` for a graph-only installation. There is intentionally
 no JSON configuration or persisted-data migration layer in this greenfield
 release.
+
+Generated graph and semantic-index writes stop before usable space falls below
+`:store/:minimum-free-space-bytes` (10 GiB by default). The check runs before
+full analysis and before every graph or semantic ingestion batch. Set
+`:store/:free-space-probe-path` when generated state is backed by a different
+filesystem. When it is `nil`, native systems probe the database filesystem;
+WSL probes `/mnt/c` because ext4 reports the thin-provisioned VHDX ceiling, not
+the Windows host capacity. Override the path for a WSL distribution stored on
+another Windows drive. A value of `0` disables the reserve but not the check.
 
 ## Language support
 

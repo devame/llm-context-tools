@@ -10,6 +10,7 @@
             [llm-context.query :as query]
             [llm-context.semantic.reconcile :as semantic-reconcile]
             [llm-context.semantic.document :as semantic-document]
+            [llm-context.storage :as storage]
             [llm-context.store :as store]))
 
 (def persistence-batch-size 1000)
@@ -45,8 +46,10 @@
 
 (defn- persist!
   ([graph config entities progress]
-   (persist! graph config entities nil progress))
+   (persist! graph nil config entities nil progress))
   ([graph config entities analyzers progress]
+   (persist! graph nil config entities analyzers progress))
+  ([graph project config entities analyzers progress]
   ;; A full analysis is the format upgrade boundary. Semantic operational
   ;; records belong to a versioned document/index contract and must not make a
   ;; new graph appear complete merely because an older index was complete.
@@ -56,6 +59,14 @@
     (store/begin-full-replacement! graph)
     (store/replace-all! graph entities
                         {:batch-size persistence-batch-size
+                         :max-transaction-weight
+                         (get-in config [:store :max-transaction-weight])
+                         :before-transaction
+                         (when project
+                           (fn [{:keys [phase]}]
+                             (storage/assert-headroom!
+                              project config
+                              (keyword (str "graph-" (name phase))))))
                          :on-progress
                          (when progress
                            #(emit! progress :persist-progress %))})
@@ -147,7 +158,11 @@
   ([project config progress] (prepare-current project config progress :full))
   ([project config progress mode]
    (loop [attempt 0]
-     (let [candidate (prepare project config progress mode)]
+     (let [space (when (and project config)
+                   (storage/assert-headroom! project config
+                                             :analysis-preflight))
+           _ (when space (emit! progress :storage-preflight space))
+           candidate (prepare project config progress mode)]
        (if-not (stale-candidate? project config candidate)
          candidate
          (if (zero? attempt)
@@ -164,7 +179,7 @@
   (let [entities (:entities candidate)]
     (emit! progress :persist-start
            {:entities (count entities) :batch-size persistence-batch-size})
-    (persist! graph config entities (:analyzers candidate) progress)
+    (persist! graph project config entities (:analyzers candidate) progress)
     (emit! progress :analyzer-finalize-start {})
     (let [quality (query/graph-quality graph)
           graph-revision (semantic-document/graph-revision
@@ -207,8 +222,12 @@
   ([project config]
    (analyze! project config nil))
   ([project config progress]
-   (store/with-store [graph project config]
-     (analyze! graph project config progress)))
+   (let [recovery (store/recover-legacy-full-replacement! project config)]
+     (when (= :archived (:status recovery))
+       (emit! progress :legacy-graph-archived
+              {:archive-path (str (:path recovery))}))
+     (store/with-store [graph project config]
+       (analyze! graph project config progress))))
   ([graph project config progress]
    (let [candidate (prepare-current project config progress)]
      (if (:stale? candidate)

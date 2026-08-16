@@ -5,7 +5,10 @@
   :max-file-bytes 1048576}
 
  :store
- {:path ".llm-context/db"}
+ {:path ".llm-context/db"
+  :max-transaction-weight 4000
+  :minimum-free-space-bytes 10737418240
+  :free-space-probe-path nil}
 
  :service
  {:watch true

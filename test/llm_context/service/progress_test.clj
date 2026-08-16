@@ -40,6 +40,6 @@
     (let [restarted (progress/create context)
           snapshot (progress/snapshot restarted)]
       (is (= :interrupted (:state snapshot)))
-      (is (= "The service stopped during analysis"
+      (is (= "The previous analysis process stopped before completion"
              (:last-error snapshot)))
       (is (:finished-at snapshot)))))

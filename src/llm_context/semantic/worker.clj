@@ -5,6 +5,7 @@
             [llm-context.semantic.index :as index]
             [llm-context.semantic.reconcile :as reconcile]
             [llm-context.semantic.state :as state]
+            [llm-context.storage :as storage]
             [llm-context.store :as store])
   (:import [java.util UUID]
            [java.util.concurrent Callable ExecutionException Executors
@@ -498,6 +499,8 @@
 (defn process-once!
   "Lease and synchronously process one bounded job batch."
   [worker]
+  (storage/assert-headroom! (:project worker) (:config worker)
+                            :semantic-index-batch)
   (let [time (now worker)
         settings (:settings worker)
         dirty? (seq (with-graph-lock

@@ -192,10 +192,18 @@
   [{:keys [stage files diagnostics completed total file entities
            exact-edges references external dynamic ambiguous unresolved
            upserts deletes deferred batch-size phase
-           elapsed-seconds]
+           elapsed-seconds archive-path probe-path usable-bytes
+           minimum-free-space-bytes]
     :as event}]
   (case stage
     :discover-start "Discovering source files..."
+    :legacy-graph-archived
+    (str "Archived the interrupted legacy graph at " archive-path
+         "; rebuilding from a fresh database...")
+    :storage-preflight
+    (format "Storage preflight: %.1f GiB usable at %s (%.1f GiB reserve)"
+            (/ (double usable-bytes) 1073741824.0) probe-path
+            (/ (double minimum-free-space-bytes) 1073741824.0))
     :discover-complete
     (format "Discovered %d supported files (%d diagnostics)" files diagnostics)
     :parse-progress (format "Parsing %d/%d: %s" completed total file)
