@@ -109,6 +109,13 @@
     (not (pos-int? (get-in config [:service :request-queue-capacity])))
     (conj ":service/:request-queue-capacity must be a positive integer")
 
+    (not (pos-int? (get-in config [:service :log-max-bytes])))
+    (conj ":service/:log-max-bytes must be a positive integer")
+
+    (not (and (integer? (get-in config [:service :log-retained-files]))
+              (not (neg? (get-in config [:service :log-retained-files])))))
+    (conj ":service/:log-retained-files must be a non-negative integer")
+
     (not (pos-int? (get-in config [:context :default-max-tokens])))
     (conj ":context/:default-max-tokens must be a positive integer")
 

@@ -4,6 +4,7 @@
   (:require [clojure.string :as str]
             [llm-context.accelerator :as accelerator]
             [llm-context.intent.reranker :as candidate-reranker]
+            [llm-context.logs :as logs]
             [llm-context.semantic.index :as index]
             [llm-context.semantic.next-plaid :as next-plaid]
             [llm-context.semantic.runtime :as semantic-runtime])
@@ -207,6 +208,7 @@
                    index-path (make-array java.nio.file.attribute.FileAttribute 0))
                 _ (Files/createDirectories
                    log-directory (make-array java.nio.file.attribute.FileAttribute 0))
+                _ (logs/rotate-before-start! log-path (:service config))
                 full-command (concat (process-command executable port index-path
                                                         model settings selection)
                                      (next command))

@@ -401,6 +401,10 @@ and uses host-managed logging where available. Generation never installs or
 enables the service. Use `--executable PATH` when `llm-context` is not on the
 current `PATH`, and inspect the output before installing it with host tools.
 
+Project-owned service and provider logs rotate only before their writer starts,
+never underneath a live process. `:service/:log-max-bytes` defaults to 10 MiB
+and `:service/:log-retained-files` defaults to three rotated files per log.
+
 ## Development
 
 ```bash

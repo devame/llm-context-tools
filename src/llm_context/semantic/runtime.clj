@@ -2,6 +2,7 @@
   "Project-scoped NextPlaid child-process lifecycle."
   (:require [clojure.string :as str]
             [llm-context.accelerator :as accelerator]
+            [llm-context.logs :as logs]
             [llm-context.semantic.index :as index]
             [llm-context.semantic.next-plaid :as next-plaid])
   (:import [java.io File]
@@ -171,6 +172,7 @@
             _ (Files/createDirectories
                log-directory
                (make-array java.nio.file.attribute.FileAttribute 0))
+            _ (logs/rotate-before-start! log-path (:service config))
             full-command (concat (process-command executable port index-path
                                                     model settings selection)
                                  (next command))

@@ -1,7 +1,9 @@
 (ns llm-context.service.daemon
   "Launch the project coordinator as a detached JVM using the current
   application classpath."
-  (:require [llm-context.service.client :as client])
+  (:require [llm-context.config :as config]
+            [llm-context.logs :as logs]
+            [llm-context.service.client :as client])
   (:import [java.lang ProcessBuilder$Redirect ProcessHandle]
            [java.nio.file Files Path Paths]))
 
@@ -41,6 +43,8 @@
         _ (Files/createDirectories
            log-directory
            (make-array java.nio.file.attribute.FileAttribute 0))
+        _ (logs/rotate-before-start! log-path
+                                     (:service (config/load-config project)))
         builder (doto (ProcessBuilder. ^java.util.List
                                        (launch-command project))
                   (.redirectErrorStream true)

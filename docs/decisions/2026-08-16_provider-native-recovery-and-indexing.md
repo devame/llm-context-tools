@@ -303,6 +303,11 @@ single-instance behavior, bounded task/file-descriptor controls where the host
 supports them, and host-managed logging. llm-context only renders the artifact;
 installation and activation remain explicit administrator actions.
 
+Daemon-owned service, semantic-provider, and query-router logs use bounded
+size-triggered rotation at process startup. Rotation never renames a file while
+its writer is live; host-supervised foreground services continue to prefer the
+host journal.
+
 ### Phase 5: resumable analysis before persistence
 
 Persist analyzer outputs per file under an immutable staging generation keyed
