@@ -269,7 +269,9 @@
     (is (<= (:query large) 12))
     (is (zero? (:entity large)))
     (is (zero? (:pull large)))
-    (is (= 1 (:pull-many large)))
+    ;; One pull resolves owned identities and one reads their full attributes.
+    ;; Both operations are provider-native and remain constant as the file grows.
+    (is (= 2 (:pull-many large)))
     (is (= 1 (:transact large)))))
 
 (deftest file-mutations-can-atomically-assert-semantic-dirty-markers

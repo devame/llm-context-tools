@@ -568,17 +568,35 @@
            (conj marker))))
      markers)))
 
-(defn- attributes-by-eid [db eids]
+(defn- pulled-reference-eid [value]
+  (if (and (map? value) (contains? value :db/id))
+    (:db/id value)
+    value))
+
+(defn- pulled-value-datoms [attribute value]
+  (let [normalize #(if (contains? reference-attributes attribute)
+                     (pulled-reference-eid %)
+                     %)]
+    (if (contains? cardinality-many-attributes attribute)
+      (map (fn [item] [attribute (normalize item)]) value)
+      [[attribute (normalize value)]])))
+
+(defn- attributes-by-eid
+  "Read complete entities through Datalevin's native pull path. This avoids a
+  generic three-variable Datalog query for every replacement batch while
+  preserving the flat datom representation used by comparison and cleanup."
+  [db eids]
   (if-not (seq eids)
     {}
-    (reduce
-     (fn [result [eid attribute value]]
-       (update result eid (fnil conj []) [attribute value]))
-     {}
-     (d/q '[:find ?entity ?attribute ?value
-            :in $ [?entity ...]
-            :where [?entity ?attribute ?value]]
-          db (vec eids)))))
+    (into {}
+          (map (fn [entity]
+                 [(:db/id entity)
+                  (into []
+                        (mapcat (fn [[attribute value]]
+                                  (when-not (= :db/id attribute)
+                                    (pulled-value-datoms attribute value))))
+                        entity)]))
+          (d/pull-many db '[*] (vec eids)))))
 
 (defn- referenced-identities-by-eid
   "Resolve Datalevin reference values back to stable canonical identities.
