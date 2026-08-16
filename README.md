@@ -150,6 +150,7 @@ llm-context maintenance status
 llm-context maintenance compact-copy [--output PATH]
 llm-context maintenance cleanup --older-than-days DAYS [--apply]
 llm-context service start|status|stop
+llm-context service supervisor --format systemd|launchd|windows [--output PATH]
 ```
 
 `find-symbol` and the `fts-only` search mode use Datalevin's embedded full-text
@@ -373,6 +374,13 @@ only direct-child recovery archives and verified compact copies carrying an
 exact llm-context retention marker. It always keeps the newest artifact in
 each category and ignores unmarked directories, provider indexes, and active
 logs.
+
+`service supervisor` renders a project-specific systemd unit, launchd plist,
+or Windows Task Scheduler registration script. The generated definition runs
+`service foreground`, applies restart backoff and conservative process limits,
+and uses host-managed logging where available. Generation never installs or
+enables the service. Use `--executable PATH` when `llm-context` is not on the
+current `PATH`, and inspect the output before installing it with host tools.
 
 ## Development
 

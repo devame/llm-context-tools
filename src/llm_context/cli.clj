@@ -894,6 +894,30 @@
                           {:exit-code 2})))
         options))))
 
+(defn- parse-supervisor-options [args]
+  (loop [remaining (seq args) options {}]
+    (if-let [argument (first remaining)]
+      (case argument
+        "--format" (if-let [value (second remaining)]
+                     (recur (nnext remaining) (assoc options :format (keyword value)))
+                     (throw (ex-info "service supervisor --format requires a value"
+                                     {:exit-code 2})))
+        "--executable" (if-let [value (second remaining)]
+                         (recur (nnext remaining) (assoc options :executable value))
+                         (throw (ex-info "service supervisor --executable requires a path"
+                                         {:exit-code 2})))
+        "--output" (if-let [value (second remaining)]
+                     (recur (nnext remaining) (assoc options :output value))
+                     (throw (ex-info "service supervisor --output requires a path"
+                                     {:exit-code 2})))
+        (throw (ex-info (str "Unknown service supervisor option: " argument)
+                        {:exit-code 2})))
+      (do
+        (when-not (:format options)
+          (throw (ex-info "service supervisor requires --format systemd|launchd|windows"
+                          {:exit-code 2})))
+        options))))
+
 (defmethod execute "maintenance" [cli-context _ args]
   (case (or (first args) "status")
     "status"
@@ -935,6 +959,21 @@
 
 (defmethod execute "service" [cli-context _ args]
   (case (or (first args) "status")
+    "supervisor"
+    (let [{:keys [output] :as options} (parse-supervisor-options (next args))
+          rendered ((resolve-fn 'llm-context.supervisor/render)
+                    cli-context options)]
+      (if output
+        (let [path (.normalize
+                    (.resolve ^java.nio.file.Path (:root cli-context) output))]
+          (when-let [parent (.getParent path)]
+            (java.nio.file.Files/createDirectories
+             parent (make-array java.nio.file.attribute.FileAttribute 0)))
+          (java.nio.file.Files/writeString
+           path rendered (make-array java.nio.file.OpenOption 0))
+          (println "Wrote" (str path)))
+        (print rendered))
+      0)
     "start"
     (let [result ((resolve-fn 'llm-context.service.daemon/start!)
                   cli-context)]

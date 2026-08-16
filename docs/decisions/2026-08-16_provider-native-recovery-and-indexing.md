@@ -297,6 +297,12 @@ with exact llm-context markers, and preserves the newest artifact in each
 category. Provider indexes, active logs, symbolic links, and unmarked paths
 are outside the deletion allowlist.
 
+Supervisor generation is implemented for systemd, launchd, and Windows Task
+Scheduler. Definitions are project-specific and include restart throttling,
+single-instance behavior, bounded task/file-descriptor controls where the host
+supports them, and host-managed logging. llm-context only renders the artifact;
+installation and activation remain explicit administrator actions.
+
 ### Phase 5: resumable analysis before persistence
 
 Persist analyzer outputs per file under an immutable staging generation keyed

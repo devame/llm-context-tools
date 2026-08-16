@@ -226,6 +226,20 @@ verified compact copies are eligible; the newest artifact in each category is
 always retained. `--apply` is required to perform deletion. Unmarked paths,
 active logs, and provider indexes are never deleted by this command.
 
+Generate, inspect, and then install a host-native supervisor definition:
+
+```bash
+llm-context service supervisor --format systemd --output llm-context.service
+llm-context service supervisor --format launchd --output llm-context.plist
+llm-context service supervisor --format windows --output register-service.ps1
+```
+
+The generator resolves the current `llm-context` executable, binds the
+definition to the selected project root, and adds restart backoff,
+single-instance behavior, and conservative process limits. It does not install
+or enable anything. Host-managed journals are preferred over an unbounded
+application-owned supervisor log.
+
 The destination must not exist or overlap the live database. llm-context opens
 the finished copy and compares graph metadata plus canonical and semantic
 operational identity counts. It reports the verified path but never activates
