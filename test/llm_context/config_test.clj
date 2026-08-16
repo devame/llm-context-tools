@@ -22,6 +22,8 @@
            (count (get-in loaded [:semantic :lateon-code :model-revision]))))
     (is (= ["next-plaid-api"]
            (get-in loaded [:semantic :lateon-code :next-plaid-command])))
+    (is (= :auto (get-in loaded [:semantic :lateon-code :accelerator])))
+    (is (= :auto (get-in loaded [:semantic :lateon-code :quantization])))
     (is (= 2048
            (get-in loaded [:semantic :lateon-code :model-document-length])))
     (is (= 4
@@ -43,6 +45,8 @@
                                 :query-timeout-ms])))
     (is (= "mixedbread-ai/mxbai-edge-colbert-v0-32m"
            (get-in loaded [:context :query-router :model])))
+    (is (= :cpu (get-in loaded [:context :query-router :accelerator])))
+    (is (= :int8 (get-in loaded [:context :query-router :quantization])))
     (is (= 250 (get-in loaded [:context :query-router :query-timeout-ms])))
     (is (= 0.02 (get-in loaded [:context :query-router :minimum-margin])))
     (is (= [] (get-in loaded [:context :source-role-overrides])))))
@@ -152,3 +156,19 @@
       (is (some #(re-find #":startup-timeout-ms" %) errors))
       (is (some #(re-find #":query-timeout-ms" %) errors))
       (is (some #(re-find #":centroid-score-threshold" %) errors)))))
+
+(deftest accelerator-and-quantization-settings-are-validated
+  (let [context (temp-project)]
+    (spit (str (:config-file context))
+          (pr-str {:semantic {:lateon-code {:accelerator :cuda
+                                            :quantization :int8}}
+                   :context {:query-router {:accelerator :tpu
+                                            :quantization :binary}}}))
+    (let [errors (:errors
+                  (ex-data
+                   (try (config/load-config context)
+                        nil
+                        (catch clojure.lang.ExceptionInfo error error))))]
+      (is (some #(re-find #"lateon-code CUDA cannot use" %) errors))
+      (is (some #(re-find #"query-router/:accelerator" %) errors))
+      (is (some #(re-find #"query-router/:quantization" %) errors)))))

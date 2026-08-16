@@ -2,7 +2,7 @@
   "Launch the project coordinator as a detached JVM using the current
   application classpath."
   (:require [llm-context.service.client :as client])
-  (:import [java.lang ProcessBuilder$Redirect]
+  (:import [java.lang ProcessBuilder$Redirect ProcessHandle]
            [java.nio.file Files Path Paths]))
 
 (defn- windows? []
@@ -67,3 +67,28 @@
         (do
           (Thread/sleep 100)
           (recur))))))
+
+(defn- await-exit? [^ProcessHandle handle timeout-ms]
+  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+    (loop []
+      (cond
+        (not (.isAlive handle)) true
+        (>= (System/currentTimeMillis) deadline) false
+        :else (do (Thread/sleep 100) (recur))))))
+
+(defn stop!
+  "Request graceful shutdown, then ensure the exact advertised service process
+  and its owned child runtimes cannot remain orphaned after the descriptor is
+  removed."
+  [project]
+  (let [descriptor (client/descriptor project)
+        response (client/request project {:op :stop})
+        handle (when-let [pid (:pid descriptor)]
+                 (.orElse (ProcessHandle/of (long pid)) nil))]
+    (when (and (:ok response) handle (.isAlive ^ProcessHandle handle))
+      (when-not (await-exit? handle 15000)
+        (.destroy ^ProcessHandle handle)
+        (when-not (await-exit? handle 5000)
+          (.destroyForcibly ^ProcessHandle handle)
+          (await-exit? handle 5000))))
+    response))

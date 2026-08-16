@@ -87,6 +87,13 @@ case "${LLM_CONTEXT_SKIP_SEMANTIC:-0}" in
   1|true|TRUE|yes|YES) INSTALL_SEMANTIC=0 ;;
 esac
 
+RUNTIME_FLAVOR=${LLM_CONTEXT_ACCELERATOR_PACKAGE:-cpu}
+case "$RUNTIME_FLAVOR" in
+  cpu) RUNTIME_SUFFIX="" ;;
+  cuda) RUNTIME_SUFFIX="-cuda" ;;
+  *) fail "LLM_CONTEXT_ACCELERATOR_PACKAGE must be cpu or cuda" ;;
+esac
+
 if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
   case "$(uname -s):$(uname -m)" in
     Linux:x86_64|Linux:amd64)
@@ -97,8 +104,11 @@ if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
       fail "LateOn runtime is not packaged for $(uname -s) $(uname -m); rerun with LLM_CONTEXT_SKIP_SEMANTIC=1"
       ;;
   esac
+  if [ "$RUNTIME_FLAVOR" = "cuda" ] && [ "$(uname -s)" != "Linux" ]; then
+    fail "the packaged CUDA runtime is currently available only for Linux x86_64"
+  fi
 
-  NEXT_PLAID_ARCHIVE="next-plaid-api-${NEXT_PLAID_VERSION}-${NEXT_PLAID_TARGET}.tar.gz"
+  NEXT_PLAID_ARCHIVE="next-plaid-api-${NEXT_PLAID_VERSION}-${NEXT_PLAID_TARGET}${RUNTIME_SUFFIX}.tar.gz"
   printf 'Downloading NextPlaid API %s for %s...\n' \
     "$NEXT_PLAID_VERSION" "$NEXT_PLAID_TARGET"
   download "$RELEASE_URL/$NEXT_PLAID_ARCHIVE" \
@@ -119,7 +129,9 @@ if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
     fail "NextPlaid runtime archive did not contain ONNX Runtime"
 
   if [ -z "${LLM_CONTEXT_MODEL_MANIFEST:-}" ]; then
-  if verify_hash "$MODEL_DIR/model_int8.onnx" \
+  if verify_hash "$MODEL_DIR/model.onnx" \
+       "75f8f308994224ac88d580d5a37b68e94bd78be4887b7beb8578ed8b30bad242" &&
+     verify_hash "$MODEL_DIR/model_int8.onnx" \
        "a62a88b4e3ebb76e8bc5f0263d17b773c667d27bc73c5120e3131048dd1554ef" &&
      verify_hash "$MODEL_DIR/tokenizer.json" \
        "a388b94942e98e5c661c6c23f919842285738bfd123a0d148dea0c56287505d0" &&
@@ -135,7 +147,9 @@ if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
     MODEL_READY=0
     MODEL_URL_BASE=${LLM_CONTEXT_MODEL_URL:-"https://huggingface.co/${MODEL_ID}/resolve/${MODEL_REVISION}"}
     mkdir -p "$TEMP_DIR/model"
-    printf 'Downloading pinned LateOn-Code INT8 model (about 154 MB)...\n'
+    printf 'Downloading pinned LateOn-Code FP32 and INT8 models (about 747 MB)...\n'
+    download "$MODEL_URL_BASE/model.onnx?download=true" \
+      "$TEMP_DIR/model/model.onnx"
     download "$MODEL_URL_BASE/model_int8.onnx?download=true" \
       "$TEMP_DIR/model/model_int8.onnx"
     download "$MODEL_URL_BASE/tokenizer.json?download=true" \
@@ -146,6 +160,8 @@ if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
       "$TEMP_DIR/model/config.json"
     download "$MODEL_URL_BASE/onnx_config.json?download=true" \
       "$TEMP_DIR/model/onnx_config.json"
+    verify_hash "$TEMP_DIR/model/model.onnx" \
+      "75f8f308994224ac88d580d5a37b68e94bd78be4887b7beb8578ed8b30bad242" &&
     verify_hash "$TEMP_DIR/model/model_int8.onnx" \
       "a62a88b4e3ebb76e8bc5f0263d17b773c667d27bc73c5120e3131048dd1554ef" &&
     verify_hash "$TEMP_DIR/model/tokenizer.json" \
@@ -159,7 +175,9 @@ if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
       fail "LateOn-Code model checksum verification failed"
   fi
 
-  if verify_hash "$ROUTER_MODEL_DIR/model_int8.onnx" \
+  if verify_hash "$ROUTER_MODEL_DIR/model.onnx" \
+       "886e3a1638af8222613a8b3baf73520d5ab8c8275fc5ea16e3166982d01df24e" &&
+     verify_hash "$ROUTER_MODEL_DIR/model_int8.onnx" \
        "264ba680e960af9fffb4f78c3af1e4ff92520678b8e136c79434d88fb2549e1b" &&
      verify_hash "$ROUTER_MODEL_DIR/tokenizer.json" \
        "594291000b476c98ed600cbb1914ff128c79642a9433aac86213c7a5562d7c1a" &&
@@ -175,7 +193,9 @@ if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
     ROUTER_MODEL_READY=0
     ROUTER_MODEL_URL_BASE=${LLM_CONTEXT_QUERY_ROUTER_MODEL_URL:-"https://huggingface.co/${ROUTER_MODEL_ID}/resolve/${ROUTER_MODEL_REVISION}"}
     mkdir -p "$TEMP_DIR/router-model"
-    printf 'Downloading pinned Mixedbread INT8 query router (about 33 MB)...\n'
+    printf 'Downloading pinned Mixedbread FP32 and INT8 query router (about 165 MB)...\n'
+    download "$ROUTER_MODEL_URL_BASE/model.onnx?download=true" \
+      "$TEMP_DIR/router-model/model.onnx"
     download "$ROUTER_MODEL_URL_BASE/model_int8.onnx?download=true" \
       "$TEMP_DIR/router-model/model_int8.onnx"
     download "$ROUTER_MODEL_URL_BASE/tokenizer.json?download=true" \
@@ -186,6 +206,8 @@ if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
       "$TEMP_DIR/router-model/config.json"
     download "$ROUTER_MODEL_URL_BASE/onnx_config.json?download=true" \
       "$TEMP_DIR/router-model/onnx_config.json"
+    verify_hash "$TEMP_DIR/router-model/model.onnx" \
+      "886e3a1638af8222613a8b3baf73520d5ab8c8275fc5ea16e3166982d01df24e" &&
     verify_hash "$TEMP_DIR/router-model/model_int8.onnx" \
       "264ba680e960af9fffb4f78c3af1e4ff92520678b8e136c79434d88fb2549e1b" &&
     verify_hash "$TEMP_DIR/router-model/tokenizer.json" \
@@ -233,6 +255,10 @@ if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
     cp "$TEMP_DIR/next-plaid/libonnxruntime.so" \
       "$INSTALL_DIR/libonnxruntime.so"
   fi
+  for provider in "$TEMP_DIR/next-plaid"/libonnxruntime_providers_*.so; do
+    [ -f "$provider" ] || continue
+    cp "$provider" "$INSTALL_DIR/$(basename "$provider")"
+  done
   if [ -f "$TEMP_DIR/next-plaid/libonnxruntime.dylib" ]; then
     cp "$TEMP_DIR/next-plaid/libonnxruntime.dylib" \
       "$INSTALL_DIR/libonnxruntime.dylib"

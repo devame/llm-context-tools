@@ -2,6 +2,7 @@
   "Resident, optional Mixedbread query-shape router. It reuses the pinned
   NextPlaid ONNX runtime and contributes an advisory prior only."
   (:require [clojure.string :as str]
+            [llm-context.accelerator :as accelerator]
             [llm-context.intent.reranker :as candidate-reranker]
             [llm-context.semantic.index :as index]
             [llm-context.semantic.next-plaid :as next-plaid]
@@ -78,15 +79,15 @@
   (with-open [socket (ServerSocket. 0)]
     (.getLocalPort socket)))
 
-(defn- process-command [executable port index-path model-path settings]
+(defn- process-command [executable port index-path model-path settings selection]
   (vec (concat [(str executable)
                 "--host" "127.0.0.1"
                 "--port" (str port)
                 "--index-dir" (str index-path)
                 "--model" (str model-path)]
-               (when (= :int8 (:quantization settings)) ["--int8"])
-               ["--parallel" (str (:encoding-sessions settings))
-                "--batch-size" (str (:encoding-batch-size settings))
+               (:arguments selection)
+               ["--parallel" (str (:encoding-sessions selection))
+                "--batch-size" (str (:encoding-batch-size selection))
                 "--query-length" "48"
                 "--document-length" "128"])))
 
@@ -196,7 +197,8 @@
                       :model-missing (str model))}
 
           :else
-          (let [port (free-port)
+          (let [selection (accelerator/resolve-runtime settings executable model)
+                port (free-port)
                 index-path (.normalize (.resolve ^Path (:root project)
                                                  (:index-path settings)))
                 log-directory (.resolve ^Path (:state-dir project) "logs")
@@ -206,7 +208,7 @@
                 _ (Files/createDirectories
                    log-directory (make-array java.nio.file.attribute.FileAttribute 0))
                 full-command (concat (process-command executable port index-path
-                                                        model settings)
+                                                        model settings selection)
                                      (next command))
                 builder (doto (ProcessBuilder. ^java.util.List (vec full-command))
                           (.redirectErrorStream true)
@@ -216,6 +218,8 @@
                              (semantic-runtime/onnx-runtime-path executable)]
                     (.put (.environment builder) "ORT_DYLIB_PATH"
                           (str onnx-runtime)))
+                _ (accelerator/configure-process-environment!
+                   builder settings executable)
                 process (.start builder)
                 endpoint (str "http://127.0.0.1:" port)
                 client (next-plaid/create endpoint settings)
@@ -240,6 +244,7 @@
                      (candidate-reranker/unavailable :disabled))
                    :owner owner
                    :endpoint endpoint :log-path log-path
+                   :inference selection
                    :model (:model settings)
                    :model-revision (:model-revision settings)}))
               (catch Throwable error

@@ -1,5 +1,6 @@
 (ns llm-context.runtime.doctor
   (:require [clojure.string :as str]
+            [llm-context.accelerator :as accelerator]
             [clojure.java.io :as io]
             [llm-context.analysis.clj-kondo :as clj-kondo]
             [llm-context.analysis.janet :as janet]
@@ -151,6 +152,25 @@
            :else
            (str "checksum mismatch: "
                 (str/join ", " (:mismatched model-verification))))}
+        accelerator-check
+        (let [selection
+              (when (and lateon-enabled? executable model-path)
+                (try
+                  (accelerator/resolve-runtime lateon-settings executable
+                                               model-path)
+                  (catch clojure.lang.ExceptionInfo error
+                    {:error error})))]
+          {:check :semantic-accelerator
+           :required? false
+           :ok? (or (not lateon-enabled?)
+                    (and selection (nil? (:error selection))))
+           :detail
+           (cond
+             (not lateon-enabled?) "provider disabled"
+             (nil? executable) "NextPlaid executable unavailable"
+             (nil? model-path) "model path unavailable"
+             (:error selection) (.getMessage ^Throwable (:error selection))
+             :else (accelerator/describe selection))})
         router-settings (get-in config [:context :query-router])
         router-enabled? (:enabled router-settings)
         router-model-path (when router-enabled?
@@ -205,7 +225,7 @@
            :else "running")}]
     [java-check writable-check clj-kondo-check janet-catalog-check
      janet-grammar-check datalevin-check graph-format-check runtime-check
-     onnx-check model-check router-model-check service-check]))
+     onnx-check model-check accelerator-check router-model-check service-check]))
 
 (defn healthy? [checks]
   (every? #(or (not (:required? %)) (:ok? %)) checks))

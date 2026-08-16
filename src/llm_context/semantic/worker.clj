@@ -623,12 +623,13 @@
 (defn create
   ([graph project config client]
    (create graph project config client {}))
-  ([graph project config client {:keys [owner now-fn sleep-fn progress-fn]}]
+  ([graph project config client
+    {:keys [owner now-fn sleep-fn progress-fn settings]}]
    (let [now-fn (or now-fn #(System/currentTimeMillis))]
     {:graph graph
     :project project
     :config config
-    :settings (get-in config [:semantic :lateon-code])
+    :settings (or settings (get-in config [:semantic :lateon-code]))
     :client client
     :owner (or owner (str (UUID/randomUUID)))
     :now-fn now-fn

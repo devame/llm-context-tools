@@ -37,5 +37,5 @@
            (:model-revision router)))
     (is (= artifacts/next-plaid-version (:next-plaid-version router)))
     (is (= 40 (count artifacts/model-revision)))
-    (is (= 5 (count artifacts/model-files)))
-    (is (= 5 (count artifacts/query-router-model-files)))))
+    (is (= 6 (count artifacts/model-files)))
+    (is (= 6 (count artifacts/query-router-model-files)))))

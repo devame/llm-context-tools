@@ -2,6 +2,7 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [llm-context.accelerator :as accelerator]
             [llm-context.intent :as intent]
             [llm-context.model-packages :as model-packages]
             [llm-context.source-role :as source-role])
@@ -11,7 +12,6 @@
 (def default-resource "llm_context/default-config.edn")
 
 (def ^:private semantic-modes #{:background :disabled})
-(def ^:private semantic-quantizations #{:int8})
 
 (defn- non-blank-string? [value]
   (and (string? value) (not (str/blank? value))))
@@ -159,8 +159,19 @@
              (non-blank-string? (:model-path router))))
     (conj ":context/:query-router/:model-path must be nil or a non-blank path")
 
-    (not (contains? semantic-quantizations (:quantization router)))
-    (conj ":context/:query-router/:quantization must be :int8")
+    (not (contains? accelerator/accelerators (:accelerator router)))
+    (conj ":context/:query-router/:accelerator must be :auto, :cpu, or :cuda")
+
+    (not (contains? accelerator/quantizations (:quantization router)))
+    (conj ":context/:query-router/:quantization must be :auto, :int8, or :fp32")
+
+    (not (and (vector? (:cuda-library-paths router))
+              (every? non-blank-string? (:cuda-library-paths router))))
+    (conj ":context/:query-router/:cuda-library-paths must be a vector of paths")
+
+    (and (= :cuda (:accelerator router))
+         (= :int8 (:quantization router)))
+    (conj ":context/:query-router CUDA cannot use :int8 quantization")
 
     (not (and (non-blank-string? (:next-plaid-version router))
               (re-matches #"\d+\.\d+\.\d+" (:next-plaid-version router))))
@@ -184,6 +195,18 @@
 
     (not (pos-int? (:update-timeout-ms router)))
     (conj ":context/:query-router/:update-timeout-ms must be a positive integer")
+
+    (not (pos-int? (:encoding-sessions router)))
+    (conj ":context/:query-router/:encoding-sessions must be a positive integer")
+
+    (not (pos-int? (:encoding-batch-size router)))
+    (conj ":context/:query-router/:encoding-batch-size must be a positive integer")
+
+    (not (pos-int? (:cuda-encoding-sessions router)))
+    (conj ":context/:query-router/:cuda-encoding-sessions must be a positive integer")
+
+    (not (pos-int? (:cuda-encoding-batch-size router)))
+    (conj ":context/:query-router/:cuda-encoding-batch-size must be a positive integer")
 
     (not (and (number? (:minimum-margin router))
               (not (neg? (:minimum-margin router)))))
@@ -223,8 +246,19 @@
               (re-matches #"[0-9a-f]{40}" (:model-revision lateon))))
     (conj ":semantic/:lateon-code/:model-revision must be a 40-character commit hash")
 
-    (not (contains? semantic-quantizations (:quantization lateon)))
-    (conj ":semantic/:lateon-code/:quantization must be :int8")
+    (not (contains? accelerator/accelerators (:accelerator lateon)))
+    (conj ":semantic/:lateon-code/:accelerator must be :auto, :cpu, or :cuda")
+
+    (not (contains? accelerator/quantizations (:quantization lateon)))
+    (conj ":semantic/:lateon-code/:quantization must be :auto, :int8, or :fp32")
+
+    (not (and (vector? (:cuda-library-paths lateon))
+              (every? non-blank-string? (:cuda-library-paths lateon))))
+    (conj ":semantic/:lateon-code/:cuda-library-paths must be a vector of paths")
+
+    (and (= :cuda (:accelerator lateon))
+         (= :int8 (:quantization lateon)))
+    (conj ":semantic/:lateon-code CUDA cannot use :int8 quantization")
 
     (not (or (nil? (:model-path lateon))
              (non-blank-string? (:model-path lateon))))
@@ -261,6 +295,12 @@
     (not (pos-int? (:encoding-batch-size lateon)))
     (conj ":semantic/:lateon-code/:encoding-batch-size must be a positive integer")
 
+    (not (pos-int? (:cuda-encoding-sessions lateon)))
+    (conj ":semantic/:lateon-code/:cuda-encoding-sessions must be a positive integer")
+
+    (not (pos-int? (:cuda-encoding-batch-size lateon)))
+    (conj ":semantic/:lateon-code/:cuda-encoding-batch-size must be a positive integer")
+
     (not (pos-int? (:model-document-length lateon)))
     (conj ":semantic/:lateon-code/:model-document-length must be a positive integer")
 
@@ -269,6 +309,9 @@
 
     (not (pos-int? (:update-concurrency lateon)))
     (conj ":semantic/:lateon-code/:update-concurrency must be a positive integer")
+
+    (not (pos-int? (:cuda-update-concurrency lateon)))
+    (conj ":semantic/:lateon-code/:cuda-update-concurrency must be a positive integer")
 
     (not (pos-int? (:health-timeout-ms lateon)))
     (conj ":semantic/:lateon-code/:health-timeout-ms must be a positive integer")

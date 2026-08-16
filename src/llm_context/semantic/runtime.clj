@@ -1,6 +1,7 @@
 (ns llm-context.semantic.runtime
   "Project-scoped NextPlaid child-process lifecycle."
   (:require [clojure.string :as str]
+            [llm-context.accelerator :as accelerator]
             [llm-context.semantic.index :as index]
             [llm-context.semantic.next-plaid :as next-plaid])
   (:import [java.io File]
@@ -79,7 +80,7 @@
   (with-open [socket (ServerSocket. 0)]
     (.getLocalPort socket)))
 
-(defn- process-command [executable port index-path model-path settings]
+(defn process-command [executable port index-path model-path settings selection]
   (vec
    (concat
     [(str executable)
@@ -87,9 +88,9 @@
      "--port" (str port)
      "--index-dir" (str index-path)
      "--model" (str model-path)]
-    (when (= :int8 (:quantization settings)) ["--int8"])
-    ["--parallel" (str (:encoding-sessions settings))
-     "--batch-size" (str (:encoding-batch-size settings))
+    (:arguments selection)
+    ["--parallel" (str (:encoding-sessions selection))
+     "--batch-size" (str (:encoding-batch-size selection))
      "--document-length" (str (:model-document-length settings))])))
 
 (defn onnx-runtime-path [^Path executable]
@@ -157,7 +158,8 @@
        :detail (str model)}
 
       :else
-      (let [port (free-port)
+      (let [selection (accelerator/resolve-runtime settings executable model)
+            port (free-port)
             index-path (.normalize
                         (.resolve ^Path (:root project)
                                   (:index-path settings)))
@@ -170,7 +172,7 @@
                log-directory
                (make-array java.nio.file.attribute.FileAttribute 0))
             full-command (concat (process-command executable port index-path
-                                                    model settings)
+                                                    model settings selection)
                                  (next command))
             builder (doto (ProcessBuilder. ^java.util.List (vec full-command))
                       (.redirectErrorStream true)
@@ -179,11 +181,14 @@
             _ (when-let [onnx-runtime (onnx-runtime-path executable)]
                 (.put (.environment builder)
                       "ORT_DYLIB_PATH" (str onnx-runtime)))
+            _ (accelerator/configure-process-environment!
+               builder settings executable)
             process (.start builder)
             endpoint (str "http://127.0.0.1:" port)
             client (next-plaid/create endpoint settings)
             runtime {:status :starting :process process :client client
-                     :endpoint endpoint :log-path log-path}]
+                     :endpoint endpoint :log-path log-path
+                     :inference selection}]
         (try
           (let [health (await-ready! runtime settings)]
             (assoc runtime :status :ready :health health))

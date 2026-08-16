@@ -18,6 +18,8 @@ jobs:
           - runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             features: model
+            artifact_suffix: ""
+            cuda: false
             executable: next-plaid-api
             archive: tar
             ort_archive: onnxruntime-linux-x64-1.23.0.tgz
@@ -25,9 +27,23 @@ jobs:
             ort_source: lib/libonnxruntime.so.1.23.0
             ort_name: libonnxruntime.so
             ort_sha256: b6deea7f2e22c10c043019f294a0ea4d2a6c0ae52a009c34847640db75ec5580
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            features: model,cuda
+            artifact_suffix: -cuda
+            cuda: true
+            executable: next-plaid-api
+            archive: tar
+            ort_archive: onnxruntime-linux-x64-gpu-1.23.0.tgz
+            ort_root: onnxruntime-linux-x64-gpu-1.23.0
+            ort_source: lib/libonnxruntime.so.1.23.0
+            ort_name: libonnxruntime.so
+            ort_sha256: fc5d0e2dbdb893de11758da83523169761a70562dc0f6991f2cdb614f6a62c3d
           - runner: macos-15
             target: aarch64-apple-darwin
             features: model,accelerate
+            artifact_suffix: ""
+            cuda: false
             executable: next-plaid-api
             archive: tar
             ort_archive: onnxruntime-osx-arm64-1.23.0.tgz
@@ -38,6 +54,8 @@ jobs:
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
             features: model
+            artifact_suffix: ""
+            cuda: false
             executable: next-plaid-api.exe
             archive: zip
             ort_archive: onnxruntime-win-x64-1.23.0.zip
@@ -58,11 +76,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build NextPlaid API
         shell: bash
-        run: >-
-          cargo build --locked --release
-          --target "${{ matrix.target }}"
-          -p next-plaid-api
-          --features "${{ matrix.features }}"
+        run: |
+          cargo build --locked --release \
+            --target "${{ matrix.target }}" \
+            -p next-plaid-api \
+            --features "${{ matrix.features }}"
       - name: Package NextPlaid API
         shell: bash
         run: |
@@ -86,19 +104,23 @@ jobs:
           fi
           cp "onnxruntime/${{ matrix.ort_root }}/${{ matrix.ort_source }}" \
             "package/${{ matrix.ort_name }}"
+          if [ "${{ matrix.cuda }}" = "true" ]; then
+            cp "onnxruntime/${{ matrix.ort_root }}/lib/libonnxruntime_providers_shared.so" package/
+            cp "onnxruntime/${{ matrix.ort_root }}/lib/libonnxruntime_providers_cuda.so" package/
+          fi
           cp "onnxruntime/${{ matrix.ort_root }}/LICENSE" \
             package/onnxruntime-LICENSE
           cp "onnxruntime/${{ matrix.ort_root }}/ThirdPartyNotices.txt" \
             package/onnxruntime-ThirdPartyNotices.txt
           if [ "${{ matrix.archive }}" = "zip" ]; then
-            (cd package && 7z a "../next-plaid-api-1.6.4-${{ matrix.target }}.zip" .)
+            (cd package && 7z a "../next-plaid-api-1.6.4-${{ matrix.target }}${{ matrix.artifact_suffix }}.zip" .)
           else
-            tar -C package -czf "next-plaid-api-1.6.4-${{ matrix.target }}.tar.gz" .
+            tar -C package -czf "next-plaid-api-1.6.4-${{ matrix.target }}${{ matrix.artifact_suffix }}.tar.gz" .
           fi
       - uses: actions/upload-artifact@v4
         with:
-          name: next-plaid-api-${{ matrix.target }}
-          path: next-plaid-api-1.6.4-${{ matrix.target }}.*
+          name: next-plaid-api-${{ matrix.target }}${{ matrix.artifact_suffix }}
+          path: next-plaid-api-1.6.4-${{ matrix.target }}${{ matrix.artifact_suffix }}.*
           if-no-files-found: error
 
   release:

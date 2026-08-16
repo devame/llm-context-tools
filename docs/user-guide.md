@@ -230,8 +230,8 @@ coordinated through its Unix socket (loopback TCP on Windows).
 
 ## Installation and troubleshooting
 
-The one-script installer verifies the jar, NextPlaid, ONNX Runtime, pinned
-LateOn model, and pinned 33 MB INT8 query-router model. Set
+The one-script installer verifies the jar, NextPlaid, ONNX Runtime, and both
+FP32 and INT8 variants of the pinned retrieval and routing models. Set
 `LLM_CONTEXT_SKIP_SEMANTIC=1` when only exact graph and FTS features are wanted.
 
 - If `doctor` reports Java failure, install JDK 23 or newer.
@@ -244,6 +244,46 @@ LateOn model, and pinned 33 MB INT8 query-router model. Set
   `semantic dirty`, then explicitly retry failed jobs.
 - Runtime details are in `.llm-context/logs/`; all project state is disposable
   and excluded from normal source control.
+
+### CPU and CUDA inference
+
+Embedding generation can use CUDA; canonical analysis, Datalevin transactions,
+queue management, and NextPlaid index writes remain CPU and storage work. The
+semantic retriever accepts these project settings:
+
+```edn
+{:semantic
+ {:lateon-code
+  {:accelerator :auto       ; :auto, :cpu, or :cuda
+   :quantization :auto      ; :auto, :int8, or :fp32
+   :cuda-library-paths []   ; absolute directories for cuDNN/CUDA libraries
+   :cuda-encoding-sessions 1
+   :cuda-encoding-batch-size 1
+   :cuda-update-concurrency 1}}}
+```
+
+`:auto` selects CUDA/FP32 only when a GPU device, both ONNX Runtime CUDA
+provider libraries, and the verified `model.onnx` are present. Otherwise it
+uses CPU/INT8 and reports the exact fallback reasons through
+`llm-context semantic status`. Explicit `:cuda` fails closed when any
+prerequisite is absent. NextPlaid does not support CUDA with the INT8 model.
+
+The query router/reranker has the same fields under
+`:context :query-router`. Its default remains CPU/INT8 because the 32M model is
+small and per-query GPU transfer and synchronization can cost more than the
+inference it saves. Users can still select CUDA/FP32 and benchmark it locally.
+The router's separate CUDA batch default is 8 because its documents are capped
+at 128 tokens; do not copy that value to the 2,048-token semantic retriever.
+
+Linux x86_64 users can request the verified CUDA-enabled NextPlaid and ONNX
+Runtime package during installation:
+
+```bash
+LLM_CONTEXT_ACCELERATOR_PACKAGE=cuda sh install.sh
+```
+
+The host must provide CUDA 12 and cuDNN 9. Add non-standard dependency
+directories to `:cuda-library-paths`. The default installer flavor remains CPU.
 
 Agent guidance can be installed with
 `llm-context integrate codex|claude|generic`. Deterministic EDN, JSON, JSONL,

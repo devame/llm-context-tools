@@ -110,6 +110,7 @@ try {
 
         if (-not $env:LLM_CONTEXT_MODEL_MANIFEST) {
         $ModelHashes = [ordered]@{
+            "model.onnx" = "75f8f308994224ac88d580d5a37b68e94bd78be4887b7beb8578ed8b30bad242"
             "model_int8.onnx" = "a62a88b4e3ebb76e8bc5f0263d17b773c667d27bc73c5120e3131048dd1554ef"
             "tokenizer.json" = "a388b94942e98e5c661c6c23f919842285738bfd123a0d148dea0c56287505d0"
             "config_sentence_transformers.json" = "34942289dec20e285b07132aa1d09980ed776a0bc34e531dd7b49c4701876871"
@@ -133,7 +134,7 @@ try {
             } else {
                 "https://huggingface.co/$ModelId/resolve/$ModelRevision"
             }
-            Write-Host "Downloading pinned LateOn-Code INT8 model (about 154 MB)..."
+            Write-Host "Downloading pinned LateOn-Code FP32 and INT8 models (about 747 MB)..."
             foreach ($ModelFile in $ModelHashes.Keys) {
                 $Destination = Join-Path $ModelDownload $ModelFile
                 Receive-File "$ModelUrlBase/$ModelFile`?download=true" $Destination
@@ -144,6 +145,7 @@ try {
         }
 
         $RouterModelHashes = [ordered]@{
+            "model.onnx" = "886e3a1638af8222613a8b3baf73520d5ab8c8275fc5ea16e3166982d01df24e"
             "model_int8.onnx" = "264ba680e960af9fffb4f78c3af1e4ff92520678b8e136c79434d88fb2549e1b"
             "tokenizer.json" = "594291000b476c98ed600cbb1914ff128c79642a9433aac86213c7a5562d7c1a"
             "config_sentence_transformers.json" = "0c4eb4090ff55ddee69380ad5ea88a3a89500651996a56953af72bafdb7965b6"
@@ -167,7 +169,7 @@ try {
             } else {
                 "https://huggingface.co/$RouterModelId/resolve/$RouterModelRevision"
             }
-            Write-Host "Downloading pinned Mixedbread INT8 query router (about 33 MB)..."
+            Write-Host "Downloading pinned Mixedbread FP32 and INT8 query router (about 165 MB)..."
             foreach ($ModelFile in $RouterModelHashes.Keys) {
                 $Destination = Join-Path $RouterModelDownload $ModelFile
                 Receive-File "$RouterModelUrlBase/$ModelFile`?download=true" $Destination

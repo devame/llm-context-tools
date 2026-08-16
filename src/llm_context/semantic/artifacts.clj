@@ -14,7 +14,9 @@
   "963e23afa1478d8bcc12e5d7115adcfdbd22c3af")
 
 (def model-files
-  {"model_int8.onnx"
+  {"model.onnx"
+   "75f8f308994224ac88d580d5a37b68e94bd78be4887b7beb8578ed8b30bad242"
+   "model_int8.onnx"
    "a62a88b4e3ebb76e8bc5f0263d17b773c667d27bc73c5120e3131048dd1554ef"
    "tokenizer.json"
    "a388b94942e98e5c661c6c23f919842285738bfd123a0d148dea0c56287505d0"
@@ -26,7 +28,9 @@
    "eedf90bb3b71b7500a973e140b72a736c4c5ca4b6746c1f69fcc64b29924a8d5"})
 
 (def query-router-model-files
-  {"model_int8.onnx"
+  {"model.onnx"
+   "886e3a1638af8222613a8b3baf73520d5ab8c8275fc5ea16e3166982d01df24e"
+   "model_int8.onnx"
    "264ba680e960af9fffb4f78c3af1e4ff92520678b8e136c79434d88fb2549e1b"
    "tokenizer.json"
    "594291000b476c98ed600cbb1914ff128c79642a9433aac86213c7a5562d7c1a"

@@ -27,7 +27,9 @@
    :model "lightonai/LateOn-Code"
    :model-revision "734b659a57935ef50562d79581c3ff1f8d825c93"
    :model-path nil
-   :quantization :int8
+   :accelerator :auto
+   :quantization :auto
+   :cuda-library-paths []
    :index-path ".llm-context/semantic/next-plaid"
    :index-name "llm-context-v4"
    :nbits 4
@@ -38,9 +40,12 @@
    :pool-factor 2
    :encoding-sessions 4
    :encoding-batch-size 1
+   :cuda-encoding-sessions 1
+   :cuda-encoding-batch-size 1
    :model-document-length 2048
    :update-batch-size 32
    :update-concurrency 4
+   :cuda-update-concurrency 1
    :startup-timeout-ms 120000
    :health-timeout-ms 2000
    :update-timeout-ms 120000
@@ -79,7 +84,9 @@
    :model "mixedbread-ai/mxbai-edge-colbert-v0-32m"
    :model-revision "963e23afa1478d8bcc12e5d7115adcfdbd22c3af"
    :model-path nil
+   :accelerator :cpu
    :quantization :int8
+   :cuda-library-paths []
    :index-path ".llm-context/query-router/next-plaid"
    :index-name "llm-context-query-shapes-v1"
    :nbits 4
@@ -87,6 +94,8 @@
    :pool-factor 1
    :encoding-sessions 1
    :encoding-batch-size 1
+   :cuda-encoding-sessions 1
+   :cuda-encoding-batch-size 8
    :startup-timeout-ms 120000
    :health-timeout-ms 2000
    :update-timeout-ms 30000

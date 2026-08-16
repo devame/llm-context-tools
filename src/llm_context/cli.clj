@@ -811,7 +811,8 @@
          (remote-value cli-context {:op :semantic-status}))
         (println "not running"))
       0)
-    "stop" (let [response (service-client/request cli-context {:op :stop})]
+    "stop" (let [response ((resolve-fn 'llm-context.service.daemon/stop!)
+                            cli-context)]
              (cond
                (:ok response) (do (println "stopped") 0)
                (nil? response) (do (println "not running") 0)

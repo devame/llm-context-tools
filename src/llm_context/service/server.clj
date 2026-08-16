@@ -62,12 +62,17 @@
 (defn- runtime-view [runtime-state]
   (let [runtime (select-keys runtime-state
                              [:status :reason :detail :endpoint :log-path
+                              :inference
                               :worker-status :worker-detail :worker-progress
                               :query-router-status :query-router-detail
+                              :query-router-inference
                               :candidate-reranker-status
                               :candidate-reranker-detail])]
     (cond-> runtime
-      (:log-path runtime) (update :log-path str))))
+      (:log-path runtime) (update :log-path str)
+      (nil? (:inference runtime)) (dissoc :inference)
+      (nil? (:query-router-inference runtime))
+      (dissoc :query-router-inference))))
 
 (defn- semantic-status [graph runtime-state]
   (let [runtime (runtime-view runtime-state)
@@ -547,6 +552,7 @@
                                             :enabled])
                                  (:status router-runtime) :disabled)
                                :candidate-reranker (:reranker router-runtime)
+                               :query-router-inference (:inference router-runtime)
                                :query-router-runtime router-runtime))
                       (catch Throwable error
                         (swap! runtime-state assoc
@@ -570,7 +576,13 @@
                             (semantic-worker/create
                              graph project settings
                              (:client @runtime-state)
-                             {:progress-fn
+                             {:settings
+                              (assoc
+                               (get-in settings [:semantic :lateon-code])
+                               :update-concurrency
+                               (get-in @runtime-state
+                                       [:inference :update-concurrency]))
+                              :progress-fn
                               #(swap! runtime-state assoc
                                       :worker-progress %)})]
                         (reset! worker-state worker)

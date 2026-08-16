@@ -90,6 +90,8 @@
                           {:status :ready
                            :endpoint "http://127.0.0.1:12345"
                            :log-path (.resolve root "next-plaid.log")
+                           :inference {:accelerator :cpu
+                                       :quantization :int8}
                            :client semantic-index})
         running (future
                   (with-out-str
@@ -110,6 +112,9 @@
     (is (= (str (.resolve root "next-plaid.log"))
            (get-in (client/request project {:op :semantic-status})
                    [:value :runtime :log-path])))
+    (is (= {:accelerator :cpu :quantization :int8}
+           (get-in (client/request project {:op :semantic-status})
+                   [:value :runtime :inference])))
     (is (= {:ok true :value :stopping}
            (client/request project {:op :stop})))
     (is (not= ::timeout (deref running 5000 ::timeout)))
