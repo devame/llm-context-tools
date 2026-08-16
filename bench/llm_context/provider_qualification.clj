@@ -16,7 +16,8 @@
 (def ^:private qualification-schema
   {:qualification/id {:db/valueType :db.type/string
                       :db/unique :db.unique/identity}
-   :qualification/value {:db/valueType :db.type/long}})
+   :qualification/value {:db/valueType :db.type/long}
+   :qualification/parent {:db/valueType :db.type/ref}})
 
 (def ^:private transaction-report-keys
   #{:db-before :db-after :tx-data :tempids :tx-meta})
@@ -52,6 +53,8 @@
               (make-array java.nio.file.attribute.FileAttribute 0))
         source (.resolve root "source")
         copied (.resolve root "compact-copy")
+        bulk (.resolve root "bulk")
+        invalid-bulk (.resolve root "invalid-bulk")
         version (library-version
                  "META-INF/maven/org.datalevin/datalevin-embedded/pom.properties")]
     (try
@@ -83,6 +86,46 @@
                           (d/db connection)))
                 (finally
                   (d/close connection))))
+            bulk-result
+            (let [datoms [(d/datom 1 :qualification/id "bulk-root")
+                          (d/datom 1 :qualification/value 10)
+                          (d/datom 2 :qualification/id "bulk-child")
+                          (d/datom 2 :qualification/value 20)
+                          (d/datom 2 :qualification/parent 1)]
+                  initialized
+                  (d/init-db datoms (str bulk) qualification-schema
+                             {:validate-data? true :closed-schema? true})
+                  initial-value
+                  (try
+                    (d/q '[:find ?value .
+                           :where
+                           [?child :qualification/id "bulk-child"]
+                           [?child :qualification/parent ?parent]
+                           [?parent :qualification/value ?value]]
+                         initialized)
+                    (finally (d/close-db initialized)))
+                  reopened-value
+                  (let [connection (d/get-conn (str bulk) qualification-schema)]
+                    (try
+                      (d/q '[:find ?value .
+                             :where
+                             [?entity :qualification/id "bulk-child"]
+                             [?entity :qualification/value ?value]]
+                           (d/db connection))
+                      (finally (d/close connection))))
+                  invalid-rejected?
+                  (try
+                    (let [db (d/init-db
+                              [(d/datom 1 :qualification/id "invalid")
+                               (d/datom 1 :qualification/value "not-a-long")]
+                              (str invalid-bulk) qualification-schema
+                              {:validate-data? true :closed-schema? true})]
+                      (d/close-db db)
+                      false)
+                    (catch Throwable _ true))]
+              {:relationships (= 10 initial-value)
+               :reopen (= 20 reopened-value)
+               :validation invalid-rejected?})
             capabilities
             {:transaction-report
              (every? (fn [[report metadata]]
@@ -91,13 +134,22 @@
              :transact-async
              (boolean (report-valid? (first (:async reports))
                                      (second (:async reports))))
-             :compact-copy (= #{"sync" "async"} copied-ids)}]
+             :compact-copy (= #{"sync" "async"} copied-ids)
+             :bulk-init (every? true? (vals bulk-result))}]
         {:provider :datalevin
          :artifact "org.datalevin/datalevin-embedded"
          :version version
          :status (if (every? true? (vals capabilities))
                    :supported :failed)
-         :capabilities capabilities})
+         :capabilities capabilities
+         :production-decisions
+         {:bulk-graph-build
+          {:status :not-adopted
+           :reason
+           (str "init-db requires trusted raw numeric datoms; llm-context "
+                "canonical entities use transaction maps, unique identities, "
+                "and lookup references. A production adapter would duplicate "
+                "Datalevin transaction identity and reference resolution.")}}})
       (catch Throwable error
         {:provider :datalevin
          :artifact "org.datalevin/datalevin-embedded"

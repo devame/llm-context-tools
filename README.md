@@ -388,6 +388,12 @@ rate-limited by `:store/:storage-sample-interval-ms`; growth beyond
 `:store/:maximum-operation-growth-bytes` (32 GiB by default) stops before the
 next write unit and leaves the durable graph/outbox state retryable.
 
+Datalevin's raw-datom `init-db` bulk loader is covered by the provider
+qualification harness but is not used for production graph builds. Its trusted
+numeric-datom contract would require llm-context to duplicate Datalevin's
+identity and lookup-reference resolution. Full builds therefore continue to
+use bounded, validated, replay-convergent transactions.
+
 `service supervisor` renders a project-specific systemd unit, launchd plist,
 or Windows Task Scheduler registration script. The generated definition runs
 `service foreground`, applies restart backoff and conservative process limits,

@@ -8,5 +8,8 @@
     (is (= "1.0.0" (:version result)))
     (is (= {:transaction-report true
             :transact-async true
-            :compact-copy true}
-           (:capabilities result)))))
+            :compact-copy true
+            :bulk-init true}
+           (:capabilities result)))
+    (is (= :not-adopted
+           (get-in result [:production-decisions :bulk-graph-build :status])))))

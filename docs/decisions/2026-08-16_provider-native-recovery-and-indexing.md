@@ -353,6 +353,16 @@ The staged database is opened normally, checked for graph invariants, and
 activated atomically. Incremental and recovery paths continue to use ordinary
 transactions.
 
+Pinned Datalevin 1.0.0 qualification proves that `init-db` can build, reopen,
+type-validate, and query a shadow database containing raw numeric datoms and
+exact reference relationships. Production adoption is rejected for this
+release. The provider contract requires trusted pre-resolved entity numbers,
+while llm-context's authoritative candidate uses transaction maps, unique
+identities, and lookup references. Converting it would duplicate Datalevin's
+transaction identity/reference resolution and create a second correctness
+path. Ordinary bounded transactions already converge after interruption, so
+the unmeasured speed opportunity does not justify that semantic risk.
+
 ## Disk and latency observability
 
 Every long-running phase records a durable sample at a bounded interval:
