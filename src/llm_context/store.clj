@@ -73,6 +73,21 @@
    {}
    (group-by first identities)))
 
+(defn- canonical-identity-index
+  "Scan Datalevin's AVE indexes once and detach canonical identities from the
+  immutable database value. Full replacement can reuse this ordinary map
+  across batches without pinning LMDB reader pages or repeating Datalog query
+  setup for every batch."
+  [db]
+  (reduce
+   (fn [result attribute]
+     (reduce (fn [index datom]
+               (assoc index [attribute (:v datom)] (:e datom)))
+             result
+             (d/datoms db :ave attribute)))
+   {}
+   canonical-identity-attributes))
+
 (defn- dependency-order
   "Put every referenced entity before entities that point at it. Datalevin can
   resolve forward temp IDs, but doing that repeatedly in a large transaction
@@ -646,27 +661,6 @@
                (get attributes eid)))))
    entities))
 
-(defn- stale-canonical-eids
-  "Find canonical identities absent from a complete proposed snapshot without
-  retaining a second full graph in memory. Operational semantic entities do
-  not have :entity/type and are intentionally outside this replacement."
-  [db asserted-identities]
-  (reduce
-   (fn [stale attribute]
-     (reduce
-      (fn [result [eid value]]
-        (if (contains? asserted-identities [attribute value])
-          result
-          (conj result eid)))
-      stale
-      (d/q '[:find ?entity ?value
-             :in $ ?attribute
-             :where [?entity :entity/type _]
-                    [?entity ?attribute ?value]]
-           db attribute)))
-   []
-   canonical-identity-attributes))
-
 (defn- transaction-value-weight [attribute value]
   (cond
     (coll? value) (max 1 (count value))
@@ -701,8 +695,8 @@
       [batch nil weight])))
 
 (defn- transact-upsert-batches!
-  [connection entities batch-size max-transaction-weight before-transaction
-   on-progress]
+  [connection entities existing-identity-index batch-size
+   max-transaction-weight before-transaction on-progress]
   (let [total (count entities)]
     (loop [remaining (seq entities)
            completed 0
@@ -714,7 +708,8 @@
                                    max-transaction-weight)
               db (d/db connection)
               existing-eids
-              (existing-identity-eids db (map entity-identity batch))
+              (select-keys existing-identity-index
+                           (map entity-identity batch))
               attributes (attributes-by-eid db (vals existing-eids))
               unchanged (unchanged-identities db batch existing-eids
                                               attributes)
@@ -868,17 +863,22 @@
     (validate-identities! entities)
     (validate-relationships! (d/db connection) entities true)
     (let [ordered (vec (dependency-order entities))
-          asserted-identities (set (map entity-identity ordered))]
+          asserted-identities (set (map entity-identity ordered))
+          existing-identity-index
+          (canonical-identity-index (d/db connection))]
       ;; Upsert first. This restores any identities lost by an interrupted
       ;; earlier replacement and is safe to repeat after every committed batch.
-      (transact-upsert-batches! connection ordered batch-size
+      (transact-upsert-batches! connection ordered existing-identity-index
+                                batch-size
                                 max-transaction-weight before-transaction
                                 on-progress)
       ;; Compute removals only after the desired snapshot has landed. A retry
       ;; can therefore never mistake an as-yet-unrestored desired identity for
       ;; stale data.
-      (let [stale (stale-canonical-eids (d/db connection)
-                                        asserted-identities)]
+      (let [stale (keep (fn [[identity eid]]
+                          (when-not (contains? asserted-identities identity)
+                            eid))
+                        existing-identity-index)]
         (transact-stale-cleanup-batches! connection stale batch-size
                                          before-transaction on-progress))))
 

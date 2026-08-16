@@ -226,6 +226,14 @@ entities. The optimization is rejected if a second identical replacement does
 not produce zero canonical upsert transactions or if it changes the resulting
 datom set.
 
+Scale qualification found that resolving each small batch through a fresh
+Datalog value-membership query reduced unchanged Metabase replay to roughly
+15-17 entities per second. Full replacement now scans Datalevin's canonical
+AVE identity indexes once into an ordinary detached identity-to-EID map and
+reuses it for batch comparison and stale detection. It does not retain the
+immutable database value; attributes and reference identities remain bounded
+per batch. Incremental writes keep their existing targeted lookup path.
+
 ### Phase 2: provider-native graph maintenance
 
 Add an explicit maintenance command that creates a Datalevin compact copy in a
