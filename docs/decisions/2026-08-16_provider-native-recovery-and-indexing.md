@@ -282,6 +282,17 @@ expiry, retry, or supersession retracts the marker; it never implies durable
 provider completion. A partial or ambiguous provider submission remains an
 ordinary leased job and is recovered through delete-await-submit-verify.
 
+When Datalevin's derived indexed records are absent but the provider generation
+survives, the worker first reads provider metadata for each leased symbol. It
+reconstructs indexed state without a provider write only when symbol ID,
+document hash, model revision, document version, and the complete chunk set all
+match the freshly built authoritative document. Missing, stale, partial, or
+duplicate documents retain the normal delete-await-submit-verify path. This
+turns provider recovery into exact reuse rather than unconditional re-encoding
+without treating provider acceptance as durable truth. In the live Metabase
+recovery, 626 of the first 1024 jobs qualified for exact reuse and effective
+completion rose to roughly 678 documents/minute with no failures.
+
 GPU acceleration remains an encoder concern. It does not change queue,
 generation, or visibility semantics.
 
