@@ -262,6 +262,13 @@ backpressure rather than failure, and records separately:
 - visible in NextPlaid;
 - failed or retryable.
 
+The accepted boundary is persisted as `:semantic.job/accepted-at` only after
+every provider request for the leased batch returns successfully. Status counts
+accepted jobs separately while they await exact metadata visibility. Lease
+expiry, retry, or supersession retracts the marker; it never implies durable
+provider completion. A partial or ambiguous provider submission remains an
+ordinary leased job and is recovered through delete-await-submit-verify.
+
 GPU acceleration remains an encoder concern. It does not change queue,
 generation, or visibility semantics.
 

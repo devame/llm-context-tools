@@ -391,6 +391,8 @@
                               :db/index true}
    :semantic.job/lease-until {:db/valueType :db.type/long
                               :db/index true}
+   :semantic.job/accepted-at {:db/valueType :db.type/long
+                              :db/index true}
    :semantic.job/last-error {:db/valueType :db.type/string}
    :semantic.job/updated-at {:db/valueType :db.type/long}
 

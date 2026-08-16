@@ -91,7 +91,7 @@
         previous (:last-semantic-status runtime-state)
         baseline (or previous
                      {:indexed 0 :indexed-records 0 :desired 0
-                      :pending 0 :leased 0 :failed 0 :dirty 0
+                      :pending 0 :leased 0 :accepted 0 :failed 0 :dirty 0
                       :coverage-percent 0.0 :completeness :unknown})]
     (assoc baseline
            :graph-state :updating

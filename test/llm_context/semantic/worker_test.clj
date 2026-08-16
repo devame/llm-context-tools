@@ -51,10 +51,11 @@
       (let [worker (test-worker graph project client)]
         (worker/prepare! worker)
         (is (= {:leased 2 :completed 2 :retried 0
-                :failed 0 :superseded 0}
+                :failed 0 :superseded 0 :accepted-documents 2}
                (select-keys
                 (worker/process-once! worker)
-                [:leased :completed :retried :failed :superseded])))
+                [:leased :completed :retried :failed :superseded
+                 :accepted-documents])))
         (is (empty? (state/job-records graph reconcile/provider)))
         (let [indexed (first (state/indexed-records
                               graph reconcile/provider))]

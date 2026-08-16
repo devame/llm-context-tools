@@ -113,6 +113,26 @@
         (is (= 150 (:semantic.job/lease-until (get records "symbol:a"))))
         (is (= 110 (:semantic.job/lease-until (get records "symbol:b"))))))))
 
+(deftest provider-acceptance-is-durable-only-for-current-leases
+  (let [project (fixture/temp-project)]
+    (store/with-store [graph project (config/defaults)]
+      (state/enqueue-job! graph (job "symbol:a" "sha256:a" 10))
+      (state/enqueue-job! graph (job "symbol:b" "sha256:b" 10))
+      (let [leased (state/lease-jobs! graph provider "worker-a" 10 100 2)
+            job-ids (mapv :semantic.job/id leased)]
+        (is (empty? (state/mark-jobs-accepted!
+                     graph job-ids "worker-b" 20)))
+        (is (= (set job-ids)
+               (state/mark-jobs-accepted!
+                graph job-ids "worker-a" 20)))
+        (is (= 2 (:accepted (state/semantic-summary graph provider 20))))
+        (is (every? #(= 20 (:semantic.job/accepted-at %))
+                    (state/job-records graph provider)))
+        (is (= 2 (state/recover-expired-leases! graph provider 110)))
+        (is (zero? (:accepted (state/semantic-summary graph provider 110))))
+        (is (every? #(nil? (:semantic.job/accepted-at %))
+                    (state/job-records graph provider)))))))
+
 (deftest stale-worker-cannot-complete-superseded-job
   (let [project (fixture/temp-project)]
     (store/with-store [graph project (config/defaults)]
@@ -306,5 +326,7 @@
       (let [measured (db-support/with-operation-counts
                        (state/semantic-summary graph provider 100))]
         (is (= 200 (get-in measured [:value :desired])))
-        (is (<= (get-in measured [:counts :query]) 6))
+        ;; Provider acceptance is one additional constant-size aggregate; the
+        ;; query count remains independent of repository/job cardinality.
+        (is (<= (get-in measured [:counts :query]) 7))
         (is (zero? (get-in measured [:counts :pull-many])))))))

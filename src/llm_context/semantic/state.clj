@@ -138,6 +138,8 @@
     "Extend a worker-owned lease during a long model or visibility operation.")
   (renew-job-leases! [graph job-ids owner now lease-ms]
     "Extend current worker-owned leases in one conditional transaction.")
+  (mark-jobs-accepted! [graph job-ids owner accepted-at]
+    "Record which currently leased jobs were accepted by the semantic provider.")
   (recover-expired-leases! [graph provider now]
     "Return expired leases to pending and report how many were recovered.")
   (complete-job! [graph completion]
@@ -245,6 +247,7 @@
                                           [:semantic.job/document-hash
                                            :semantic.job/lease-owner
                                            :semantic.job/lease-until
+                                           :semantic.job/accepted-at
                                            :semantic.job/last-error]))]
           (d/transact! conn (vec (concat obsolete [entity])))
           (d/pull (d/db conn) '[*]
@@ -328,6 +331,7 @@
                            existing [:semantic.job/document-hash
                                      :semantic.job/lease-owner
                                      :semantic.job/lease-until
+                                     :semantic.job/accepted-at
                                      :semantic.job/last-error]))
                         [entity])))
 
@@ -473,6 +477,49 @@
                         renewable)
                   (throw error)))))))))
 
+  (mark-jobs-accepted! [graph job-ids owner accepted-at]
+    (let [job-ids (vec (distinct job-ids))]
+      (when-not (and (string? owner) (seq owner) (nat-int? accepted-at))
+        (throw (ex-info "Semantic acceptance owner and time must be valid"
+                        {:owner owner :accepted-at accepted-at})))
+      (if (empty? job-ids)
+        #{}
+        (let [conn (connection graph)
+              db (d/db conn)
+              current
+              (into {}
+                    (map (fn [[id entity lease-owner status]]
+                           [id [entity lease-owner status]]))
+                    (d/q '[:find ?id ?entity ?lease-owner ?status
+                           :in $ [?id ...]
+                           :where
+                           [?entity :semantic.job/id ?id]
+                           [?entity :semantic.job/lease-owner ?lease-owner]
+                           [?entity :semantic.job/status ?status]]
+                         db job-ids))
+              accepted
+              (filterv (fn [job-id]
+                         (let [[_ lease-owner status] (get current job-id)]
+                           (and (= owner lease-owner) (= :leased status))))
+                       job-ids)
+              tx
+              (mapcat (fn [job-id]
+                        (let [[eid] (get current job-id)]
+                          [[:db.fn/cas eid :semantic.job/lease-owner owner owner]
+                           {:db/id eid
+                            :semantic.job/accepted-at accepted-at
+                            :semantic.job/updated-at accepted-at}]))
+                      accepted)]
+          (if-not (seq tx)
+            #{}
+            (try
+              (d/transact! conn (vec tx))
+              (set accepted)
+              (catch clojure.lang.ExceptionInfo error
+                (if (= :transact/cas (:error (ex-data error)))
+                  #{}
+                  (throw error)))))))))
+
   (recover-expired-leases! [graph provider now]
     (when-not (nat-int? now)
       (throw (ex-info "Semantic recovery time must be non-negative" {:now now})))
@@ -499,7 +546,8 @@
                   :semantic.job/available-at now
                   :semantic.job/updated-at now}]
                 (retract-present current [:semantic.job/lease-owner
-                                          :semantic.job/lease-until]))))
+                                          :semantic.job/lease-until
+                                          :semantic.job/accepted-at]))))
              (inc count)
              (catch clojure.lang.ExceptionInfo error
                (if (= :transact/cas (:error (ex-data error)))
@@ -675,7 +723,10 @@
                      :semantic.job/updated-at failed-at}]
                    [[:db/retract eid :semantic.job/lease-owner release-token]]
                    (when-let [until (:semantic.job/lease-until job)]
-                     [[:db/retract eid :semantic.job/lease-until until]])))]
+                     [[:db/retract eid :semantic.job/lease-until until]])
+                   (when-let [accepted-at (:semantic.job/accepted-at job)]
+                     [[:db/retract eid :semantic.job/accepted-at
+                       accepted-at]])))]
           (try
             (d/transact! conn tx)
             {:status (if terminal? :failed :pending) :attempts attempts}
@@ -742,6 +793,7 @@
        :completeness (if complete? :complete :partial)
        :pending (:pending counts)
        :leased (:leased counts)
+       :accepted (:accepted counts)
        :failed (:failed counts)
        :oldest-pending-ms (when oldest-pending-at
                             (max 0 (- now oldest-pending-at)))

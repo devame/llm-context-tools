@@ -396,6 +396,22 @@
             (.get future)
             (catch ExecutionException error
               (throw (.getCause error))))))
+      (let [job-ids (mapv :semantic.job/id jobs)
+            accepted-at (now worker)
+            accepted
+            (with-graph-lock
+              worker
+              #(state/mark-jobs-accepted!
+                (:graph worker) job-ids (:owner worker) accepted-at))]
+        (when-not (= (set job-ids) accepted)
+          (throw
+           (ex-info
+            "Semantic provider accepted work after one or more leases changed"
+            {:type :semantic/acceptance-lease-lost
+             :retriable? true
+             :submitted (count job-ids)
+             :accepted (count accepted)})))
+        (count accepted))
       (finally
         (.shutdown executor)
         (.awaitTermination executor 5 TimeUnit/SECONDS)))))
@@ -429,7 +445,7 @@
                             (partition-all
                              (:update-batch-size (:settings worker)) chunks))
               upload-start (System/nanoTime)
-              _ (submit-update-batches! worker jobs batches)
+              accepted-documents (submit-update-batches! worker jobs batches)
               upload-ms (long (/ (- (System/nanoTime) upload-start) 1000000))
               visibility-start (System/nanoTime)
               _ (await-documents!
@@ -444,6 +460,7 @@
               (into immediate (complete-prepared! worker prepared))]
           {:results results
            :metrics {:submitted-documents (count prepared)
+                     :accepted-documents accepted-documents
                      :submitted-chunks (count chunks)
                      :upload-batches (count batches)
                      :delete-ms delete-ms
@@ -454,6 +471,7 @@
            (into immediate
                  (mapv #(retry-job! worker (:job %) error) prepared))
            :metrics {:submitted-documents 0 :submitted-chunks 0
+                     :accepted-documents 0
                      :upload-batches 0 :delete-ms 0
                      :upload-ms 0 :visibility-ms 0}})))))
 
@@ -590,6 +608,8 @@
                        (update :failed + (:failed result 0))
                        (update :submitted-documents +
                                (:submitted-documents result 0))
+                       (update :accepted-documents +
+                               (:accepted-documents result 0))
                        (update :submitted-chunks +
                                (:submitted-chunks result 0))
                        (update :upload-batches + (:upload-batches result 0))
@@ -637,7 +657,8 @@
     :progress-fn progress-fn
     :progress (atom {:started-at (now-fn)
                      :leased 0 :completed 0 :retried 0 :failed 0
-                     :submitted-documents 0 :submitted-chunks 0
+                     :submitted-documents 0 :accepted-documents 0
+                     :submitted-chunks 0
                      :upload-batches 0 :delete-ms 0
                      :upload-ms 0 :visibility-ms 0})
     :stop? (atom false)})))

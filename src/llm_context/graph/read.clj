@@ -545,6 +545,15 @@
         oldest (some (fn [[status _ updated]]
                        (when (= :pending status) updated))
                      status-rows)
+        accepted
+        (or (d/q '[:find (count ?job) .
+                   :in $ ?provider
+                   :where
+                   [?job :semantic.job/provider ?provider]
+                   [?job :semantic.job/status :leased]
+                   [?job :semantic.job/accepted-at _]]
+                 db provider)
+            0)
         dirty
         (or (d/q '[:find (count ?marker) .
                    :in $ ?provider
@@ -556,6 +565,7 @@
      :indexed-current indexed-current
      :pending (get by-status :pending 0)
      :leased (get by-status :leased 0)
+     :accepted accepted
      :failed (get by-status :failed 0)
      :oldest-pending-at oldest
      :dirty dirty}))

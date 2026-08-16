@@ -196,7 +196,8 @@ llm-context semantic sync --wait
 
 Status defaults to one line: remaining documents, total desired documents, and
 measured documents per second. Add `--verbose` for runtime availability,
-desired/indexed coverage, provider details, and analysis progress. During a
+desired/indexed coverage, leased and provider-accepted work, provider details,
+and analysis progress. During a
 graph replacement verbose status remains readable and reports the last
 committed graph snapshot together with live analysis progress. Use `--watch`
 from any terminal to poll either view; the default interval is 2 seconds and
