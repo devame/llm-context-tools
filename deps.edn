@@ -29,5 +29,9 @@
   {:extra-paths ["bench"]
    :jvm-opts ["--enable-native-access=ALL-UNNAMED"]
    :main-opts ["-m" "llm-context.public-semantic-evaluation"]}
+  :qualify-providers
+  {:extra-paths ["bench"]
+   :jvm-opts ["--enable-native-access=ALL-UNNAMED"]
+   :main-opts ["-m" "llm-context.provider-qualification"]}
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.8"}}
           :ns-default build}}}

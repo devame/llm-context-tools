@@ -133,7 +133,8 @@
               (make-array java.nio.file.attribute.FileAttribute 0))
         context (assoc (project/context (str root)) :options {:quiet? true})
         output (with-out-str
-                 (is (zero? (cli/execute context "semantic" ["status"]))))]
+                 (is (zero? (cli/execute context "semantic"
+                                         ["status" "--verbose"]))))]
     (is (str/includes? output ":pending 0"))
     (is (str/includes? output ":status :not-running"))))
 
@@ -198,14 +199,31 @@
            (cli/execute context "semantic" ["sync" "--wait"]))))))
 
 (deftest semantic-status-accepts-watch-options
-  (is (= {:watch? true :interval-ms 1500}
+  (is (= {:watch? true :verbose? true :interval-ms 1500}
          (#'cli/parse-semantic-status-options
-          ["--watch" "--interval-ms" "1500"])))
-  (is (= {:watch? false :interval-ms 2000}
+          ["--watch" "--verbose" "--interval-ms" "1500"])))
+  (is (= {:watch? false :verbose? false :interval-ms 2000}
          (#'cli/parse-semantic-status-options [])))
   (is (thrown-with-msg?
        clojure.lang.ExceptionInfo #"requires a positive integer"
        (#'cli/parse-semantic-status-options ["--interval-ms" "0"]))))
+
+(deftest semantic-status-summary-is-concise-and-reports-throughput
+  (let [status {:desired 100
+                :indexed 35
+                :runtime {:worker-progress
+                          {:documents-per-minute 120.0}}}]
+    (is (= "65 of 100 documents pending, processing speed: 2.00 docs/s"
+           (#'cli/semantic-status-summary status)))
+    (is (= "0 of 100 documents pending, processing speed: 0.00 docs/s"
+           (#'cli/semantic-status-summary (assoc status :indexed 100))))))
+
+(deftest semantic-status-summary-derives-speed-from-watch-samples
+  (is (= "86 of 100 documents pending, processing speed: 2.00 docs/s"
+         (#'cli/semantic-status-summary
+          {:desired 100 :indexed 14}
+          {:desired 100 :indexed 10}
+          2000))))
 
 (deftest initialization-confirms-the-project-root
   (let [root (Files/createTempDirectory

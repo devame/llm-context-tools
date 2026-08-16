@@ -38,6 +38,23 @@
   [:file/id :symbol/id :topic/id :edge/id :reference/id :effect/id
    :aggregate/id :membership/id])
 
+(def ^:private identity-pull
+  (into [:db/id] canonical-identity-attributes))
+
+(def ^:private reference-attributes
+  (->> schema/datalevin-schema
+       (keep (fn [[attribute definition]]
+               (when (= :db.type/ref (:db/valueType definition))
+                 attribute)))
+       set))
+
+(def ^:private cardinality-many-attributes
+  (->> schema/datalevin-schema
+       (keep (fn [[attribute definition]]
+               (when (= :db.cardinality/many (:db/cardinality definition))
+                 attribute)))
+       set))
+
 (defn- existing-identity-eids
   "Resolve a set of canonical identities with at most one indexed query per
   identity attribute. The returned map is suitable for transaction planning."
@@ -548,6 +565,68 @@
             :where [?entity ?attribute ?value]]
           db (vec eids)))))
 
+(defn- referenced-identities-by-eid
+  "Resolve Datalevin reference values back to stable canonical identities.
+  Comparison code can then remain independent of provider-local entity IDs."
+  [db attributes]
+  (let [referenced-eids
+        (->> attributes
+             vals
+             (mapcat identity)
+             (keep (fn [[attribute value]]
+                     (when (contains? reference-attributes attribute)
+                       value)))
+             distinct
+             vec)]
+    (if-not (seq referenced-eids)
+      {}
+      (into {}
+            (keep (fn [entity]
+                    (when-let [[_ value :as identity]
+                               (entity-identity entity)]
+                      [(:db/id entity) value])))
+            (d/pull-many db identity-pull referenced-eids)))))
+
+(defn- desired-attribute-datoms
+  "Represent one canonical entity as provider-independent attribute/value
+  datoms. Cardinality-many values compare as sets, not insertion order."
+  [entity]
+  (into #{}
+        (mapcat
+         (fn [[attribute value]]
+           (if (contains? cardinality-many-attributes attribute)
+             (map (fn [item] [attribute item]) value)
+             [[attribute value]])))
+        (schema/with-derived-attributes entity)))
+
+(defn- stored-attribute-datoms
+  [attributes referenced-identities eid]
+  (into #{}
+        (map (fn [[attribute value]]
+               [attribute
+                (if (contains? reference-attributes attribute)
+                  (get referenced-identities value ::unresolved-reference)
+                  value)]))
+        (get attributes eid)))
+
+(defn- unchanged-identities
+  "Return identities whose complete derived canonical datom set already
+  matches storage. A missing reference identity deliberately makes comparison
+  fail closed, causing a normal idempotent upsert."
+  [db entities existing-eids attributes]
+  (let [referenced-identities
+        (referenced-identities-by-eid db attributes)]
+    (into #{}
+          (keep
+           (fn [entity]
+             (let [identity (entity-identity entity)]
+               (when-let [eid (get existing-eids identity)]
+                 (when (= (desired-attribute-datoms entity)
+                          (stored-attribute-datoms attributes
+                                                   referenced-identities eid))
+                   identity)))))
+          entities)))
+
 (defn- stale-attribute-tx
   "Map upserts do not retract attributes omitted by a newer canonical entity.
   Explicitly remove those old values while retaining the entity's stable eid."
@@ -626,7 +705,9 @@
    on-progress]
   (let [total (count entities)]
     (loop [remaining (seq entities)
-           completed 0]
+           completed 0
+           written 0
+           skipped 0]
       (when (seq remaining)
         (let [[batch next-remaining transaction-weight]
               (take-weighted-batch remaining batch-size
@@ -635,22 +716,37 @@
               existing-eids
               (existing-identity-eids db (map entity-identity batch))
               attributes (attributes-by-eid db (vals existing-eids))
+              unchanged (unchanged-identities db batch existing-eids
+                                              attributes)
+              changed-batch
+              (remove #(contains? unchanged (entity-identity %)) batch)
               stale-attributes
-              (stale-attribute-tx batch existing-eids attributes)
-              assertions (entities->tx db batch #{} existing-eids)
-              next-completed (+ completed (count batch))]
-          (when before-transaction
-            (before-transaction {:phase :upsert
-                                 :completed completed :total total}))
-          (d/transact! connection
-                       (vec (concat stale-attributes assertions)))
+              (stale-attribute-tx changed-batch existing-eids attributes)
+              assertions (entities->tx db changed-batch #{} existing-eids)
+              tx (vec (concat stale-attributes assertions))
+              batch-written (count changed-batch)
+              batch-skipped (count unchanged)
+              submitted-transaction-weight
+              (reduce + 0 (map entity-transaction-weight changed-batch))
+              next-completed (+ completed (count batch))
+              next-written (+ written batch-written)
+              next-skipped (+ skipped batch-skipped)]
+          (when (seq tx)
+            (when before-transaction
+              (before-transaction {:phase :upsert
+                                   :completed completed :total total
+                                   :written written :skipped skipped}))
+            (d/transact! connection tx))
           (when on-progress
             (on-progress {:phase :upsert
                           :completed next-completed :total total
-                          :transaction-weight transaction-weight
+                          :written next-written :skipped next-skipped
+                          :transaction-submitted? (boolean (seq tx))
+                          :transaction-weight submitted-transaction-weight
+                          :examined-transaction-weight transaction-weight
                           :max-transaction-weight
                           max-transaction-weight}))
-          (recur next-remaining next-completed))))))
+          (recur next-remaining next-completed next-written next-skipped))))))
 
 (defn- transact-stale-cleanup-batches!
   "Remove stale canonical entities as explicit datoms. Datalevin expands
@@ -683,9 +779,6 @@
             (on-progress {:phase :cleanup
                           :completed next-completed :total total}))
           (recur (next remaining) next-completed))))))
-
-(def ^:private identity-pull
-  (into [:db/id] canonical-identity-attributes))
 
 (defn- replacement-snapshot [db file-id entities]
   (let [{:keys [owned inbound]} (file-retraction-plan db file-id)

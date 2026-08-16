@@ -192,6 +192,7 @@
   [{:keys [stage files diagnostics completed total file entities
            exact-edges references external dynamic ambiguous unresolved
            upserts deletes deferred batch-size phase
+           written skipped
            elapsed-seconds archive-path probe-path usable-bytes
            minimum-free-space-bytes]
     :as event}]
@@ -227,8 +228,12 @@
     :persist-start (format "Persisting %d entities in batches of %d..."
                            entities batch-size)
     :persist-progress
-    (format "%s %d/%d entities"
-            (if (= :retract phase) "Retracted" "Committed") completed total)
+    (case phase
+      :upsert
+      (format "Examined %d/%d entities (%d written, %d unchanged)"
+              completed total (or written 0) (or skipped 0))
+      :cleanup (format "Removed %d/%d stale entities" completed total)
+      (format "Processed %d/%d entities" completed total))
     :complete (format "Full analysis completed in %d seconds" elapsed-seconds)
     (str "Analysis stage: " (name stage))))
 
@@ -445,10 +450,11 @@
 
 (defn- parse-semantic-status-options [arguments]
   (loop [remaining (seq arguments)
-         parsed {:watch? false :interval-ms 2000}]
+         parsed {:watch? false :verbose? false :interval-ms 2000}]
     (if-let [argument (first remaining)]
       (case argument
         "--watch" (recur (next remaining) (assoc parsed :watch? true))
+        "--verbose" (recur (next remaining) (assoc parsed :verbose? true))
         "--interval-ms"
         (let [interval-ms (some-> (second remaining) parse-long)]
           (when-not (pos-int? interval-ms)
@@ -460,11 +466,52 @@
                         {:exit-code 2})))
       parsed)))
 
-(defn- print-semantic-status! [status]
+(defn- print-verbose-semantic-status! [status]
   (println (str "\n# semantic status observed at "
                 (java.time.Instant/now)))
   (pprint/pprint status)
   (flush))
+
+(defn- pending-document-count [status]
+  (when (and (number? (:desired status)) (number? (:indexed status)))
+    (max 0 (- (long (:desired status)) (long (:indexed status))))))
+
+(defn- semantic-processing-speed
+  "Return documents per second. Prefer the worker's cumulative measured rate,
+  which remains meaningful across provider batches; fall back to the change
+  between CLI polling samples when worker telemetry is unavailable."
+  [status previous-status elapsed-ms]
+  (let [pending (pending-document-count status)
+        documents-per-minute
+        (get-in status [:runtime :worker-progress :documents-per-minute])]
+    (cond
+      (zero? (or pending 0)) 0.0
+      (number? documents-per-minute)
+      (/ (double documents-per-minute) 60.0)
+      (and previous-status (pos? (long (or elapsed-ms 0)))
+           (number? (:indexed status))
+           (number? (:indexed previous-status)))
+      (/ (* 1000.0
+            (max 0 (- (long (:indexed status))
+                      (long (:indexed previous-status)))))
+         (double elapsed-ms))
+      :else 0.0)))
+
+(defn- semantic-status-summary
+  ([status] (semantic-status-summary status nil nil))
+  ([status previous-status elapsed-ms]
+   (if-let [pending (pending-document-count status)]
+     (format "%d of %d documents pending, processing speed: %.2f docs/s"
+             pending (long (:desired status))
+             (semantic-processing-speed status previous-status elapsed-ms))
+     (str "semantic status unavailable"
+          (when-let [error (:error status)] (str ": " error))))))
+
+(defn- print-semantic-summary!
+  ([status] (print-semantic-summary! status nil nil))
+  ([status previous-status elapsed-ms]
+   (println (semantic-status-summary status previous-status elapsed-ms))
+   (flush)))
 
 (defmethod execute "semantic" [context _ args]
   (let [subcommand (or (first args) "status")
@@ -472,20 +519,31 @@
         settings (config/load-config context)]
     (case subcommand
       "status"
-      (let [{:keys [watch? interval-ms]}
+      (let [{:keys [watch? verbose? interval-ms]}
             (parse-semantic-status-options (next args))]
         (if-not watch?
-          (pprint/pprint (semantic-status context settings))
-          (loop []
-            (print-semantic-status!
-             (try
-               (semantic-status context settings)
-               (catch Throwable error
-                 {:graph-state :unknown
-                  :availability :unavailable
-                  :error (.getMessage error)})))
-            (Thread/sleep interval-ms)
-            (recur))))
+          (let [status (semantic-status context settings)]
+            (if verbose?
+              (pprint/pprint status)
+              (print-semantic-summary! status)))
+          (loop [previous-status nil
+                 previous-observed-at nil]
+            (let [observed-at (System/nanoTime)
+                  status
+                  (try
+                    (semantic-status context settings)
+                    (catch Throwable error
+                      {:graph-state :unknown
+                       :availability :unavailable
+                       :error (.getMessage error)}))
+                  elapsed-ms
+                  (when previous-observed-at
+                    (long (/ (- observed-at previous-observed-at) 1000000)))]
+              (if verbose?
+                (print-verbose-semantic-status! status)
+                (print-semantic-summary! status previous-status elapsed-ms))
+              (Thread/sleep interval-ms)
+              (recur status observed-at)))))
 
       "sync"
       (let [{:keys [wait? timeout-ms]}

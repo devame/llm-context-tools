@@ -557,6 +557,72 @@
                                    :where [?entity :entity/type _]]
                                  [])))))))
 
+(deftest identical-whole-graph-replay-skips-provider-writes
+  (let [project (temp-project)
+        file (file-entity "src/replay.clj" "source")
+        source (symbol-entity file "sample/source" 1)
+        target (symbol-entity file "sample/target" 2)
+        edge {:entity/type :entity.type/edge
+              :edge/id "edge:replay"
+              :edge/kind :edge.kind/calls
+              :edge/from (:symbol/id source)
+              :edge/to (:symbol/id target)
+              :edge/target-text "target"
+              :edge/resolution :resolution/exact
+              :edge/confidence 1.0
+              :edge/evidence :test-exact}
+        desired [file source target edge]
+        events (atom [])
+        guarded (atom [])]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-all! graph desired)
+      (with-redefs [d/transact!
+                    (fn [& _]
+                      (throw (ex-info "unchanged replay wrote to Datalevin" {})))]
+        (store/replace-all! graph desired
+                            {:batch-size 2
+                             :before-transaction #(swap! guarded conj %)
+                             :on-progress #(swap! events conj %)}))
+      (is (empty? @guarded))
+      (is (= 4 (:completed (last @events))))
+      (is (= 0 (:written (last @events))))
+      (is (= 4 (:skipped (last @events))))
+      (is (false? (:transaction-submitted? (last @events)))))))
+
+(deftest changed-reference-is-not-skipped-during-whole-graph-replay
+  (let [project (temp-project)
+        file (file-entity "src/reference.clj" "source")
+        source (symbol-entity file "sample/source" 1)
+        target-a (symbol-entity file "sample/target-a" 2)
+        target-b (symbol-entity file "sample/target-b" 3)
+        edge {:entity/type :entity.type/edge
+              :edge/id "edge:reference-change"
+              :edge/kind :edge.kind/calls
+              :edge/from (:symbol/id source)
+              :edge/to (:symbol/id target-a)
+              :edge/target-text "target"
+              :edge/resolution :resolution/exact
+              :edge/confidence 1.0
+              :edge/evidence :test-exact}
+        initial [file source target-a target-b edge]
+        desired (conj (vec (butlast initial))
+                      (assoc edge :edge/to (:symbol/id target-b)))
+        events (atom [])]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-all! graph initial)
+      (store/replace-all! graph desired
+                          {:on-progress #(swap! events conj %)})
+      (is (= 1 (:written (last @events))))
+      (is (= 4 (:skipped (last @events))))
+      (is (= (:symbol/id target-b)
+             (d/q '[:find ?target-id .
+                    :in $ ?edge-id
+                    :where
+                    [?edge :edge/id ?edge-id]
+                    [?edge :edge/to ?target]
+                    [?target :symbol/id ?target-id]]
+                  (store/database graph) (:edge/id edge)))))))
+
 (deftest interrupted-whole-graph-replacement-converges-on-retry
   (let [project (temp-project)
         old-file (file-entity "src/a.clj" "old")

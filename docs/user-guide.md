@@ -186,19 +186,21 @@ The service supervises NextPlaid and drains durable LateOn jobs in the
 background:
 
 ```bash
-llm-context semantic status
-llm-context semantic status --watch [--interval-ms N]
+llm-context semantic status [--verbose]
+llm-context semantic status --watch [--interval-ms N] [--verbose]
 llm-context semantic failures
 llm-context semantic dirty
 llm-context semantic retry --failed --wait
 llm-context semantic sync --wait
 ```
 
-Status separates runtime availability from index completeness and reports
-desired/indexed coverage. During a graph replacement it remains readable and
-reports the last committed graph snapshot together with live analysis progress.
-Use `--watch` from any terminal to poll that status; the default interval is
-2 seconds and can be changed with `--interval-ms`. The durable progress
+Status defaults to one line: remaining documents, total desired documents, and
+measured documents per second. Add `--verbose` for runtime availability,
+desired/indexed coverage, provider details, and analysis progress. During a
+graph replacement verbose status remains readable and reports the last
+committed graph snapshot together with live analysis progress. Use `--watch`
+from any terminal to poll either view; the default interval is 2 seconds and
+can be changed with `--interval-ms`. The durable progress
 snapshot is `.llm-context/analysis-progress.edn`, so a restarted service can
 also report that an interrupted analysis was abandoned. A ready runtime with a handful of terminal jobs is
 available with partial completeness; it is not globally unavailable. Failed

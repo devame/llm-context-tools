@@ -140,8 +140,8 @@ llm-context context --intent <natural-language-query> [--source-preference auto|
 llm-context export --format edn|json|jsonl|markdown [--output PATH]
 llm-context summary [--output PATH]
 llm-context integrate claude|codex|generic [--force]
-llm-context semantic status
-llm-context semantic status --watch [--interval-ms N]
+llm-context semantic status [--verbose]
+llm-context semantic status --watch [--interval-ms N] [--verbose]
 llm-context semantic sync [--wait]
 llm-context semantic failures
 llm-context semantic dirty
@@ -344,9 +344,11 @@ only the current instance's files, and `service stop` is idempotent.
 
 Use `llm-context semantic status` to inspect lag and
 `llm-context semantic status --watch` to monitor a full or incremental graph
-replacement from another terminal. Status remains available while the graph
-is being committed: it reports the last committed counters plus the live
-analysis stage. The service also writes an atomic
+replacement from another terminal. The default output is one concise line with
+remaining documents, total documents, and processing speed; add `--verbose`
+for the complete runtime and progress map. Status remains available while the
+graph is being committed: verbose mode reports the last committed counters plus
+the live analysis stage. The service also writes an atomic
 `.llm-context/analysis-progress.edn` snapshot, and marks a previously running
 operation as interrupted when the service restarts.
 `llm-context semantic sync --wait` when automation needs all queued embeddings
