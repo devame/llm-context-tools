@@ -401,6 +401,10 @@ progress record and to live semantic-worker progress. Checks between sampling
 intervals still enforce the cheap filesystem reserve without recursively
 walking generated directories.
 
+Starting a new durable analysis operation replaces the previous progress event
+rather than merging with it. Historical stage/counter fields therefore cannot
+make a newly running operation appear simultaneously complete.
+
 ## Failure model
 
 | Failure point | Required outcome |

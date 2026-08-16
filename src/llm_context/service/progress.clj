@@ -83,15 +83,18 @@
     (write-atomically! (path project) next-state)
     next-state))
 
+(defn- replace! [{:keys [project state]} values]
+  (let [next-state (merge (initial-state) values {:updated-at (now)})]
+    (reset! state next-state)
+    (write-atomically! (path project) next-state)
+    next-state))
+
 (defn begin! [progress operation]
-  (update! progress
-           {:state :running
-            :operation operation
-            :operation-id (str (UUID/randomUUID))
-            :started-at (now)
-            :finished-at nil
-            :result nil
-            :last-error nil}))
+  (replace! progress
+            {:state :running
+             :operation operation
+             :operation-id (str (UUID/randomUUID))
+             :started-at (now)}))
 
 (defn record! [progress event]
   (update! progress

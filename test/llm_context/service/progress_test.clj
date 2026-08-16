@@ -28,7 +28,14 @@
       (is (= :complete (:state snapshot)))
       (is (= {:mode :full :files 10 :entities 42}
              (:result snapshot)))
-      (is (nil? (:last-error snapshot))))))
+      (is (nil? (:last-error snapshot))))
+    (progress/begin! handle :incremental-analysis)
+    (let [snapshot (progress/read-state context)]
+      (is (= :running (:state snapshot)))
+      (is (= :incremental-analysis (:operation snapshot)))
+      (is (nil? (:stage snapshot)))
+      (is (nil? (:completed snapshot)))
+      (is (nil? (:result snapshot))))))
 
 (deftest a-new-service-marks-an-abandoned-analysis-interrupted
   (let [root (Files/createTempDirectory
