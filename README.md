@@ -371,9 +371,9 @@ different empty destination. The command never activates or deletes a copy.
 
 `maintenance cleanup` is a dry run unless `--apply` is present. It considers
 only direct-child recovery archives and verified compact copies carrying an
-exact llm-context retention marker. It always keeps the newest artifact in
-each category and ignores unmarked directories, provider indexes, and active
-logs.
+exact llm-context retention marker, plus content-addressed analyzer staging
+generations. It always keeps the newest artifact in each category and ignores
+unmarked recovery/maintenance directories, provider indexes, and active logs.
 
 Full analysis preparation uses immutable compressed generations under
 `.llm-context/analysis-staging/`. A generation is reusable only after every

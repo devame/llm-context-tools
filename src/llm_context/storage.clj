@@ -1,7 +1,8 @@
 (ns llm-context.storage
   "Host-aware free-space protection for generated indexes."
   (:require [clojure.edn :as edn]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [llm-context.analysis.staging :as staging])
   (:import [java.nio.file Files LinkOption Path Paths]
            [java.util.stream Stream]))
 
@@ -152,6 +153,28 @@
        (sort-by :created-at >)
        vec))
 
+(defn- staging-artifacts [project config]
+  (->> (direct-children (staging/root-path project config))
+       (keep
+        (fn [^Path artifact]
+          (when (and (Files/isDirectory artifact no-follow-links)
+                     (re-matches #"[0-9a-f]{32}" (str (.getFileName artifact))))
+            (let [artifact (.normalize (.toAbsolutePath artifact))
+                  index (marker-data (.resolve artifact "index.edn"))
+                  complete? (and (= staging/format-version (:format index))
+                                 (= (str (.getFileName artifact))
+                                    (:generation index))
+                                 (integer? (:completed-at index)))
+                  measured (path-stat artifact)]
+              (assoc measured
+                     :created-at (if complete?
+                                   (:completed-at index)
+                                   (:modified-at measured))
+                     :complete? complete?)))))
+       (filter :created-at)
+       (sort-by :created-at >)
+       vec))
+
 (defn cleanup-plan
   "Plan retention cleanup without mutating the filesystem. Only artifacts
   carrying llm-context's exact marker contract are eligible. The newest
@@ -171,7 +194,8 @@
          [:maintenance
           (marked-artifacts (.resolve ^Path (:state-dir project) "maintenance")
                             ".verified.edn"
-                            :verified-compact-copy)]]
+                            :verified-compact-copy)]
+         [:analysis-staging (staging-artifacts project config)]]
         artifacts
         (mapcat
          (fn [[component entries]]
@@ -206,7 +230,9 @@
         (mapv
          (fn [{:keys [path marker-path bytes component]}]
            (delete-tree! (Paths/get path (make-array String 0)))
-           (Files/deleteIfExists (Paths/get marker-path (make-array String 0)))
+           (when marker-path
+             (Files/deleteIfExists
+              (Paths/get marker-path (make-array String 0))))
            {:path path :component component :bytes bytes})
          (filter :eligible? (:candidates plan)))]
     (assoc plan :applied? true :deleted deleted)))

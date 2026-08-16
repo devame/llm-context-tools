@@ -221,10 +221,11 @@ llm-context maintenance cleanup --older-than-days 30 --apply
 graph, provider-index, staging, recovery, maintenance, and log locations and
 reports their size, file count, and latest modification time.
 
-Cleanup defaults to a dry run. Only llm-context-marked recovery archives and
-verified compact copies are eligible; the newest artifact in each category is
-always retained. `--apply` is required to perform deletion. Unmarked paths,
-active logs, and provider indexes are never deleted by this command.
+Cleanup defaults to a dry run. Only llm-context-marked recovery archives,
+verified compact copies, and exact content-addressed analyzer staging
+generations are eligible; the newest artifact in each category is always
+retained. `--apply` is required to perform deletion. Unmarked maintenance and
+recovery paths, active logs, and provider indexes are never deleted.
 
 Generate, inspect, and then install a host-native supervisor definition:
 

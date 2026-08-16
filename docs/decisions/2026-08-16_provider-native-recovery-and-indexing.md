@@ -338,6 +338,12 @@ whole-project validation and persistence path. A partial generation or any
 contract/content mismatch runs the authoritative analyzers again; no mixture of
 old and new shards can reach Datalevin.
 
+Explicit retention now also recognizes exact content-addressed staging
+generation directories, including incomplete generations. It preserves the
+newest generation and applies the same age-gated dry-run-first cleanup. This
+prevents resumability from becoming an unbounded second store while retaining
+the latest interrupted work for diagnosis or retry.
+
 ### Phase 6: optional shadow bulk build
 
 Only after qualification, a brand-new graph may be built with Datalevin's bulk

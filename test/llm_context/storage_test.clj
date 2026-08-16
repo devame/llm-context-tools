@@ -1,6 +1,7 @@
 (ns llm-context.storage-test
   (:require [clojure.test :refer [deftest is]]
             [llm-context.config :as config]
+            [llm-context.analysis.staging :as staging]
             [llm-context.project :as project]
             [llm-context.storage :as storage])
   (:import [java.nio.file Files OpenOption]))
@@ -84,3 +85,32 @@
     (is (not (Files/exists old (make-array java.nio.file.LinkOption 0))))
     (is (Files/exists newest (make-array java.nio.file.LinkOption 0)))
     (is (Files/exists unmarked (make-array java.nio.file.LinkOption 0)))))
+
+(deftest retention-cleanup-removes-old-staging-but-keeps-newest-partial
+  (let [project (temp-project)
+        settings (config/defaults)
+        staging-root (staging/root-path project settings)
+        old (.resolve staging-root "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        newest (.resolve staging-root "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        old-time (- (System/currentTimeMillis) (* 40 24 60 60 1000))]
+    (doseq [path [old newest]]
+      (Files/createDirectories path
+                               (make-array java.nio.file.attribute.FileAttribute 0))
+      (Files/writeString (.resolve path "partial") "x" (make-array OpenOption 0)))
+    (Files/setLastModifiedTime old
+                               (java.nio.file.attribute.FileTime/fromMillis
+                                old-time))
+    (Files/setLastModifiedTime (.resolve old "partial")
+                               (java.nio.file.attribute.FileTime/fromMillis
+                                old-time))
+    (let [plan (storage/cleanup-plan project settings 30)
+          staging-candidates (filter #(= :analysis-staging (:component %))
+                                     (:candidates plan))]
+      (is (= 2 (count staging-candidates)))
+      (is (:eligible? (first (filter #(= (str old) (:path %))
+                                    staging-candidates))))
+      (is (:protected? (first (filter #(= (str newest) (:path %))
+                                     staging-candidates)))))
+    (storage/apply-cleanup! project settings 30)
+    (is (not (Files/exists old (make-array java.nio.file.LinkOption 0))))
+    (is (Files/exists newest (make-array java.nio.file.LinkOption 0)))))
