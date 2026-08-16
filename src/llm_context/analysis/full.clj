@@ -48,10 +48,12 @@
 
 (defn- persist!
   ([graph config entities progress]
-   (persist! graph nil config entities nil progress))
+   (persist! graph nil config entities nil progress nil))
   ([graph config entities analyzers progress]
-   (persist! graph nil config entities analyzers progress))
+   (persist! graph nil config entities analyzers progress nil))
   ([graph project config entities analyzers progress]
+   (persist! graph project config entities analyzers progress nil))
+  ([graph project config entities analyzers progress operation-guard]
   ;; A full analysis is the format upgrade boundary. Semantic operational
   ;; records belong to a versioned document/index contract and must not make a
   ;; new graph appear complete merely because an older index was complete.
@@ -66,9 +68,11 @@
                          :before-transaction
                          (when project
                            (fn [{:keys [phase]}]
-                             (storage/assert-headroom!
-                              project config
-                              (keyword (str "graph-" (name phase))))))
+                             (if operation-guard
+                               (storage/assert-operation-safe! operation-guard)
+                               (storage/assert-headroom!
+                                project config
+                                (keyword (str "graph-" (name phase)))))))
                          :on-progress
                          (when progress
                            #(emit! progress :persist-progress %))})
@@ -221,10 +225,13 @@
   "Activate a prepared full candidate. Callers coordinate this short mutation
   boundary; semantic reconciliation intentionally happens afterward."
   [graph project config candidate progress]
-  (let [entities (:entities candidate)]
+  (let [entities (:entities candidate)
+        operation-guard (storage/operation-guard
+                         project config :graph-analysis #{:graph :recovery})]
     (emit! progress :persist-start
            {:entities (count entities) :batch-size persistence-batch-size})
-    (persist! graph project config entities (:analyzers candidate) progress)
+    (persist! graph project config entities (:analyzers candidate) progress
+              operation-guard)
     (emit! progress :analyzer-finalize-start {})
     (let [quality (query/graph-quality graph)
           graph-revision (semantic-document/graph-revision

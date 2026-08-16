@@ -374,6 +374,13 @@ evaluated before a write unit and include both minimum free space and maximum
 operation growth. Crossing a limit stops before the next unit, records the
 reason durably, releases renewable leases, and leaves state resumable.
 
+The operation-growth guard is implemented for graph replacement transactions
+and semantic provider batches. It checks filesystem headroom before each write,
+rate-limits recursive size sampling, and compares graph/recovery or semantic
+index growth with the configurable 32 GiB default. The limit is evaluated
+before the next unit, so existing identity convergence and lease expiry remain
+the recovery mechanisms.
+
 ## Failure model
 
 | Failure point | Required outcome |

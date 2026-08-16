@@ -30,6 +30,26 @@
       (is (= :test-write (:operation (ex-data error))))
       (is (= 1 (:exit-code (ex-data error)))))))
 
+(deftest operation-growth-guard-stops-before-the-next-write-unit
+  (let [project (temp-project)
+        settings (-> (config/defaults)
+                     (assoc-in [:store :minimum-free-space-bytes] 0)
+                     (assoc-in [:store :maximum-operation-growth-bytes] 4)
+                     (assoc-in [:store :storage-sample-interval-ms] 1))
+        guard (storage/operation-guard project settings :fixture #{:graph})
+        graph-file (.resolve (:db-dir project) "growth")]
+    (Files/createDirectories (:db-dir project)
+                             (make-array java.nio.file.attribute.FileAttribute 0))
+    (Files/writeString graph-file "12345" (make-array OpenOption 0))
+    (Thread/sleep 2)
+    (let [error (try
+                  (storage/assert-operation-safe! guard)
+                  nil
+                  (catch clojure.lang.ExceptionInfo error error))]
+      (is (= :store/operation-growth-limit (:type (ex-data error))))
+      (is (= 5 (:operation-growth-bytes (ex-data error))))
+      (is (= 4 (:maximum-operation-growth-bytes (ex-data error)))))))
+
 (deftest inventory-measures-only-allowlisted-generated-components
   (let [project (temp-project)
         settings (-> (config/defaults)

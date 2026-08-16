@@ -122,6 +122,59 @@
              (assoc (path-stat path) :component component))
            components)}))
 
+(declare assert-headroom! gibibytes)
+
+(defn- selected-bytes [project config components]
+  (let [selected (set components)]
+    (transduce (comp (filter #(contains? selected (:component %)))
+                     (map :bytes))
+               + 0
+               (:components (inventory project config)))))
+
+(defn operation-guard
+  "Capture a bounded operation's initial generated-artifact size. Component
+  measurement is filesystem-only and never retains a database value."
+  [project config operation components]
+  {:project project
+   :config config
+   :operation operation
+   :components (set components)
+   :baseline-bytes (selected-bytes project config components)
+   :sample (atom {:sampled-at 0 :bytes nil})})
+
+(defn assert-operation-safe!
+  "Check free-space reserve before every write and rate-limit recursive growth
+  measurement. Throws before the next write unit when the operation cap is
+  exceeded."
+  [{:keys [project config operation components baseline-bytes sample]}]
+  (let [space (assert-headroom! project config operation)
+        now (System/currentTimeMillis)
+        interval (get-in config [:store :storage-sample-interval-ms])
+        previous @sample]
+    (if (< (- now (:sampled-at previous)) interval)
+      (assoc space :sampled? false
+             :operation operation
+             :operation-growth-bytes
+             (some-> (:bytes previous) (- baseline-bytes)))
+      (let [bytes (selected-bytes project config components)
+            growth (max 0 (- bytes baseline-bytes))
+            maximum (get-in config [:store :maximum-operation-growth-bytes])
+            snapshot (assoc space :sampled? true
+                            :operation operation
+                            :components components
+                            :operation-bytes bytes
+                            :operation-growth-bytes growth
+                            :maximum-operation-growth-bytes maximum)]
+        (reset! sample {:sampled-at now :bytes bytes})
+        (when (> growth maximum)
+          (throw
+           (ex-info
+            (format "Storage growth limit reached before %s: %.1f GiB grown, %.1f GiB allowed"
+                    (name operation) (gibibytes growth) (gibibytes maximum))
+            (assoc snapshot :exit-code 1
+                   :type :store/operation-growth-limit))))
+        snapshot))))
+
 (defn- direct-children [^Path directory]
   (if-not (Files/isDirectory directory no-follow-links)
     []

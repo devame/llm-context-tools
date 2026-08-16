@@ -83,6 +83,12 @@
                                  [:store :minimum-free-space-bytes])))))
     (conj ":store/:minimum-free-space-bytes must be a non-negative integer")
 
+    (not (pos-int? (get-in config [:store :maximum-operation-growth-bytes])))
+    (conj ":store/:maximum-operation-growth-bytes must be a positive integer")
+
+    (not (pos-int? (get-in config [:store :storage-sample-interval-ms])))
+    (conj ":store/:storage-sample-interval-ms must be a positive integer")
+
     (not (or (nil? (get-in config [:store :free-space-probe-path]))
              (non-blank-string?
               (get-in config [:store :free-space-probe-path]))))

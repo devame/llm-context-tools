@@ -382,6 +382,12 @@ published last. `:analysis/:maximum-staging-generation-bytes` (2 GiB by
 default) bounds one generation; `:analysis/:resumable-staging` can disable the
 feature. Partial generations are never treated as an active graph.
 
+Before every graph transaction and semantic upload batch, the storage guard
+checks the configured free-space reserve. Recursive component-size sampling is
+rate-limited by `:store/:storage-sample-interval-ms`; growth beyond
+`:store/:maximum-operation-growth-bytes` (32 GiB by default) stops before the
+next write unit and leaves the durable graph/outbox state retryable.
+
 `service supervisor` renders a project-specific systemd unit, launchd plist,
 or Windows Task Scheduler registration script. The generated definition runs
 `service foreground`, applies restart backoff and conservative process limits,

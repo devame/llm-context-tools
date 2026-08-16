@@ -248,6 +248,13 @@ its completion index is published. Only a complete generation matching the
 whole source inventory, graph format, and analyzer contract can be resumed;
 partial data is never queryable.
 
+Generated writes also have two independent guards. Set
+`:store/:minimum-free-space-bytes` for the capacity reserve and
+`:store/:maximum-operation-growth-bytes` for the maximum growth of one graph
+analysis or semantic-worker run. Directory sizing is rate-limited by
+`:store/:storage-sample-interval-ms` (5 seconds by default); free-space itself
+is checked before every write unit.
+
 The destination must not exist or overlap the live database. llm-context opens
 the finished copy and compares graph metadata plus canonical and semantic
 operational identity counts. It reports the verified path but never activates

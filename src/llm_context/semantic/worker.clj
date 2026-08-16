@@ -517,8 +517,10 @@
 (defn process-once!
   "Lease and synchronously process one bounded job batch."
   [worker]
-  (storage/assert-headroom! (:project worker) (:config worker)
-                            :semantic-index-batch)
+  (if-let [guard (:storage-guard worker)]
+    (storage/assert-operation-safe! guard)
+    (storage/assert-headroom! (:project worker) (:config worker)
+                              :semantic-index-batch))
   (let [time (now worker)
         settings (:settings worker)
         dirty? (seq (with-graph-lock
@@ -655,6 +657,10 @@
     :now-fn now-fn
     :sleep-fn (or sleep-fn #(Thread/sleep %))
     :progress-fn progress-fn
+    :storage-guard
+    (when (and project config)
+      (storage/operation-guard project config :semantic-indexing
+                               #{:semantic-index}))
     :progress (atom {:started-at (now-fn)
                      :leased 0 :completed 0 :retried 0 :failed 0
                      :submitted-documents 0 :accepted-documents 0

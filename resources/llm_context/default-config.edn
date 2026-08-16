@@ -9,8 +9,10 @@
 
  :store
  {:path ".llm-context/db"
-  :max-transaction-weight 4000
+ :max-transaction-weight 4000
   :minimum-free-space-bytes 10737418240
+  :maximum-operation-growth-bytes 34359738368
+  :storage-sample-interval-ms 5000
   :free-space-probe-path nil}
 
  :service
