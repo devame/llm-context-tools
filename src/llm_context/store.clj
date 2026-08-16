@@ -974,6 +974,84 @@
   [{:keys [^Path root]} config]
   (.normalize (.resolve root (get-in config [:store :path]))))
 
+(def ^:private verification-identity-attributes
+  (into canonical-identity-attributes
+        [:llm-context/meta-key :semantic.dirty/id :semantic.job/id
+         :semantic.indexed/id :semantic.watermark/id]))
+
+(defn- identity-counts [db]
+  (into (sorted-map)
+        (map (fn [attribute]
+               [attribute (count (d/datoms db :ave attribute))]))
+        verification-identity-attributes))
+
+(defn compact-copy!
+  "Create a provider-native compact Datalevin copy and verify its graph
+  metadata and canonical/operational identity counts. The destination must not
+  exist and is never activated or deleted by this operation."
+  [{:keys [connection path]} destination]
+  (let [source (.normalize (.toAbsolutePath ^Path path))
+        destination (.normalize (.toAbsolutePath ^Path destination))]
+    (when (or (= source destination)
+              (.startsWith destination source)
+              (.startsWith source destination))
+      (throw (ex-info "Compact-copy destination must be separate from the live database"
+                      {:exit-code 2 :type :store/unsafe-copy-destination
+                       :source-path (str source)
+                       :copy-path (str destination)})))
+    (when (Files/exists destination (make-array LinkOption 0))
+      (throw (ex-info "Compact-copy destination already exists"
+                      {:exit-code 2 :type :store/copy-destination-exists
+                       :copy-path (str destination)})))
+    (when-let [parent (.getParent destination)]
+      (Files/createDirectories
+       parent (make-array java.nio.file.attribute.FileAttribute 0)))
+    (let [source-db (d/db connection)
+          source-metadata
+          (some-> (d/q '[:find (pull ?meta [*]) .
+                         :where [?meta :llm-context/meta-key "analysis-format"]]
+                       source-db)
+                  (dissoc :db/id))
+          source-counts (identity-counts source-db)]
+      (try
+        (d/copy source-db (str destination) true)
+        (catch Throwable error
+          (throw (ex-info "Datalevin compact copy failed; partial destination was retained"
+                          {:exit-code 1 :type :store/compact-copy-failed
+                           :source-path (str source)
+                           :copy-path (str destination)}
+                          error))))
+      (let [copied-connection (d/get-conn (str destination)
+                                          schema/datalevin-schema)]
+        (try
+          (let [copied-db (d/db copied-connection)
+                copied-metadata
+                (some-> (d/q '[:find (pull ?meta [*]) .
+                               :where
+                               [?meta :llm-context/meta-key "analysis-format"]]
+                             copied-db)
+                        (dissoc :db/id))
+                copied-counts (identity-counts copied-db)
+                verified? (and (= source-metadata copied-metadata)
+                               (= source-counts copied-counts))
+                result {:source-path (str source)
+                        :copy-path (str destination)
+                        :compact? true
+                        :verified? verified?
+                        :graph-metadata copied-metadata
+                        :identity-counts copied-counts}]
+            (when-not verified?
+              (throw
+               (ex-info "Datalevin compact copy did not match the source graph"
+                        (assoc result
+                               :exit-code 1
+                               :type :store/compact-copy-mismatch
+                               :source-graph-metadata source-metadata
+                               :source-identity-counts source-counts))))
+            result)
+          (finally
+            (d/close copied-connection)))))))
+
 (defn- move-directory! [^Path source ^Path target]
   (try
     (Files/move source target

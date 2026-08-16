@@ -207,6 +207,17 @@ available with partial completeness; it is not globally unavailable. Failed
 jobs remain terminal until `retry --failed`. `sync --wait` exits non-zero until
 pending, leased, failed, and dirty counts all converge.
 
+Create a provider-native compact graph copy without changing the live graph:
+
+```bash
+llm-context maintenance compact-copy [--output PATH]
+```
+
+The destination must not exist or overlap the live database. llm-context opens
+the finished copy and compares graph metadata plus canonical and semantic
+operational identity counts. It reports the verified path but never activates
+or deletes it automatically.
+
 Graph format 4 makes `:symbol/indexable?` authoritative for semantic document
 selection and indexes namespace/module containers as deterministic coarse
 summaries. Safe literal collections become source-backed aggregates with

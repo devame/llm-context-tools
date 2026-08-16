@@ -387,6 +387,13 @@
                         #(semantic-reconcile/mark-full! graph))
       (read-consistently graph generation false
                          #(current-semantic-status! % runtime-state)))
+    :maintenance-compact-copy
+    (with-graph-write
+      graph generation
+      #(store/compact-copy! graph
+                            (java.nio.file.Paths/get
+                             (:destination request)
+                             (make-array String 0))))
     :stop :stopping
     (throw (ex-info (str "Unknown service operation: " (:op request))
                     {:exit-code 2})))))

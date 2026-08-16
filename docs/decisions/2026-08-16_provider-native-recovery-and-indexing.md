@@ -237,6 +237,16 @@ Evaluate `transact-async` with real graph distributions. Adopt it only if it
 improves wall-clock throughput without increasing peak disk, RSS, recovery
 time, or transaction ambiguity. A faster microbenchmark alone is insufficient.
 
+The copy-and-verify portion is implemented as
+`llm-context maintenance compact-copy [--output PATH]`. It executes through the
+resident graph owner when present, uses Datalevin's qualified compact-copy
+primitive, opens the result with the pinned schema, and compares graph metadata
+plus canonical and semantic operational identity counts. The destination must
+be empty and separate from the live database. Activation and deletion remain
+outside this command, so a maintenance failure cannot replace the live graph or
+erase diagnostic evidence. Async transaction adoption remains a separate
+measured gate.
+
 ### Phase 3: simplify semantic ingestion around provider behavior
 
 Keep the Datalevin outbox, deterministic document IDs, leases, generation

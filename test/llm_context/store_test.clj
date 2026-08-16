@@ -760,6 +760,51 @@
              (:llm-context/replacement-strategy
               (store/graph-metadata graph)))))))
 
+(deftest compact-copy-is-provider-native-and-verified-without-activation
+  (let [project (temp-project)
+        settings (config/defaults)
+        file (file-entity "src/copy.clj" "copy")
+        symbol (symbol-entity file "sample/copied" 1)
+        destination (.resolve (:root project) "maintenance/compact-copy")]
+    (store/with-store [graph project settings]
+      (store/replace-all! graph [file symbol])
+      (store/write-graph-metadata!
+       graph {:analyzer-name "fixture"
+              :analyzer-version "1"
+              :janet-catalog-version "1"
+              :semantic-document-version 4
+              :semantic-index-name "fixture-v1"})
+      (d/transact! (:connection graph)
+                   [{:semantic.dirty/id "dirty:copy"
+                     :semantic.dirty/provider :lateon-code
+                     :semantic.dirty/file-id (:file/id file)
+                     :semantic.dirty/operation :upsert
+                     :semantic.dirty/created-at 1}])
+      (let [result (store/compact-copy! graph destination)]
+        (is (true? (:verified? result)))
+        (is (= (str destination) (:copy-path result)))
+        (is (= 1 (get-in result [:identity-counts :file/id])))
+        (is (= 1 (get-in result [:identity-counts :symbol/id])))
+        (is (= 1 (get-in result [:identity-counts :semantic.dirty/id])))
+        (is (= "fixture"
+               (get-in result [:graph-metadata
+                               :llm-context/analyzer-name]))))
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo #"already exists"
+           (store/compact-copy! graph destination))))))
+
+(deftest compact-copy-rejects-live-database-relatives
+  (let [project (temp-project)
+        settings (config/defaults)]
+    (store/with-store [graph project settings]
+      (let [source (store/database-path project settings)]
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo #"separate from the live database"
+             (store/compact-copy! graph source)))
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo #"separate from the live database"
+             (store/compact-copy! graph (.resolve source "nested"))))))))
+
 (deftest target-file-replacement-preserves-inbound-evidence
   (let [project (temp-project)
         source-file (file-entity "src/source.clj" "source")

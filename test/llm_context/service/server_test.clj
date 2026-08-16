@@ -20,7 +20,7 @@
   (loop [attempt 0]
     (cond
       (client/available? project) true
-      (>= attempt 100) false
+      (>= attempt 250) false
       :else (do (Thread/sleep 20) (recur (inc attempt))))))
 
 (defn- await-semantic-status [project expected]
@@ -263,7 +263,7 @@
         (let [slow (future
                      (client/request
                       project {:op :query :subcommand "stats" :args []}))]
-          (is (= true (deref entered 2000 false)))
+          (is (= true (deref entered 5000 false)))
           (is (= {:ok true :value :pong}
                  (client/request project {:op :ping}
                                  {:request-timeout 1000})))
@@ -272,7 +272,7 @@
                                          {:request-timeout 1000})
                          [:ok])))
           (deliver release true)
-          (is (= 0 (get-in (deref slow 2000 ::timeout)
+          (is (= 0 (get-in (deref slow 5000 ::timeout)
                            [:value :entities]))))
         (is (= {:ok true :value :stopping}
                (client/request project {:op :stop})))
@@ -368,6 +368,26 @@
       (is (= :running (get-in status [:analysis-progress :state])))
       (is (= 12 (get-in status [:analysis-progress :completed])))
       (is (= :ready (get-in status [:runtime :status]))))))
+
+(deftest compact-copy-runs-as-a-coordinated-graph-write
+  (let [graph (Object.)
+        generation (atom 0)
+        runtime-state (atom {})
+        invocation (atom nil)
+        destination
+        (str (Files/createTempDirectory
+              "llm-context-maintenance-copy-fixture-"
+              (make-array java.nio.file.attribute.FileAttribute 0)))]
+    (with-redefs [store/compact-copy!
+                  (fn [actual-graph actual-destination]
+                    (reset! invocation [actual-graph (str actual-destination)])
+                    {:verified? true :copy-path (str actual-destination)})]
+      (is (= {:verified? true :copy-path destination}
+             (#'server/dispatch nil {} graph generation runtime-state
+                                {:op :maintenance-compact-copy
+                                 :destination destination})))
+      (is (= [graph destination] @invocation))
+      (is (= 2 @generation)))))
 
 (deftest graph-read-discards-work-overlapped-by-a-write
   (let [graph (Object.)

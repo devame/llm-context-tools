@@ -52,6 +52,7 @@
        "    --check            Validate a source snapshot without writing data\n"
        "  query                Query the semantic graph\n"
        "  semantic             Inspect or synchronize LateOn indexing\n"
+       "  maintenance          Create verified provider-native maintenance copies\n"
        "  models               Install or inspect verified model packages\n"
        "  context              Build a symbol or natural-language context packet\n"
        "  export               Export graph data\n"
@@ -850,6 +851,47 @@
              (str ((resolve-fn 'llm-context.integrations/install!)
                    cli-context target force?)))
     0))
+
+(defn- compact-copy-destination [cli-context args]
+  (loop [remaining (seq args) output nil]
+    (if-let [argument (first remaining)]
+      (case argument
+        "--output"
+        (if-let [value (second remaining)]
+          (recur (nnext remaining) value)
+          (throw (ex-info "maintenance compact-copy --output requires a path"
+                          {:exit-code 2})))
+        (throw (ex-info (str "Unknown maintenance compact-copy option: " argument)
+                        {:exit-code 2})))
+      (let [relative (or output
+                         (str ".llm-context/maintenance/graph-copy-"
+                              (System/currentTimeMillis)))]
+        (.normalize
+         (let [path (java.nio.file.Paths/get relative (make-array String 0))]
+           (if (.isAbsolute path)
+             path
+             (.resolve ^java.nio.file.Path (:root cli-context) path))))))))
+
+(defmethod execute "maintenance" [cli-context _ args]
+  (case (or (first args) "compact-copy")
+    "compact-copy"
+    (let [destination (compact-copy-destination cli-context (next args))
+          settings (config/load-config cli-context)
+          remote (remote-value
+                  cli-context
+                  {:op :maintenance-compact-copy
+                   :destination (str destination)}
+                  {:request-timeout 86400000})
+          result
+          (if-not (= unavailable remote)
+            remote
+            (with-compatible-graph
+              cli-context settings
+              #((resolve-fn 'llm-context.store/compact-copy!) % destination)))]
+      (pprint/pprint result)
+      0)
+    (throw (ex-info (str "Unknown maintenance command: " (first args))
+                    {:exit-code 2}))))
 
 (defmethod execute "service" [cli-context _ args]
   (case (or (first args) "status")

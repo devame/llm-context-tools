@@ -225,6 +225,29 @@
           {:desired 100 :indexed 10}
           2000))))
 
+(deftest compact-copy-delegates-to-the-resident-service-owner
+  (let [root (Files/createTempDirectory
+              "llm-context-maintenance-copy-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        context (assoc (project/context (str root)) :options {:quiet? true})
+        request (atom nil)
+        output (with-out-str
+                 (with-redefs
+                  [service-client/request
+                   (fn [_ payload options]
+                     (reset! request [payload options])
+                     {:ok true
+                      :value {:verified? true
+                              :copy-path (str (.resolve root "copy"))}})]
+                   (is (zero? (cli/execute
+                               context "maintenance"
+                               ["compact-copy" "--output" "copy"])))))]
+    (is (= {:op :maintenance-compact-copy
+            :destination (str (.resolve root "copy"))}
+           (first @request)))
+    (is (= 86400000 (:request-timeout (second @request))))
+    (is (str/includes? output ":verified? true"))))
+
 (deftest initialization-confirms-the-project-root
   (let [root (Files/createTempDirectory
               "llm-context-init-"
