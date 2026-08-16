@@ -284,6 +284,12 @@ logs, and semantic generations expose age and size. Automatic deletion occurs
 only under an explicit retention policy and never removes the only verified
 generation or the newest interrupted archive.
 
+The read-only inventory slice is implemented as `llm-context maintenance
+status`. It measures only explicit project-owned graph, provider-index,
+staging, recovery, maintenance, and log locations, does not follow symbolic
+links, and performs no cleanup. Retention and deletion remain a separate
+explicit-policy slice.
+
 ### Phase 5: resumable analysis before persistence
 
 Persist analyzer outputs per file under an immutable staging generation keyed

@@ -248,6 +248,20 @@
     (is (= 86400000 (:request-timeout (second @request))))
     (is (str/includes? output ":verified? true"))))
 
+(deftest maintenance-status-is-read-only-and-local
+  (let [root (Files/createTempDirectory
+              "llm-context-maintenance-status-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        context (assoc (project/context (str root)) :options {:quiet? true})
+        requested? (atom false)
+        output (with-out-str
+                 (with-redefs [service-client/request
+                               (fn [& _] (reset! requested? true))]
+                   (is (zero? (cli/execute context "maintenance" ["status"])))))]
+    (is (false? @requested?))
+    (is (str/includes? output ":components"))
+    (is (str/includes? output ":semantic-index"))))
+
 (deftest initialization-confirms-the-project-root
   (let [root (Files/createTempDirectory
               "llm-context-init-"

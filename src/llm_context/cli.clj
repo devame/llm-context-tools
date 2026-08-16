@@ -52,7 +52,7 @@
        "    --check            Validate a source snapshot without writing data\n"
        "  query                Query the semantic graph\n"
        "  semantic             Inspect or synchronize LateOn indexing\n"
-       "  maintenance          Create verified provider-native maintenance copies\n"
+       "  maintenance          Inspect storage or create verified maintenance copies\n"
        "  models               Install or inspect verified model packages\n"
        "  context              Build a symbol or natural-language context packet\n"
        "  export               Export graph data\n"
@@ -873,7 +873,16 @@
              (.resolve ^java.nio.file.Path (:root cli-context) path))))))))
 
 (defmethod execute "maintenance" [cli-context _ args]
-  (case (or (first args) "compact-copy")
+  (case (or (first args) "status")
+    "status"
+    (do
+      (when-let [unknown (second args)]
+        (throw (ex-info (str "Unknown maintenance status option: " unknown)
+                        {:exit-code 2})))
+      (pprint/pprint
+       ((resolve-fn 'llm-context.storage/inventory)
+        cli-context (config/load-config cli-context)))
+      0)
     "compact-copy"
     (let [destination (compact-copy-destination cli-context (next args))
           settings (config/load-config cli-context)

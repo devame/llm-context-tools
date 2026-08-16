@@ -1,7 +1,8 @@
 (ns llm-context.storage
   "Host-aware free-space protection for generated indexes."
   (:require [clojure.string :as str])
-  (:import [java.nio.file Files LinkOption Path Paths]))
+  (:import [java.nio.file Files LinkOption Path Paths]
+           [java.util.stream Stream]))
 
 (def ^:private gib (* 1024 1024 1024))
 
@@ -57,6 +58,65 @@
      :usable-bytes usable
      :minimum-free-space-bytes minimum
      :safe? (>= usable minimum)}))
+
+(def ^:private no-follow-links
+  (into-array LinkOption [LinkOption/NOFOLLOW_LINKS]))
+
+(defn- configured-path ^Path [project value]
+  (let [candidate (Paths/get value (make-array String 0))]
+    (.normalize
+     (if (.isAbsolute candidate)
+       candidate
+       (.resolve ^Path (:root project) candidate)))))
+
+(defn- path-stat
+  "Measure one allowlisted artifact without following symbolic links. Files
+  that disappear during the scan are ignored so inventory remains read-only
+  and useful while a provider is updating its index."
+  [^Path path]
+  (let [path (.normalize (.toAbsolutePath path))]
+    (if-not (Files/exists path no-follow-links)
+      {:path (str path) :exists? false :files 0 :bytes 0 :modified-at nil}
+      (with-open [^Stream entries (Files/walk path (make-array java.nio.file.FileVisitOption 0))]
+        (let [summary
+              (reduce
+               (fn [{:keys [files bytes modified-at] :as result} ^Path entry]
+                 (try
+                   (let [modified (.toMillis
+                                   (Files/getLastModifiedTime entry no-follow-links))]
+                     (cond-> (assoc result :modified-at (max (or modified-at 0)
+                                                             modified))
+                       (Files/isRegularFile entry no-follow-links)
+                       (assoc :files (inc files)
+                              :bytes (+ bytes (Files/size entry)))))
+                   (catch java.nio.file.NoSuchFileException _ result)))
+               {:files 0 :bytes 0 :modified-at nil}
+               (iterator-seq (.iterator entries)))]
+          (assoc summary :path (str path) :exists? true))))))
+
+(defn inventory
+  "Return a read-only inventory of project-owned generated artifacts. The
+  component list is explicit: arbitrary project paths are never traversed."
+  [project config]
+  (let [database (configured-path project (get-in config [:store :path]))
+        state-dir ^Path (:state-dir project)
+        components
+        [[:graph database]
+         [:recovery (.resolve (.getParent database) "recovery")]
+         [:semantic-index
+          (configured-path project
+                           (get-in config [:semantic :lateon-code :index-path]))]
+         [:query-router-index
+          (configured-path project
+                           (get-in config [:context :query-router :index-path]))]
+         [:analysis-staging (.resolve state-dir "analysis-staging")]
+         [:maintenance (.resolve state-dir "maintenance")]
+         [:logs (.resolve state-dir "logs")]]]
+    {:storage (status project config)
+     :components
+     (mapv (fn [[component path]]
+             (assoc (path-stat path) :component component))
+           components)}))
 
 (defn gibibytes [bytes]
   (/ (double bytes) gib))

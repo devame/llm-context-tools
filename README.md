@@ -146,6 +146,7 @@ llm-context semantic sync [--wait]
 llm-context semantic failures
 llm-context semantic dirty
 llm-context semantic retry --failed [--wait]
+llm-context maintenance status
 llm-context maintenance compact-copy [--output PATH]
 llm-context service start|status|stop
 ```
@@ -355,6 +356,11 @@ operation as interrupted when the service restarts.
 `llm-context semantic sync --wait` when automation needs all queued embeddings
 visible before continuing. Logs are under `.llm-context/logs/`; they contain
 identifiers and bounded errors, not source documents.
+
+`llm-context maintenance status` reports size, file count, and latest
+modification time for an explicit allowlist of project-owned graph, recovery,
+semantic, router, staging, maintenance, and log paths. It never scans source
+files, follows symlinks, or deletes artifacts.
 
 `llm-context maintenance compact-copy` asks Datalevin to create a compact copy
 under `.llm-context/maintenance/`, then opens the copy and verifies graph

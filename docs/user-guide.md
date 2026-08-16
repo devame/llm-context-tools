@@ -211,8 +211,13 @@ pending, leased, failed, and dirty counts all converge.
 Create a provider-native compact graph copy without changing the live graph:
 
 ```bash
+llm-context maintenance status
 llm-context maintenance compact-copy [--output PATH]
 ```
+
+`maintenance status` is read-only. It inventories only known project-owned
+graph, provider-index, staging, recovery, maintenance, and log locations and
+reports their size, file count, and latest modification time.
 
 The destination must not exist or overlap the live database. llm-context opens
 the finished copy and compares graph metadata plus canonical and semantic
