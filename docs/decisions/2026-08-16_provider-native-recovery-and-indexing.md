@@ -331,6 +331,13 @@ path outside the generation, and enforces a configurable per-generation byte
 limit. Integration remains a separate slice so the storage contract can be
 qualified independently.
 
+The preparation integration keys reuse to the complete source inventory and
+application/analyzer/canonicalization contract. A complete match skips analyzer
+execution and refreshes only non-semantic file metadata before the ordinary
+whole-project validation and persistence path. A partial generation or any
+contract/content mismatch runs the authoritative analyzers again; no mixture of
+old and new shards can reach Datalevin.
+
 ### Phase 6: optional shadow bulk build
 
 Only after qualification, a brand-new graph may be built with Datalevin's bulk

@@ -110,7 +110,9 @@
          [:query-router-index
           (configured-path project
                            (get-in config [:context :query-router :index-path]))]
-         [:analysis-staging (.resolve state-dir "analysis-staging")]
+         [:analysis-staging
+          (configured-path project (get-in config
+                                           [:analysis :staging-directory]))]
          [:maintenance (.resolve state-dir "maintenance")]
          [:logs (.resolve state-dir "logs")]]]
     {:storage (status project config)

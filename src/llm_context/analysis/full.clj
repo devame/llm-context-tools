@@ -4,6 +4,7 @@
             [llm-context.analysis.janet :as janet]
             [llm-context.analysis.manifest :as manifest]
             [llm-context.analysis.project-analyzer :as project-analyzer]
+            [llm-context.analysis.staging :as staging]
             [llm-context.model.canonical-hash :as canonical-hash]
             [llm-context.model.ids :as ids]
             [llm-context.model.schema :as schema]
@@ -11,7 +12,8 @@
             [llm-context.semantic.reconcile :as semantic-reconcile]
             [llm-context.semantic.document :as semantic-document]
             [llm-context.storage :as storage]
-            [llm-context.store :as store]))
+            [llm-context.store :as store]
+            [llm-context.version :as version]))
 
 (def persistence-batch-size 1000)
 (def analyzer-name "clj-kondo+janet-semantic")
@@ -99,6 +101,27 @@
           [relative-path (ids/content-hash content)])
         files))
 
+(defn- preparation-contract [project]
+  {:staging-format staging/format-version
+   :application-version version/value
+   :graph-format schema/graph-format-version
+   :analyzer-name analyzer-name
+   :clj-kondo-version clj-kondo/analyzer-version
+   :clj-kondo-configuration-fingerprint
+   (clj-kondo/config-fingerprint project)
+   :janet-catalog-version janet/catalog-version
+   :semantic-fingerprint-version canonical-hash/contract-version})
+
+(defn- refresh-file-metadata [files outputs]
+  (let [files-by-path (into {} (map (juxt :relative-path identity)) files)]
+    (mapv
+     (fn [output]
+       (let [source (get files-by-path (get-in output [:file :file/path]))]
+         (-> output
+             (assoc-in [:file :file/modified-at] (:modified-at source))
+             (assoc-in [:file :file/size] (:size source)))))
+     outputs)))
+
 (defn prepare
   "Prepare and validate a complete candidate without opening or mutating the
   graph. The returned inventory is revalidated immediately before activation."
@@ -115,7 +138,17 @@
            _ (emit! progress :parse-progress
                     {:completed 0 :total total
                      :file (some-> files first :relative-path)})
-           project-snapshot (project-analyzer/analyze project files progress)
+           inventory (source-inventory files)
+           contract (preparation-contract project)
+           staged (staging/load-generation project config contract inventory)
+           _ (when staged
+               (emit! progress :staging-resume
+                      {:generation (get-in staged [:staging :generation])
+                       :files (count (:outputs staged))}))
+           project-snapshot
+           (if staged
+             (update staged :outputs #(refresh-file-metadata files %))
+             (project-analyzer/analyze project files progress))
            outputs (:outputs project-snapshot)
            preserved (filterv :preserve? outputs)
            _ (emit! progress :parse-complete
@@ -132,15 +165,27 @@
             (vec (concat diagnostics
                          (:diagnostics project-snapshot)
                          (mapcat :diagnostics preserved)))})))
+       (when-not staged
+         (let [result
+               (staging/write-generation!
+                project config contract inventory project-snapshot
+                (fn [_]
+                  (storage/assert-headroom! project config
+                                            :analysis-staging-write)))]
+           (when result
+             (emit! progress :staging-complete result))))
        {:started started
         :files files
         :file-count total
-        :source-inventory (source-inventory files)
+        :source-inventory inventory
         :outputs outputs
         :entities (vec (mapcat (fn [{:keys [file entities]}]
                                 (cons file entities))
                               outputs))
-        :analysis-metrics (:analysis-metrics project-snapshot)
+        :analysis-metrics
+        (cond-> (:analysis-metrics project-snapshot)
+          staged (assoc :staging-resumed true))
+        :staging (:staging staged)
         :analyzers (:analyzers project-snapshot)
         :diagnostics
         (vec (concat diagnostics

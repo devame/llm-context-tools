@@ -13,19 +13,26 @@
 (def format-version 1)
 (def ^:private index-name "index.edn")
 
-(defn- configured-path ^Path [project config]
+(defn root-path ^Path [project config]
   (let [value (get-in config [:analysis :staging-directory])
-        candidate (Paths/get value (make-array String 0))]
-    (.normalize
-     (if (.isAbsolute candidate)
-       candidate
-       (.resolve ^Path (:root project) candidate)))))
+        candidate (Paths/get value (make-array String 0))
+        path (.normalize
+              (if (.isAbsolute candidate)
+                candidate
+                (.resolve ^Path (:root project) candidate)))
+        state-dir (.normalize (.toAbsolutePath ^Path (:state-dir project)))]
+    (when-not (and (.startsWith path state-dir) (not= path state-dir))
+      (throw
+       (ex-info "Analyzer staging directory must be inside the project state directory"
+                {:exit-code 2 :type :analysis/unsafe-staging-directory
+                 :path (str path) :state-directory (str state-dir)})))
+    path))
 
 (defn generation-id [contract inventory]
   (subs (ids/sha256 (pr-str [format-version contract inventory])) 7 39))
 
 (defn generation-path ^Path [project config contract inventory]
-  (.resolve (configured-path project config)
+  (.resolve (root-path project config)
             (generation-id contract inventory)))
 
 (defn- compressed-bytes [value]

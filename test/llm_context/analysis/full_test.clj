@@ -4,6 +4,7 @@
             [llm-context.analysis.full :as full]
             [llm-context.analysis.project-analyzer :as project-analyzer]
             [llm-context.config :as config]
+            [llm-context.model.ids :as ids]
             [llm-context.project :as project]
             [llm-context.store :as store])
   (:import [java.nio.file Files]))
@@ -139,7 +140,8 @@
               :analyzer-phase-start :analyzer-phase-complete
               :analyzer-phase-start :analyzer-phase-complete
               :analyzer-phase-start :analyzer-phase-complete
-              :parse-complete :persist-start :persist-progress
+              :parse-complete :staging-complete
+              :persist-start :persist-progress
               :analyzer-finalize-start :analyzer-finalize-complete
               :semantic-reconcile-start :semantic-reconcile-complete
               :complete]
@@ -175,6 +177,36 @@
       (is (empty? (store/query graph
                                '[:find [?file ...] :where [?file :file/id _]]
                                []))))))
+
+(deftest complete-staging-generation-skips-repeated-analyzer-execution
+  (let [root (Files/createTempDirectory
+              "llm-context-full-staging-resume-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        project (project/context (str root))
+        settings (assoc-in (config/defaults) [:store :minimum-free-space-bytes] 0)
+        source {:relative-path "src/app.clj" :content "(ns app)"
+                :size 8 :modified-at 1 :language :language/clojure}
+        output {:file {:entity/type :entity.type/file
+                       :file/id "file:app" :file/path "src/app.clj"
+                       :file/content-hash (ids/content-hash (:content source))
+                       :file/size 8 :file/modified-at 1
+                       :file/language :language/clojure}
+                :entities [] :diagnostics []}
+        calls (atom 0)]
+    (with-redefs [analysis-files/discover
+                  (fn [& _] {:files [source] :diagnostics []})
+                  project-analyzer/analyze
+                  (fn [& _]
+                    (swap! calls inc)
+                    {:outputs [output]
+                     :analyzers {:fixture "1"}
+                     :analysis-metrics {:fixture true}
+                     :diagnostics []})]
+      (is (nil? (:staging (full/prepare project settings))))
+      (let [resumed (full/prepare project settings)]
+        (is (true? (get-in resumed [:analysis-metrics :staging-resumed])))
+        (is (true? (get-in resumed [:staging :resumed?]))))
+      (is (= 1 @calls)))))
 
 (deftest complete-analysis-persists-janet-graph
   (let [root (Files/createTempDirectory "llm-context-full-janet-"

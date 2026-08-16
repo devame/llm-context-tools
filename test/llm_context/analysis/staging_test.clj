@@ -54,3 +54,10 @@
          (staging/write-generation! project settings contract inventory
                                     snapshot nil)))
     (is (nil? (staging/load-generation project settings contract inventory)))))
+
+(deftest staging-refuses-paths-outside-project-state
+  (let [[project settings] (fixture)
+        settings (assoc-in settings [:analysis :staging-directory] "staging")]
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo #"inside the project state directory"
+         (staging/generation-path project settings {} [])))))
