@@ -391,6 +391,12 @@ index growth with the configurable 32 GiB default. The limit is evaluated
 before the next unit, so existing identity convergence and lease expiry remain
 the recovery mechanisms.
 
+Sampled component sizes, per-component growth, aggregate operation growth,
+free space, and the configured cap are attached to the durable analysis
+progress record and to live semantic-worker progress. Checks between sampling
+intervals still enforce the cheap filesystem reserve without recursively
+walking generated directories.
+
 ## Failure model
 
 | Failure point | Required outcome |

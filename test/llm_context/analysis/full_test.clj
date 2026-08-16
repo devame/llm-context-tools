@@ -141,7 +141,7 @@
               :analyzer-phase-start :analyzer-phase-complete
               :analyzer-phase-start :analyzer-phase-complete
               :parse-complete :staging-complete
-              :persist-start :persist-progress
+              :persist-start :storage-sample :persist-progress
               :analyzer-finalize-start :analyzer-finalize-complete
               :semantic-reconcile-start :semantic-reconcile-complete
               :complete]

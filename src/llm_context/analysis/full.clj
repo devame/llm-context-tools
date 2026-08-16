@@ -68,11 +68,15 @@
                          :before-transaction
                          (when project
                            (fn [{:keys [phase]}]
-                             (if operation-guard
-                               (storage/assert-operation-safe! operation-guard)
-                               (storage/assert-headroom!
-                                project config
-                                (keyword (str "graph-" (name phase)))))))
+                             (let [snapshot
+                                   (if operation-guard
+                                     (storage/assert-operation-safe!
+                                      operation-guard)
+                                     (storage/assert-headroom!
+                                      project config
+                                      (keyword (str "graph-" (name phase)))))]
+                               (when (and progress (:sampled? snapshot))
+                                 (emit! progress :storage-sample snapshot)))))
                          :on-progress
                          (when progress
                            #(emit! progress :persist-progress %))})

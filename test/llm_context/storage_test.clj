@@ -48,6 +48,7 @@
                   (catch clojure.lang.ExceptionInfo error error))]
       (is (= :store/operation-growth-limit (:type (ex-data error))))
       (is (= 5 (:operation-growth-bytes (ex-data error))))
+      (is (= {:graph 5} (:component-growth-bytes (ex-data error))))
       (is (= 4 (:maximum-operation-growth-bytes (ex-data error)))))))
 
 (deftest inventory-measures-only-allowlisted-generated-components

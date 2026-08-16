@@ -517,11 +517,12 @@
 (defn process-once!
   "Lease and synchronously process one bounded job batch."
   [worker]
-  (if-let [guard (:storage-guard worker)]
-    (storage/assert-operation-safe! guard)
-    (storage/assert-headroom! (:project worker) (:config worker)
-                              :semantic-index-batch))
-  (let [time (now worker)
+  (let [storage-snapshot
+        (if-let [guard (:storage-guard worker)]
+          (storage/assert-operation-safe! guard)
+          (storage/assert-headroom! (:project worker) (:config worker)
+                                    :semantic-index-batch))
+        time (now worker)
         settings (:settings worker)
         dirty? (seq (with-graph-lock
                       worker
@@ -596,7 +597,9 @@
                  :graph-revision
                  (document/graph-revision
                   (store/database (:graph worker)))})))
-          summary)))))
+          (cond-> summary
+            (:sampled? storage-snapshot)
+            (assoc :storage storage-snapshot)))))))
 
 (defn- report-progress! [worker result]
   (when (pos? (:leased result))
@@ -619,11 +622,13 @@
                        (update :upload-ms + (:upload-ms result 0))
                        (update :visibility-ms + (:visibility-ms result 0)))))
           elapsed-ms (max 1 (- (now worker) (:started-at snapshot)))
-          event (assoc snapshot
-                       :phase :semantic-indexing
-                       :elapsed-ms elapsed-ms
-                       :documents-per-minute
-                       (* 60000.0 (/ (:completed snapshot) elapsed-ms)))]
+          event (cond->
+                 (assoc snapshot
+                        :phase :semantic-indexing
+                        :elapsed-ms elapsed-ms
+                        :documents-per-minute
+                        (* 60000.0 (/ (:completed snapshot) elapsed-ms)))
+                  (:storage result) (assoc :storage (:storage result)))]
       (when-let [progress-fn (:progress-fn worker)]
         (progress-fn event)))))
 

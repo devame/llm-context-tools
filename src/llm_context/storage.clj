@@ -124,29 +124,32 @@
 
 (declare assert-headroom! gibibytes)
 
-(defn- selected-bytes [project config components]
+(defn- selected-sizes [project config components]
   (let [selected (set components)]
-    (transduce (comp (filter #(contains? selected (:component %)))
-                     (map :bytes))
-               + 0
-               (:components (inventory project config)))))
+    (into (sorted-map)
+          (comp (filter #(contains? selected (:component %)))
+                (map (juxt :component :bytes)))
+          (:components (inventory project config)))))
 
 (defn operation-guard
   "Capture a bounded operation's initial generated-artifact size. Component
   measurement is filesystem-only and never retains a database value."
   [project config operation components]
-  {:project project
-   :config config
-   :operation operation
-   :components (set components)
-   :baseline-bytes (selected-bytes project config components)
-   :sample (atom {:sampled-at 0 :bytes nil})})
+  (let [sizes (selected-sizes project config components)]
+    {:project project
+     :config config
+     :operation operation
+     :components (set components)
+     :baseline-component-bytes sizes
+     :baseline-bytes (reduce + 0 (vals sizes))
+     :sample (atom {:sampled-at 0 :bytes nil})}))
 
 (defn assert-operation-safe!
   "Check free-space reserve before every write and rate-limit recursive growth
   measurement. Throws before the next write unit when the operation cap is
   exceeded."
-  [{:keys [project config operation components baseline-bytes sample]}]
+  [{:keys [project config operation components baseline-component-bytes
+           baseline-bytes sample]}]
   (let [space (assert-headroom! project config operation)
         now (System/currentTimeMillis)
         interval (get-in config [:store :storage-sample-interval-ms])
@@ -156,12 +159,22 @@
              :operation operation
              :operation-growth-bytes
              (some-> (:bytes previous) (- baseline-bytes)))
-      (let [bytes (selected-bytes project config components)
+      (let [component-bytes (selected-sizes project config components)
+            bytes (reduce + 0 (vals component-bytes))
             growth (max 0 (- bytes baseline-bytes))
             maximum (get-in config [:store :maximum-operation-growth-bytes])
             snapshot (assoc space :sampled? true
                             :operation operation
                             :components components
+                            :component-bytes component-bytes
+                            :component-growth-bytes
+                            (into (sorted-map)
+                                  (map (fn [[component size]]
+                                         [component
+                                          (max 0 (- size
+                                                    (get baseline-component-bytes
+                                                         component 0)))]))
+                                  component-bytes)
                             :operation-bytes bytes
                             :operation-growth-bytes growth
                             :maximum-operation-growth-bytes maximum)]

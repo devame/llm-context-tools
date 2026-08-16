@@ -206,6 +206,10 @@
     (format "Storage preflight: %.1f GiB usable at %s (%.1f GiB reserve)"
             (/ (double usable-bytes) 1073741824.0) probe-path
             (/ (double minimum-free-space-bytes) 1073741824.0))
+    :storage-sample
+    (format "Storage growth: %.2f GiB"
+            (/ (double (or (:operation-growth-bytes event) 0))
+               1073741824.0))
     :discover-complete
     (format "Discovered %d supported files (%d diagnostics)" files diagnostics)
     :parse-progress (format "Parsing %d/%d: %s" completed total file)
