@@ -872,6 +872,28 @@
              path
              (.resolve ^java.nio.file.Path (:root cli-context) path))))))))
 
+(defn- parse-cleanup-options [args]
+  (loop [remaining (seq args) options {:apply? false}]
+    (if-let [argument (first remaining)]
+      (case argument
+        "--older-than-days"
+        (if-let [value (second remaining)]
+          (let [days (parse-long value)]
+            (when-not (and days (pos? days))
+              (throw (ex-info "--older-than-days requires a positive integer"
+                              {:exit-code 2})))
+            (recur (nnext remaining) (assoc options :older-than-days days)))
+          (throw (ex-info "maintenance cleanup --older-than-days requires a value"
+                          {:exit-code 2})))
+        "--apply" (recur (next remaining) (assoc options :apply? true))
+        (throw (ex-info (str "Unknown maintenance cleanup option: " argument)
+                        {:exit-code 2})))
+      (do
+        (when-not (:older-than-days options)
+          (throw (ex-info "maintenance cleanup requires --older-than-days DAYS"
+                          {:exit-code 2})))
+        options))))
+
 (defmethod execute "maintenance" [cli-context _ args]
   (case (or (first args) "status")
     "status"
@@ -898,6 +920,15 @@
               cli-context settings
               #((resolve-fn 'llm-context.store/compact-copy!) % destination)))]
       (pprint/pprint result)
+      0)
+    "cleanup"
+    (let [{:keys [apply? older-than-days]} (parse-cleanup-options (next args))
+          operation (if apply?
+                      'llm-context.storage/apply-cleanup!
+                      'llm-context.storage/cleanup-plan)]
+      (pprint/pprint
+       ((resolve-fn operation) cli-context (config/load-config cli-context)
+        older-than-days))
       0)
     (throw (ex-info (str "Unknown maintenance command: " (first args))
                     {:exit-code 2}))))

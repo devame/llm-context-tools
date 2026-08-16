@@ -290,6 +290,13 @@ staging, recovery, maintenance, and log locations, does not follow symbolic
 links, and performs no cleanup. Retention and deletion remain a separate
 explicit-policy slice.
 
+The retention slice is implemented as `llm-context maintenance cleanup
+--older-than-days DAYS [--apply]`. Planning is the default. Application is
+restricted to directly nested recovery archives and verified compact copies
+with exact llm-context markers, and preserves the newest artifact in each
+category. Provider indexes, active logs, symbolic links, and unmarked paths
+are outside the deletion allowlist.
+
 ### Phase 5: resumable analysis before persistence
 
 Persist analyzer outputs per file under an immutable staging generation keyed

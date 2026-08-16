@@ -148,6 +148,7 @@ llm-context semantic dirty
 llm-context semantic retry --failed [--wait]
 llm-context maintenance status
 llm-context maintenance compact-copy [--output PATH]
+llm-context maintenance cleanup --older-than-days DAYS [--apply]
 llm-context service start|status|stop
 ```
 
@@ -366,6 +367,12 @@ files, follows symlinks, or deletes artifacts.
 under `.llm-context/maintenance/`, then opens the copy and verifies graph
 metadata plus canonical and operational identity counts. `--output` selects a
 different empty destination. The command never activates or deletes a copy.
+
+`maintenance cleanup` is a dry run unless `--apply` is present. It considers
+only direct-child recovery archives and verified compact copies carrying an
+exact llm-context retention marker. It always keeps the newest artifact in
+each category and ignores unmarked directories, provider indexes, and active
+logs.
 
 ## Development
 

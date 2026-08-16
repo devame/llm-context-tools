@@ -985,6 +985,15 @@
                [attribute (count (d/datoms db :ave attribute))]))
         verification-identity-attributes))
 
+(defn- write-artifact-marker! [^Path artifact suffix payload]
+  (let [marker (.resolveSibling artifact
+                                (str (.getFileName artifact) suffix))]
+    (try
+      (Files/writeString marker (pr-str payload)
+                         (make-array java.nio.file.OpenOption 0))
+      true
+      (catch Throwable _ false))))
+
 (defn compact-copy!
   "Create a provider-native compact Datalevin copy and verify its graph
   metadata and canonical/operational identity counts. The destination must not
@@ -1048,7 +1057,14 @@
                                :type :store/compact-copy-mismatch
                                :source-graph-metadata source-metadata
                                :source-identity-counts source-counts))))
-            result)
+            (assoc result
+                   :retention-marker-written?
+                   (write-artifact-marker!
+                    destination ".verified.edn"
+                    {:artifact/type :verified-compact-copy
+                     :artifact/format 1
+                     :artifact/path (str destination)
+                     :artifact/created-at (System/currentTimeMillis)})))
           (finally
             (d/close copied-connection)))))))
 
@@ -1097,7 +1113,15 @@
              recovery-dir
              (make-array java.nio.file.attribute.FileAttribute 0))
             (move-directory! path archive)
-            {:status :archived :path archive}))))))
+            {:status :archived
+             :path archive
+             :retention-marker-written?
+             (write-artifact-marker!
+              archive ".recovery.edn"
+              {:artifact/type :interrupted-graph-recovery
+               :artifact/format 1
+               :artifact/path (str archive)
+               :artifact/created-at (System/currentTimeMillis)})}))))))
 
 (defn open
   "Open the embedded Datalevin database configured for a project."

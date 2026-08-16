@@ -9,6 +9,7 @@
             [llm-context.project :as project]
             [llm-context.service.client :as service-client]
             [llm-context.service.progress :as analysis-progress]
+            [llm-context.storage :as storage]
             [llm-context.store :as store]
             [llm-context.version :as version])
   (:import [java.nio.file Files]))
@@ -261,6 +262,22 @@
     (is (false? @requested?))
     (is (str/includes? output ":components"))
     (is (str/includes? output ":semantic-index"))))
+
+(deftest maintenance-cleanup-is-dry-run-unless-apply-is-explicit
+  (let [root (Files/createTempDirectory
+              "llm-context-maintenance-cleanup-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        context (assoc (project/context (str root)) :options {:quiet? true})
+        calls (atom [])]
+    (with-redefs [storage/cleanup-plan
+                  (fn [_ _ days] (swap! calls conj [:plan days]) {:applied? false})
+                  storage/apply-cleanup!
+                  (fn [_ _ days] (swap! calls conj [:apply days]) {:applied? true})]
+      (with-out-str (cli/execute context "maintenance"
+                                ["cleanup" "--older-than-days" "30"]))
+      (with-out-str (cli/execute context "maintenance"
+                                ["cleanup" "--older-than-days" "30" "--apply"])))
+    (is (= [[:plan 30] [:apply 30]] @calls))))
 
 (deftest initialization-confirms-the-project-root
   (let [root (Files/createTempDirectory

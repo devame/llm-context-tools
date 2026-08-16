@@ -52,3 +52,35 @@
       (is (= 1 (get-in components [:logs :files])))
       (is (false? (get-in components [:maintenance :exists?])))
       (is (not-any? #(= (str unrelated) (:path %)) (:components result))))))
+
+(deftest retention-cleanup-requires-markers-and-preserves-newest-artifacts
+  (let [project (temp-project)
+        settings (config/defaults)
+        maintenance (.resolve (:state-dir project) "maintenance")
+        old (.resolve maintenance "graph-copy-old")
+        newest (.resolve maintenance "graph-copy-new")
+        unmarked (.resolve maintenance "do-not-delete")
+        old-time (- (System/currentTimeMillis) (* 40 24 60 60 1000))]
+    (doseq [path [old newest unmarked]]
+      (Files/createDirectories path
+                               (make-array java.nio.file.attribute.FileAttribute 0))
+      (Files/writeString (.resolve path "data") "x" (make-array OpenOption 0)))
+    (Files/writeString
+     (.resolveSibling old "graph-copy-old.verified.edn")
+     (pr-str {:artifact/type :verified-compact-copy :artifact/format 1
+              :artifact/path (str old) :artifact/created-at old-time})
+     (make-array OpenOption 0))
+    (Files/writeString
+     (.resolveSibling newest "graph-copy-new.verified.edn")
+     (pr-str {:artifact/type :verified-compact-copy :artifact/format 1
+              :artifact/path (str newest)
+              :artifact/created-at (System/currentTimeMillis)})
+     (make-array OpenOption 0))
+    (let [plan (storage/cleanup-plan project settings 30)]
+      (is (= 1 (:eligible-count plan)))
+      (is (= (str old) (:path (first (filter :eligible? (:candidates plan))))))
+      (is (Files/exists old (make-array java.nio.file.LinkOption 0))))
+    (storage/apply-cleanup! project settings 30)
+    (is (not (Files/exists old (make-array java.nio.file.LinkOption 0))))
+    (is (Files/exists newest (make-array java.nio.file.LinkOption 0)))
+    (is (Files/exists unmarked (make-array java.nio.file.LinkOption 0)))))

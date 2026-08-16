@@ -1,6 +1,7 @@
 (ns llm-context.storage
   "Host-aware free-space protection for generated indexes."
-  (:require [clojure.string :as str])
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str])
   (:import [java.nio.file Files LinkOption Path Paths]
            [java.util.stream Stream]))
 
@@ -117,6 +118,96 @@
      (mapv (fn [[component path]]
              (assoc (path-stat path) :component component))
            components)}))
+
+(defn- direct-children [^Path directory]
+  (if-not (Files/isDirectory directory no-follow-links)
+    []
+    (with-open [^Stream entries (Files/list directory)]
+      (vec (iterator-seq (.iterator entries))))))
+
+(defn- marker-data [^Path marker]
+  (try
+    (edn/read-string (Files/readString marker))
+    (catch Throwable _ nil)))
+
+(defn- marked-artifacts [^Path directory suffix expected-type]
+  (->> (direct-children directory)
+       (keep
+        (fn [^Path artifact]
+          (when (Files/isDirectory artifact no-follow-links)
+            (let [artifact (.normalize (.toAbsolutePath artifact))
+                  marker (.resolveSibling
+                          artifact (str (.getFileName artifact) suffix))
+                  data (when (Files/isRegularFile marker no-follow-links)
+                         (marker-data marker))]
+              (when (and (= expected-type (:artifact/type data))
+                         (= 1 (:artifact/format data))
+                         (= (str artifact) (:artifact/path data))
+                         (integer? (:artifact/created-at data)))
+                (assoc (path-stat artifact)
+                       :marker-path (str marker)
+                       :created-at (:artifact/created-at data)))))))
+       (sort-by :created-at >)
+       vec))
+
+(defn cleanup-plan
+  "Plan retention cleanup without mutating the filesystem. Only artifacts
+  carrying llm-context's exact marker contract are eligible. The newest
+  recovery archive and newest verified compact copy are always retained."
+  [project config older-than-days]
+  (when-not (and (integer? older-than-days) (pos? older-than-days))
+    (throw (ex-info "Retention age must be a positive number of days"
+                    {:exit-code 2 :type :maintenance/invalid-retention-age})))
+  (let [database (configured-path project (get-in config [:store :path]))
+        cutoff (- (System/currentTimeMillis)
+                  (* older-than-days 24 60 60 1000))
+        groups
+        [[:recovery
+          (marked-artifacts (.resolve (.getParent database) "recovery")
+                            ".recovery.edn"
+                            :interrupted-graph-recovery)]
+         [:maintenance
+          (marked-artifacts (.resolve ^Path (:state-dir project) "maintenance")
+                            ".verified.edn"
+                            :verified-compact-copy)]]
+        artifacts
+        (mapcat
+         (fn [[component entries]]
+           (map-indexed
+            (fn [index entry]
+              (let [protected? (zero? index)
+                    eligible? (and (not protected?)
+                                   (< (:created-at entry) cutoff))]
+                (assoc entry :component component
+                       :protected? protected?
+                       :eligible? eligible?)))
+            entries))
+         groups)]
+    {:older-than-days older-than-days
+     :cutoff cutoff
+     :candidates (vec artifacts)
+     :eligible-count (count (filter :eligible? artifacts))
+     :eligible-bytes (reduce + 0 (map :bytes (filter :eligible? artifacts)))}))
+
+(defn- delete-tree! [^Path path]
+  (with-open [^Stream entries (Files/walk path (make-array java.nio.file.FileVisitOption 0))]
+    (doseq [^Path entry (sort-by #(.getNameCount ^Path %) >
+                                 (iterator-seq (.iterator entries)))]
+      (Files/deleteIfExists entry))))
+
+(defn apply-cleanup!
+  "Delete only candidates produced by cleanup-plan. Each target was selected
+  from a direct-child allowlist and validated with an exact marker."
+  [project config older-than-days]
+  (let [plan (cleanup-plan project config older-than-days)
+        deleted
+        (mapv
+         (fn [{:keys [path marker-path bytes component]}]
+           (delete-tree! (Paths/get path (make-array String 0)))
+           (Files/deleteIfExists (Paths/get marker-path (make-array String 0)))
+           {:path path :component component :bytes bytes})
+         (filter :eligible? (:candidates plan)))]
+    (assoc plan :applied? true :deleted deleted)))
 
 (defn gibibytes [bytes]
   (/ (double bytes) gib))

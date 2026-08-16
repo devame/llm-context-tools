@@ -213,11 +213,18 @@ Create a provider-native compact graph copy without changing the live graph:
 ```bash
 llm-context maintenance status
 llm-context maintenance compact-copy [--output PATH]
+llm-context maintenance cleanup --older-than-days 30
+llm-context maintenance cleanup --older-than-days 30 --apply
 ```
 
 `maintenance status` is read-only. It inventories only known project-owned
 graph, provider-index, staging, recovery, maintenance, and log locations and
 reports their size, file count, and latest modification time.
+
+Cleanup defaults to a dry run. Only llm-context-marked recovery archives and
+verified compact copies are eligible; the newest artifact in each category is
+always retained. `--apply` is required to perform deletion. Unmarked paths,
+active logs, and provider indexes are never deleted by this command.
 
 The destination must not exist or overlap the live database. llm-context opens
 the finished copy and compares graph metadata plus canonical and semantic
