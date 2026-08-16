@@ -375,6 +375,13 @@ exact llm-context retention marker. It always keeps the newest artifact in
 each category and ignores unmarked directories, provider indexes, and active
 logs.
 
+Full analysis preparation uses immutable compressed generations under
+`.llm-context/analysis-staging/`. A generation is reusable only after every
+source path/content hash and analyzer contract matches and its index has been
+published last. `:analysis/:maximum-staging-generation-bytes` (2 GiB by
+default) bounds one generation; `:analysis/:resumable-staging` can disable the
+feature. Partial generations are never treated as an active graph.
+
 `service supervisor` renders a project-specific systemd unit, launchd plist,
 or Windows Task Scheduler registration script. The generated definition runs
 `service foreground`, applies restart backoff and conservative process limits,

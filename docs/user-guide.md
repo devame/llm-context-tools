@@ -240,6 +240,13 @@ single-instance behavior, and conservative process limits. It does not install
 or enable anything. Host-managed journals are preferred over an unbounded
 application-owned supervisor log.
 
+Analyzer preparation snapshots are compressed and content-addressed under the
+configured `:analysis/:staging-directory`. The default 2 GiB
+`:analysis/:maximum-staging-generation-bytes` limit stops a generation before
+its completion index is published. Only a complete generation matching the
+whole source inventory, graph format, and analyzer contract can be resumed;
+partial data is never queryable.
+
 The destination must not exist or overlap the live database. llm-context opens
 the finished copy and compares graph metadata plus canonical and semantic
 operational identity counts. It reports the verified path but never activates

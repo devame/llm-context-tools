@@ -1,8 +1,11 @@
 {:analysis
  {:include ["."]
-  :exclude [".git" ".llm-context" "node_modules" "target" ".cpcache"
+ :exclude [".git" ".llm-context" "node_modules" "target" ".cpcache"
             "dist" "build" "out" ".shadow-cljs" ".cljs_node_repl" ".lsp"]
-  :max-file-bytes 1048576}
+  :max-file-bytes 1048576
+  :resumable-staging true
+  :staging-directory ".llm-context/analysis-staging"
+  :maximum-staging-generation-bytes 2147483648}
 
  :store
  {:path ".llm-context/db"

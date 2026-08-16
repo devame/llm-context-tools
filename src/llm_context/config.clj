@@ -62,6 +62,16 @@
     (not (pos-int? (get-in config [:analysis :max-file-bytes])))
     (conj ":analysis/:max-file-bytes must be a positive integer")
 
+    (not (boolean? (get-in config [:analysis :resumable-staging])))
+    (conj ":analysis/:resumable-staging must be true or false")
+
+    (not (non-blank-string? (get-in config [:analysis :staging-directory])))
+    (conj ":analysis/:staging-directory must be a non-blank path")
+
+    (not (pos-int? (get-in config
+                           [:analysis :maximum-staging-generation-bytes])))
+    (conj ":analysis/:maximum-staging-generation-bytes must be a positive integer")
+
     (not (string? (get-in config [:store :path])))
     (conj ":store/:path must be a path string")
 

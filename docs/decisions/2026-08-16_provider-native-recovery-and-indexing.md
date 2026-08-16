@@ -324,6 +324,13 @@ This phase is intentionally later: it adds a new durable format owned by
 llm-context, whereas redundant-write elimination and provider batching reuse
 existing contracts.
 
+The staging storage slice uses immutable, content-addressed generation
+directories and compressed per-file output shards. It publishes `index.edn`
+last, fails closed on missing or invalid shards, never follows an index-provided
+path outside the generation, and enforces a configurable per-generation byte
+limit. Integration remains a separate slice so the storage contract can be
+qualified independently.
+
 ### Phase 6: optional shadow bulk build
 
 Only after qualification, a brand-new graph may be built with Datalevin's bulk
