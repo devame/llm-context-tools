@@ -150,7 +150,7 @@ Already relied upon:
 - asynchronous document mutation;
 - metadata inventory and visibility checks;
 - generation sentinel documents;
-- deterministic document identifiers.
+- deterministic document identifiers stored in provider metadata.
 
 Candidates requiring a packaged-binary spike:
 
@@ -164,8 +164,11 @@ Candidates requiring a packaged-binary spike:
 
 An HTTP 202 is not completion. llm-context retains the lease until the provider
 accepts the request, then verifies document visibility and generation before
-marking the durable job complete. If the provider dies after acceptance, the
-outbox reconciliation may resubmit the same deterministic document safely.
+marking the durable job complete. Pinned-binary qualification proved that a
+direct re-submit is not idempotent: the metadata chunk ID is not a physical
+provider upsert key. After an ambiguous acceptance or restart, reconciliation
+must delete all chunks for the affected symbol, await absence, submit the
+desired chunks, and verify exact visible metadata before completing the job.
 
 ### Host supervisor
 
@@ -199,7 +202,8 @@ NextPlaid checks:
 - accepted update followed by visibility;
 - bounded queue saturation and 503/backpressure behavior;
 - kill during update, restart, provider repair, and visibility reconciliation;
-- idempotent re-submit of the same document identifier;
+- measure whether direct re-submit of the same document identifier is
+  idempotent;
 - generation-sentinel survival and stale-document deletion.
 
 No production path switches to an optional facility merely because the check
@@ -323,7 +327,7 @@ reason durably, releases renewable leases, and leaves state resumable.
 | During stale cleanup | Explicit datom retractions already committed remain valid; remaining stale datoms retry |
 | Encoder process dies | Durable semantic job lease expires and another worker retries |
 | NextPlaid dies before accepting | Job remains retryable |
-| NextPlaid dies after accepting but before acknowledgment | Deterministic re-submit is idempotent and visibility reconciliation decides completion |
+| NextPlaid dies after accepting but before acknowledgment | The durable job retries delete-await-submit-verify reconciliation; direct re-submit is forbidden because it creates duplicates in 1.6.4 |
 | NextPlaid restarts with physical inconsistency | Qualified provider repair runs, then llm-context proves logical generation coverage |
 | Resident service dies | Host supervisor restarts it; startup classifies and cleans only stale project-owned artifacts |
 | Disk safety limit trips | Operation stops before another write and reports measured component growth |
@@ -387,8 +391,21 @@ provider contract.
 Phase 0 also begins with `clojure -M:qualify-providers`. The initial harness
 proves synchronous transaction reports, asynchronous commit, and compact-copy
 round trips against the pinned Datalevin artifact in an isolated temporary
-database. It explicitly reports NextPlaid as not run until the packaged binary
-and verified models can be exercised through a real child-process crash test.
+database. `clojure -M:qualify-providers --next-plaid` additionally exercises
+the packaged NextPlaid binary and verified model through a real child-process
+crash, restart, direct-resubmission measurement, delete-then-submit
+reconciliation, and a second clean restart.
+
+Pinned NextPlaid 1.6.4 qualification on 2026-08-16 used binary SHA-256
+`0eb7ce59c063b79d51564623c05fa96674ba3ed0dbf193f2b7ba7919603b3b76`
+and the verified LateOn revision declared by this release. The accepted update
+had zero documents visible immediately after forced termination, showing that
+the provider's accepted queue is not a durable completion record. The index
+opened after restart, the sentinel survived, direct resubmission created
+duplicates, and delete-then-submit reconciliation converged to exactly one
+visible desired document per symbol. Therefore the Datalevin outbox and the
+worker's delete-await-submit-verify sequence remain required; they are not
+duplicate provider functionality.
 
 ## Rejected alternatives
 
