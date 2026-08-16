@@ -2,6 +2,7 @@
   "Resident, optional Mixedbread query-shape router. It reuses the pinned
   NextPlaid ONNX runtime and contributes an advisory prior only."
   (:require [clojure.string :as str]
+            [llm-context.intent.reranker :as candidate-reranker]
             [llm-context.semantic.index :as index]
             [llm-context.semantic.next-plaid :as next-plaid]
             [llm-context.semantic.runtime :as semantic-runtime])
@@ -166,12 +167,17 @@
                        :result-count (count results)})))))
 
 (defn start!
-  "Start one small ONNX router beside the repository retrieval runtime.
-  Missing optional artifacts degrade to an unavailable advisory signal."
+  "Start one small ONNX runtime shared by query-shape routing and learned
+  candidate reranking. Missing optional artifacts degrade explicitly."
   [project config]
-  (let [settings (get-in config [:context :query-router])]
-    (if-not (:enabled settings)
-      {:status :disabled :client (unavailable :disabled)}
+  (let [settings (get-in config [:context :query-router])
+        reranker-settings (get-in config [:context :candidate-reranker])
+        router-enabled? (:enabled settings)
+        reranker-enabled? (:enabled reranker-settings)]
+    (if-not (or router-enabled? reranker-enabled?)
+      {:status :disabled
+       :client (unavailable :disabled)
+       :reranker (candidate-reranker/unavailable :disabled)}
       (let [command (:next-plaid-command settings)
             executable (semantic-runtime/find-executable (first command))
             model (semantic-runtime/model-path project settings)]
@@ -179,11 +185,15 @@
           (nil? executable)
           {:status :unavailable :reason :executable-missing
            :detail (first command)
-           :client (unavailable :executable-missing (first command))}
+           :client (unavailable :executable-missing (first command))
+           :reranker (candidate-reranker/unavailable
+                      :executable-missing (first command))}
 
           (not (Files/isDirectory model (make-array java.nio.file.LinkOption 0)))
           {:status :unavailable :reason :model-missing :detail (str model)
-           :client (unavailable :model-missing (str model))}
+           :client (unavailable :model-missing (str model))
+           :reranker (candidate-reranker/unavailable
+                      :model-missing (str model))}
 
           :else
           (let [port (free-port)
@@ -212,13 +222,26 @@
                 runtime {:process process :client client}]
             (try
               (let [health (await-ready! runtime settings)]
-                (ensure-route-documents! client settings)
-                (warm-router! client settings)
-                {:status :ready :health health :client (->NextPlaidRouter
-                                                        client process settings)
-                 :endpoint endpoint :log-path log-path
-                 :model (:model settings)
-                 :model-revision (:model-revision settings)})
+                (when router-enabled?
+                  (ensure-route-documents! client settings)
+                  (warm-router! client settings))
+                (when (and reranker-enabled? (not router-enabled?))
+                  (next-plaid/encode-texts
+                   client ["Find the relevant code definition."]
+                   {:input-type :query
+                    :timeout-ms (:startup-timeout-ms settings)}))
+                (let [owner (->NextPlaidRouter client process settings)]
+                  {:status :ready :health health
+                   :client (if router-enabled? owner (unavailable :disabled))
+                   :reranker
+                   (if reranker-enabled?
+                     (candidate-reranker/create
+                      client settings reranker-settings)
+                     (candidate-reranker/unavailable :disabled))
+                   :owner owner
+                   :endpoint endpoint :log-path log-path
+                   :model (:model settings)
+                   :model-revision (:model-revision settings)}))
               (catch Throwable error
                 (.destroy process)
                 (when-not (.waitFor process 5 TimeUnit/SECONDS)
@@ -226,5 +249,5 @@
                 (throw error)))))))))
 
 (defn stop! [runtime]
-  (when-let [client (:client runtime)]
-    (close-router! client)))
+  (when-let [owner (or (:owner runtime) (:client runtime))]
+    (close-router! owner)))

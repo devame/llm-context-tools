@@ -108,6 +108,7 @@ try {
             throw "NextPlaid runtime archive did not contain ONNX Runtime"
         }
 
+        if (-not $env:LLM_CONTEXT_MODEL_MANIFEST) {
         $ModelHashes = [ordered]@{
             "model_int8.onnx" = "a62a88b4e3ebb76e8bc5f0263d17b773c667d27bc73c5120e3131048dd1554ef"
             "tokenizer.json" = "a388b94942e98e5c661c6c23f919842285738bfd123a0d148dea0c56287505d0"
@@ -175,6 +176,10 @@ try {
                 }
             }
         }
+        } else {
+            $ModelReady = $true
+            $RouterModelReady = $true
+        }
     }
 
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
@@ -183,7 +188,7 @@ try {
     Move-Item -Force $GuideDownload (Join-Path $InstallDir "USER-GUIDE.md")
 
     $Launcher = Join-Path $InstallDir "llm-context.cmd"
-    $LauncherBody = "@echo off`r`nset `"LLM_CONTEXT_INSTALL_DIR=%~dp0`"`r`njava --enable-native-access=ALL-UNNAMED -jar `"%~dp0llm-context.jar`" %*`r`n"
+    $LauncherBody = "@echo off`r`nset `"LLM_CONTEXT_INSTALL_DIR=%~dp0`"`r`nset `"LLM_CONTEXT_MODEL_REGISTRY=%~dp0models.edn`"`r`njava --enable-native-access=ALL-UNNAMED -jar `"%~dp0llm-context.jar`" %*`r`n"
     Set-Content -Encoding Ascii -NoNewline -Path $Launcher -Value $LauncherBody
 
     if ($InstallSemantic) {
@@ -242,6 +247,30 @@ try {
                 }
                 throw
             }
+        }
+    }
+
+    $ModelRoles = $env:LLM_CONTEXT_MODEL_ROLES
+    if (-not $ModelRoles -and $InstallSemantic) {
+        $ModelRoles = "semantic-retriever,query-router-reranker"
+    }
+    if ($ModelRoles) {
+        $ModelArguments = @(
+            "--enable-native-access=ALL-UNNAMED", "-jar", $InstalledJar,
+            "models", "install", "--cache", $ModelCacheRoot,
+            "--registry", (Join-Path $InstallDir "models.edn"),
+            "--roles", $ModelRoles)
+        if ($env:LLM_CONTEXT_MODEL_MANIFEST) {
+            if (-not $env:LLM_CONTEXT_MODEL_MANIFEST_SHA256) {
+                throw "LLM_CONTEXT_MODEL_MANIFEST_SHA256 is required for a custom model manifest"
+            }
+            $ModelArguments += @(
+                "--manifest", $env:LLM_CONTEXT_MODEL_MANIFEST,
+                "--manifest-sha256", $env:LLM_CONTEXT_MODEL_MANIFEST_SHA256)
+        }
+        & java @ModelArguments
+        if ($LASTEXITCODE -ne 0) {
+            throw "Verified model package installation failed"
         }
     }
 

@@ -50,7 +50,7 @@
     (store/with-store [graph project settings]
       (let [worker (test-worker graph project client)]
         (worker/prepare! worker)
-        (is (= {:leased 1 :completed 1 :retried 0
+        (is (= {:leased 2 :completed 2 :retried 0
                 :failed 0 :superseded 0}
                (select-keys
                 (worker/process-once! worker)
@@ -92,7 +92,7 @@
           (let [prepared (worker/prepare! (test-worker graph project client))]
             (is (true? (get-in prepared [:generation :invalidated?])))
             (is (empty? (state/indexed-records graph reconcile/provider)))
-            (is (= 1 (count (state/job-records graph reconcile/provider))))))))))
+            (is (= 2 (count (state/job-records graph reconcile/provider))))))))))
 
 (deftest worker-builds-each-file-once-and-submits-fresh-documents-together
   (let [{:keys [project]}
@@ -131,12 +131,12 @@
                                            (:document-ids operation))]
                            (when (seq ids)
                              (assoc operation :document-ids (vec ids)))))))]
-        (is (= 2 (:completed result)))
+        (is (= 3 (:completed result)))
         (is (= 1 @builds))
         (is (= 1 (count additions)))
-        (is (= 2 (count (:document-ids (first additions)))))
-        (is (<= 4 @renewals 6))
-        (is (= [2] @completion-batches))))))
+        (is (= 3 (count (:document-ids (first additions)))))
+        (is (<= 6 @renewals 9))
+        (is (= [3] @completion-batches))))))
 
 (deftest worker-keeps-multiple-update-requests-in-flight
   (let [definitions (apply str (for [index (range 40)]
@@ -194,7 +194,7 @@
                     {:owner "replacement-worker"
                      :now-fn #(swap! clock inc)
                      :sleep-fn (fn [_])})]
-        (is (= 1 (:completed (worker/process-once! worker))))
+        (is (= 2 (:completed (worker/process-once! worker))))
         (is (empty? (state/job-records graph reconcile/provider)))))))
 
 (deftest worker-reconciles-dirty-markers-created-after-startup
@@ -203,7 +203,7 @@
     (store/with-store [graph project settings]
       (let [worker (test-worker graph project client)]
         (worker/prepare! worker)
-        (is (= 1 (:completed (worker/process-once! worker))))
+        (is (= 2 (:completed (worker/process-once! worker))))
         (reconcile/mark-full! graph)
         (is (= 1 (count (state/dirty-records graph reconcile/provider))))
         (is (zero? (:leased (worker/process-once! worker))))
@@ -216,7 +216,7 @@
       (let [worker (test-worker graph project client)]
         (worker/prepare! worker)
         (worker/process-once! worker)
-        (is (= 1 (count (semantic-documents client))))))
+        (is (= 2 (count (semantic-documents client))))))
     (Files/delete path)
     (incremental/analyze! project settings)
     (store/with-store [graph project settings]
@@ -224,7 +224,7 @@
         (is (= :delete
                (:semantic.job/operation
                 (first (state/job-records graph reconcile/provider)))))
-        (is (= 1 (:completed (worker/process-once! worker))))
+        (is (= 2 (:completed (worker/process-once! worker))))
         (is (empty? (semantic-documents client)))
         (is (empty? (state/indexed-records graph reconcile/provider)))))))
 
@@ -235,7 +235,7 @@
     (store/with-store [graph project settings]
       (let [worker (test-worker graph project client)
             result (worker/process-once! worker)]
-        (is (= 1 (:retried result)))
+        (is (= 2 (:retried result)))
         (is (= :pending
                (:semantic.job/status
                 (first (state/job-records graph reconcile/provider)))))
@@ -271,7 +271,7 @@
               :now-fn #(swap! clock + 10)
               :sleep-fn (fn [_])})
             result (worker/process-once! worker)]
-        (is (= 1 (:retried result)))
+        (is (= 2 (:retried result)))
         (is (= :pending
                (:semantic.job/status
                 (first (state/job-records graph reconcile/provider)))))))))
@@ -293,7 +293,7 @@
     (store/with-store [graph project settings]
       (let [result (worker/process-once!
                     (test-worker graph project failing))]
-        (is (= 1 (:failed result)))
+        (is (= 2 (:failed result)))
         (is (= :failed
                (:semantic.job/status
                 (first (state/job-records graph reconcile/provider)))))))))

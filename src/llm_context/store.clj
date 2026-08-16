@@ -29,10 +29,13 @@
     (:topic/id entity) [:topic/id (:topic/id entity)]
     (:edge/id entity) [:edge/id (:edge/id entity)]
     (:reference/id entity) [:reference/id (:reference/id entity)]
-    (:effect/id entity) [:effect/id (:effect/id entity)]))
+    (:effect/id entity) [:effect/id (:effect/id entity)]
+    (:aggregate/id entity) [:aggregate/id (:aggregate/id entity)]
+    (:membership/id entity) [:membership/id (:membership/id entity)]))
 
 (def ^:private canonical-identity-attributes
-  [:file/id :symbol/id :topic/id :edge/id :reference/id :effect/id])
+  [:file/id :symbol/id :topic/id :edge/id :reference/id :effect/id
+   :aggregate/id :membership/id])
 
 (defn- existing-identity-eids
   "Resolve a set of canonical identities with at most one indexed query per
@@ -63,6 +66,8 @@
                :entity.type/file 0
                :entity.type/symbol 1
                :entity.type/topic 2
+               :entity.type/aggregate 2
+               :entity.type/membership 3
                :entity.type/edge 3
                :entity.type/reference 3
                :entity.type/effect 4
@@ -92,8 +97,10 @@
 
 (defn- relationship-requirements [entities]
   {:files (set (keep (fn [entity]
-                       (when (= :entity.type/symbol (:entity/type entity))
-                         (:symbol/file entity)))
+                       (case (:entity/type entity)
+                         :entity.type/symbol (:symbol/file entity)
+                         :entity.type/aggregate (:aggregate/file entity)
+                         nil))
                      entities))
    :symbols
    (set
@@ -107,6 +114,7 @@
                                (:edge/to entity))]
           :entity.type/reference [(:reference/symbol entity)]
           :entity.type/effect [(:effect/symbol entity)]
+          :entity.type/aggregate [(:aggregate/owner entity)]
           []))
       entities)))
    :topics
@@ -114,7 +122,17 @@
                 (when (and (= :entity.type/edge (:entity/type entity))
                            (str/starts-with? (:edge/to entity) "topic:"))
                   (:edge/to entity)))
-              entities))})
+              entities))
+   :aggregates
+   (set
+    (keep identity
+          (mapcat
+           (fn [entity]
+             (case (:entity/type entity)
+               :entity.type/aggregate [(:aggregate/id entity)]
+               :entity.type/membership [(:membership/aggregate entity)]
+               []))
+           entities)))})
 
 (defn- asserted-identities [entities attribute]
   (set (keep attribute entities)))
@@ -123,10 +141,12 @@
   ([db entities replace-all?]
    (validate-relationships! db entities replace-all? #{}))
   ([db entities replace-all? unavailable-symbols]
-   (let [{:keys [files symbols topics]} (relationship-requirements entities)
+   (let [{:keys [files symbols topics aggregates]}
+         (relationship-requirements entities)
          asserted-files (asserted-identities entities :file/id)
          asserted-symbols (asserted-identities entities :symbol/id)
          asserted-topics (asserted-identities entities :topic/id)
+         asserted-aggregates (asserted-identities entities :aggregate/id)
          available-files
          (if replace-all?
            asserted-files
@@ -141,10 +161,17 @@
          (if replace-all?
            asserted-topics
            (into asserted-topics (existing-identities db :topic/id topics)))
+         available-aggregates
+         (if replace-all?
+           asserted-aggregates
+           (into asserted-aggregates
+                 (existing-identities db :aggregate/id aggregates)))
          missing {:symbol-files (vec (sort (remove available-files files)))
                   :edge-or-fact-symbols
                   (vec (sort (remove available-symbols symbols)))
-                  :edge-topics (vec (sort (remove available-topics topics)))}
+                  :edge-topics (vec (sort (remove available-topics topics)))
+                  :membership-aggregates
+                  (vec (sort (remove available-aggregates aggregates)))}
          missing (into {} (filter (comp seq val)) missing)]
      (when (seq missing)
        (throw
@@ -158,6 +185,7 @@
   [file entities]
   (let [file-id (:file/id file)
         symbol-ids (set (keep :symbol/id entities))
+        aggregate-ids (set (keep :aggregate/id entities))
         foreign-symbols
         (->> entities
              (keep (fn [entity]
@@ -174,8 +202,15 @@
                         :entity.type/edge (:edge/from entity)
                         :entity.type/reference (:reference/symbol entity)
                         :entity.type/effect (:effect/symbol entity)
+                        :entity.type/aggregate (:aggregate/owner entity)
                         nil)]
-                  (when (and owner (not (contains? symbol-ids owner)))
+                  (cond
+                    (and owner (not (contains? symbol-ids owner)))
+                    (entity-identity entity)
+
+                    (and (= :entity.type/membership (:entity/type entity))
+                         (not (contains? aggregate-ids
+                                         (:membership/aggregate entity))))
                     (entity-identity entity)))))
              (sort-by pr-str)
              vec)]
@@ -244,7 +279,13 @@
                           :topic/id :symbol/id) %))
           (:reference/symbol entity)
           (update :reference/symbol #(ref :symbol/id %))
-          (:effect/symbol entity) (update :effect/symbol #(ref :symbol/id %))))
+          (:effect/symbol entity) (update :effect/symbol #(ref :symbol/id %))
+          (:aggregate/owner entity)
+          (update :aggregate/owner #(ref :symbol/id %))
+          (:aggregate/file entity)
+          (update :aggregate/file #(ref :file/id %))
+          (:membership/aggregate entity)
+          (update :membership/aggregate #(ref :aggregate/id %))))
       entities))))
 
 (defn- backfill-symbol-search-index!
@@ -438,7 +479,21 @@
                             [?reference :reference/symbol ?symbol]]
                           db symbols)
                      [])
-        owned (set (concat from-edges references effects symbols))]
+        aggregates (d/q '[:find [?aggregate ...]
+                          :in $ ?file-id
+                          :where
+                          [?file :file/id ?file-id]
+                          [?aggregate :aggregate/file ?file]]
+                        db file-id)
+        memberships (if (seq aggregates)
+                      (d/q '[:find [?membership ...]
+                             :in $ [?aggregate ...]
+                             :where
+                             [?membership :membership/aggregate ?aggregate]]
+                           db aggregates)
+                      [])
+        owned (set (concat from-edges references effects memberships
+                           aggregates symbols))]
     {:owned owned
      :inbound (remove #(contains? owned (first %)) inbound)}))
 

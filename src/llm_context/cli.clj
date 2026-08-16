@@ -2,8 +2,10 @@
   (:require [clojure.pprint :as pprint]
             [clojure.string :as str]
             [llm-context.config :as config]
+            [llm-context.model-packages :as model-packages]
             [llm-context.project :as project]
             [llm-context.service.client :as service-client]
+            [llm-context.service.progress :as analysis-progress]
             [llm-context.version :as version]))
 
 (defn- resolve-fn [symbol]
@@ -50,6 +52,7 @@
        "    --check            Validate a source snapshot without writing data\n"
        "  query                Query the semantic graph\n"
        "  semantic             Inspect or synchronize LateOn indexing\n"
+       "  models               Install or inspect verified model packages\n"
        "  context              Build a symbol or natural-language context packet\n"
        "  export               Export graph data\n"
        "  summary              Export a Markdown graph summary\n"
@@ -95,6 +98,55 @@
 (defmethod execute "version" [_ _ _]
   (println version/value)
   0)
+
+(defn- parse-model-options [args]
+  (loop [remaining args
+         result {:source-roots {}}]
+    (if-let [arg (first remaining)]
+      (case arg
+        "--manifest" (recur (nnext remaining) (assoc result :manifest (second remaining)))
+        "--manifest-sha256" (recur (nnext remaining) (assoc result :manifest-sha256 (second remaining)))
+        "--cache" (recur (nnext remaining) (assoc result :cache (second remaining)))
+        "--registry" (recur (nnext remaining) (assoc result :registry (second remaining)))
+        "--roles" (recur (nnext remaining)
+                           (assoc result :selected-roles
+                                  (mapv keyword (str/split (or (second remaining) "") #","))))
+        "--source-root"
+        (let [[role path] (str/split (or (second remaining) "") #"=" 2)]
+          (when (or (str/blank? role) (str/blank? path))
+            (throw (ex-info "--source-root requires ROLE=PATH" {:exit-code 2})))
+          (recur (nnext remaining) (assoc-in result [:source-roots (keyword role)] path)))
+        (throw (ex-info (str "Unknown models option: " arg) {:exit-code 2})))
+      result)))
+
+(defmethod execute "models" [_ _ args]
+  (let [[subcommand & options] args]
+    (case subcommand
+      "install"
+      (let [parsed (parse-model-options options)
+            cache (or (:cache parsed) (System/getenv "LLM_CONTEXT_MODEL_CACHE"))]
+        (when (str/blank? cache)
+          (throw (ex-info "models install requires --cache or LLM_CONTEXT_MODEL_CACHE"
+                          {:exit-code 2})))
+        (let [result (model-packages/install! (assoc parsed :cache cache))]
+          (doseq [[role package] (:roles result)]
+            (println (format "%s: %s@%s -> %s"
+                             (name role) (:model package) (:revision package)
+                             (:path package)))))
+        0)
+
+      "status"
+      (let [parsed (parse-model-options options)
+            registry (or (:registry parsed)
+                         (System/getenv "LLM_CONTEXT_MODEL_REGISTRY"))
+            installed (model-packages/read-registry registry)]
+        (if installed
+          (pprint/pprint installed)
+          (println "No installed model registry is configured."))
+        0)
+
+      (throw (ex-info "Usage: llm-context models install|status [options]"
+                      {:exit-code 2})))))
 
 (defn- confirm-project-root? [context]
   (printf "Initialize llm-context in %s? [y/N] " (:root-str context))
@@ -179,6 +231,30 @@
     (println (format "[%s] %s" timestamp (analysis-progress-message event)))
     (flush)))
 
+(defn- run-local-analysis!
+  "Run analysis outside the resident service while preserving the same
+  durable progress contract used by service-owned analysis."
+  [context settings full? progress-state progress-printer]
+  (let [operation (if full? :full-analysis :incremental-analysis)
+        progress-fn
+        (fn [event]
+          (analysis-progress/record! progress-state event)
+          (when progress-printer
+            (progress-printer event)))]
+    (analysis-progress/begin! progress-state operation)
+    (try
+      (let [result
+            (if full?
+              ((resolve-fn 'llm-context.analysis.full/analyze!)
+               context settings progress-fn)
+              ((resolve-fn 'llm-context.analysis.incremental/analyze!)
+               context settings))]
+        (analysis-progress/complete! progress-state result)
+        result)
+      (catch Throwable error
+        (analysis-progress/fail! progress-state error)
+        (throw error)))))
+
 (defmethod execute "analyze" [context _ args]
   (when-let [unknown (first (remove #{"--full" "--check"} args))]
     (throw (ex-info (str "Unknown analyze option: " unknown) {:exit-code 2})))
@@ -208,6 +284,8 @@
                  (remote-value context
                                {:op :analyze :full? full?}
                                {:request-timeout 86400000}))
+        local-progress-state (when (and (not check?) (= unavailable remote))
+                               (analysis-progress/create context))
         result
         (cond
           check?
@@ -215,13 +293,12 @@
 
           (not= unavailable remote) remote
 
-          full?
-          ((resolve-fn 'llm-context.analysis.full/analyze!)
-           context settings progress)
+          (= unavailable remote)
+          (run-local-analysis! context settings full? local-progress-state
+                               progress)
 
           :else
-          ((resolve-fn 'llm-context.analysis.incremental/analyze!)
-           context settings))]
+          remote)]
     (when-not (get-in context [:options :quiet?])
       (println
        (case (:mode result)
@@ -312,10 +389,20 @@
     0))
 
 (defn- local-semantic-status [context settings]
-  (with-graph
-    context settings
-    #((resolve-fn 'llm-context.semantic.state/semantic-summary)
-      % :lateon-code (System/currentTimeMillis))))
+  (let [progress (analysis-progress/read-state context)]
+    (try
+      (assoc
+       (with-graph
+         context settings
+         #((resolve-fn 'llm-context.semantic.state/semantic-summary)
+           % :lateon-code (System/currentTimeMillis)))
+       :graph-state :ready
+       :analysis-progress progress)
+      (catch Throwable error
+        {:graph-state (if (= :running (:state progress)) :updating :unknown)
+         :availability :unavailable
+         :analysis-progress progress
+         :error (.getMessage error)}))))
 
 (defn- semantic-status [context settings]
   (let [remote (remote-value context {:op :semantic-status})]
@@ -348,17 +435,49 @@
                         {:exit-code 2})))
       parsed)))
 
+(defn- parse-semantic-status-options [arguments]
+  (loop [remaining (seq arguments)
+         parsed {:watch? false :interval-ms 2000}]
+    (if-let [argument (first remaining)]
+      (case argument
+        "--watch" (recur (next remaining) (assoc parsed :watch? true))
+        "--interval-ms"
+        (let [interval-ms (some-> (second remaining) parse-long)]
+          (when-not (pos-int? interval-ms)
+            (throw
+             (ex-info "semantic status --interval-ms requires a positive integer"
+                      {:exit-code 2})))
+          (recur (nnext remaining) (assoc parsed :interval-ms interval-ms)))
+        (throw (ex-info (str "Unknown semantic status option: " argument)
+                        {:exit-code 2})))
+      parsed)))
+
+(defn- print-semantic-status! [status]
+  (println (str "\n# semantic status observed at "
+                (java.time.Instant/now)))
+  (pprint/pprint status)
+  (flush))
+
 (defmethod execute "semantic" [context _ args]
   (let [subcommand (or (first args) "status")
         options (set (next args))
         settings (config/load-config context)]
     (case subcommand
       "status"
-      (do
-        (when (seq options)
-          (throw (ex-info "semantic status does not accept options"
-                          {:exit-code 2})))
-        (pprint/pprint (semantic-status context settings)))
+      (let [{:keys [watch? interval-ms]}
+            (parse-semantic-status-options (next args))]
+        (if-not watch?
+          (pprint/pprint (semantic-status context settings))
+          (loop []
+            (print-semantic-status!
+             (try
+               (semantic-status context settings)
+               (catch Throwable error
+                 {:graph-state :unknown
+                  :availability :unavailable
+                  :error (.getMessage error)})))
+            (Thread/sleep interval-ms)
+            (recur))))
 
       "sync"
       (let [{:keys [wait? timeout-ms]}
@@ -710,7 +829,7 @@
 (defn run [args]
   (try
     (let [{:keys [project command args] :as options} (parse-args args)
-          needs-project? (not (#{"help" "version"} command))
+          needs-project? (not (#{"help" "version" "models"} command))
           context (when needs-project? (project/context project))]
       (execute (assoc context :options options) command args))
     (catch clojure.lang.ExceptionInfo error

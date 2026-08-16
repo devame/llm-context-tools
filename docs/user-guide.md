@@ -105,10 +105,15 @@ reported separately.
 `--intent` asks the local LateOn index and Datalevin FTS to resolve a
 natural-language request before traversal. Automatic planning first retrieves
 a broad, shape-neutral pool while a resident 32M Mixedbread model independently
-scores lookup, set, and flow. The score is advisory: a set needs several
-structurally qualified candidates, while a flow needs at least two qualified
-roots joined by an exact call or macro-invocation edge. Vocabulary relevance
-can reorder candidates but cannot authorize a shape. Unsupported advice leaves
+scores lookup, set, and flow. The score is advisory: an exhaustive set needs a
+complete source-backed aggregate, while a flow needs at least two qualified
+roots joined by an exact call or macro-invocation edge. The same resident model
+also scores the unchanged question against a bounded prefix of retrieved
+candidate documents. That learned score owns semantic ordering; deterministic
+code only annotates structural evidence and cannot authorize a shape. The
+default `:shadow` mode reports scores without applying their order; `:enforce`
+is reserved for a model that passes the frozen reranking suite.
+Unsupported advice leaves
 an adaptive multi-root plan. Explicit
 single/multi options remain authoritative, and the model never filters the
 retrieval pool. Accepted lookup requests keep one seed; set/flow requests may
@@ -138,6 +143,12 @@ classifier in `llm-context.edn`:
   :intent-max-seeds 4
   :intent-rerank true
   :intent-candidate-count 100
+  :candidate-reranker
+  {:enabled true
+   :mode :shadow
+   :candidate-count 50
+   :query-timeout-ms 5000
+   :document-cache-size 2048}
   :query-router
   {:enabled true
    :query-timeout-ms 250
@@ -153,7 +164,15 @@ Use `--semantic-timeout-ms N` to override the configured LateOn query deadline
 for one `query search` or `context --intent` request. Use
 `--seed-mode single|multi|auto` and `--max-seeds N` to override context
 cardinality. `query search` retains its existing ordering unless
-`--intent-rerank` is explicitly supplied.
+`--intent-rerank` is explicitly supplied. Shadow mode records the order the
+model would choose without changing results. Learned-reranker failure preserves
+the existing order and is reported; it never activates the former literal
+term-overlap ordering.
+
+The original question is sent unchanged to symbol, aggregate, and semantic
+retrieval. The deterministic planner contains no repository vocabulary,
+synonym table, or hidden lexical rewrite. Repository terminology is learned
+from indexed source evidence and scored by the configured models.
 
 ## Semantic indexing
 
@@ -162,6 +181,7 @@ background:
 
 ```bash
 llm-context semantic status
+llm-context semantic status --watch [--interval-ms N]
 llm-context semantic failures
 llm-context semantic dirty
 llm-context semantic retry --failed --wait
@@ -169,19 +189,27 @@ llm-context semantic sync --wait
 ```
 
 Status separates runtime availability from index completeness and reports
-desired/indexed coverage. A ready runtime with a handful of terminal jobs is
+desired/indexed coverage. During a graph replacement it remains readable and
+reports the last committed graph snapshot together with live analysis progress.
+Use `--watch` from any terminal to poll that status; the default interval is
+2 seconds and can be changed with `--interval-ms`. The durable progress
+snapshot is `.llm-context/analysis-progress.edn`, so a restarted service can
+also report that an interrupted analysis was abandoned. A ready runtime with a handful of terminal jobs is
 available with partial completeness; it is not globally unavailable. Failed
 jobs remain terminal until `retry --failed`. `sync --wait` exits non-zero until
 pending, leased, failed, and dirty counts all converge.
 
-Graph format 3 makes `:symbol/indexable?` authoritative for semantic document
-selection. Document/index v3 rejects conflicting documents, uses graph-revision
-freshness watermarks, and automatically recreates missing reconciliation work.
+Graph format 4 makes `:symbol/indexable?` authoritative for semantic document
+selection and indexes namespace/module containers as deterministic coarse
+summaries. Safe literal collections become source-backed aggregates with
+explicit completeness and membership. Document/index v4 rejects conflicting
+documents, uses graph-revision freshness watermarks, and automatically
+recreates missing reconciliation work.
 
-## Upgrade to graph format 3
+## Upgrade to graph format 4
 
-Version `0.9.0` replaces the analyzer interchange contract. After upgrading,
-run:
+Graph format 4 adds aggregate evidence and container documents. After
+upgrading, run:
 
 ```bash
 llm-context analyze --full
@@ -214,3 +242,30 @@ LateOn model, and pinned 33 MB INT8 query-router model. Set
 Agent guidance can be installed with
 `llm-context integrate codex|claude|generic`. Deterministic EDN, JSON, JSONL,
 and Markdown projections remain available through `llm-context export`.
+
+### Replacing model packages
+
+The semantic retriever, query router/reranker, and optional answer reader use a
+shared verified package contract. Inspect an installation with:
+
+```bash
+llm-context models status
+```
+
+To install a custom Hugging Face-compatible snapshot set, create a contract-v1
+EDN manifest using the built-in `resources/llm_context/model-packages.edn` as a
+template. Every role needs an immutable 40-character revision and a SHA-256 for
+every file. Then run the installer with:
+
+```bash
+LLM_CONTEXT_MODEL_MANIFEST=/absolute/path/models.edn \
+LLM_CONTEXT_MODEL_MANIFEST_SHA256=<manifest-sha256> \
+LLM_CONTEXT_MODEL_ROLES=semantic-retriever,query-router-reranker,answer-reader \
+sh install.sh
+```
+
+The same variables work with `install.ps1`. A `file:///absolute/directory`
+base URL in the manifest installs from a local snapshot. There is no option to
+run unverified models: a missing manifest checksum, mutable revision, unsafe
+path, or mismatched model file stops installation before the runtime registry
+is changed.

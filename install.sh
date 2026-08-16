@@ -118,6 +118,7 @@ if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
     [ -f "$TEMP_DIR/next-plaid/libonnxruntime.dylib" ] ||
     fail "NextPlaid runtime archive did not contain ONNX Runtime"
 
+  if [ -z "${LLM_CONTEXT_MODEL_MANIFEST:-}" ]; then
   if verify_hash "$MODEL_DIR/model_int8.onnx" \
        "a62a88b4e3ebb76e8bc5f0263d17b773c667d27bc73c5120e3131048dd1554ef" &&
      verify_hash "$MODEL_DIR/tokenizer.json" \
@@ -197,6 +198,10 @@ if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
       "e10f017e4a8355f6b15f5be5f67295c90d5b25e487568bf0b0d9ee3259dc0eb7" ||
       fail "Mixedbread query-router model checksum verification failed"
   fi
+  else
+    MODEL_READY=1
+    ROUTER_MODEL_READY=1
+  fi
 fi
 
 mkdir -p "$INSTALL_DIR"
@@ -210,7 +215,9 @@ cat >"$INSTALL_DIR/.llm-context.new" <<'LAUNCHER'
 set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 LLM_CONTEXT_INSTALL_DIR="$SCRIPT_DIR"
+LLM_CONTEXT_MODEL_REGISTRY="$SCRIPT_DIR/models.edn"
 export LLM_CONTEXT_INSTALL_DIR
+export LLM_CONTEXT_MODEL_REGISTRY
 exec java --enable-native-access=ALL-UNNAMED -jar "$SCRIPT_DIR/llm-context.jar" "$@"
 LAUNCHER
 chmod 755 "$INSTALL_DIR/.llm-context.new"
@@ -285,6 +292,22 @@ if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
       fail "could not install the Mixedbread query-router model snapshot"
     fi
   fi
+fi
+
+MODEL_ROLES=${LLM_CONTEXT_MODEL_ROLES:-}
+if [ -z "$MODEL_ROLES" ] && [ "$INSTALL_SEMANTIC" -eq 1 ]; then
+  MODEL_ROLES="semantic-retriever,query-router-reranker"
+fi
+if [ -n "$MODEL_ROLES" ]; then
+  set -- models install --cache "$MODEL_CACHE_ROOT" \
+    --registry "$INSTALL_DIR/models.edn" --roles "$MODEL_ROLES"
+  if [ -n "${LLM_CONTEXT_MODEL_MANIFEST:-}" ]; then
+    [ -n "${LLM_CONTEXT_MODEL_MANIFEST_SHA256:-}" ] ||
+      fail "LLM_CONTEXT_MODEL_MANIFEST_SHA256 is required for a custom model manifest"
+    set -- "$@" --manifest "$LLM_CONTEXT_MODEL_MANIFEST" \
+      --manifest-sha256 "$LLM_CONTEXT_MODEL_MANIFEST_SHA256"
+  fi
+  java --enable-native-access=ALL-UNNAMED -jar "$INSTALL_DIR/llm-context.jar" "$@"
 fi
 
 INSTALLED_VERSION=$("$INSTALL_DIR/llm-context" version)

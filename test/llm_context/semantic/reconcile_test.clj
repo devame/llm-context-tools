@@ -45,11 +45,15 @@
   (state/cancel-job! graph reconcile/provider
                      (:semantic.job/symbol-id job)))
 
+(defn record-all-indexed! [graph now]
+  (doseq [pending (state/job-records graph reconcile/provider)]
+    (record-indexed! graph pending now)))
+
 (deftest full-analysis-plans-symbol-upserts-without-running-a-model
   (let [{:keys [project]} (project-with-source
                            "(ns sample.app)\n(defn useful [] :ok)")
         result (full/analyze! project settings)]
-    (is (= 1 (get-in result [:semantic :queued-upserts])))
+    (is (= 2 (get-in result [:semantic :queued-upserts])))
     (is (zero? (get-in result [:semantic :queued-deletes])))
     (store/with-store [graph project settings]
       (let [record (job graph)]
@@ -65,7 +69,7 @@
         {:keys [project path]} (project-with-source original)]
     (full/analyze! project settings)
     (store/with-store [graph project settings]
-      (record-indexed! graph (job graph) 10))
+      (record-all-indexed! graph 10))
     (spit (str path) changed)
     (let [result (incremental/analyze! project settings)]
       (is (= 1 (get-in result [:semantic :queued-upserts]))))
@@ -74,10 +78,10 @@
       ;; Graph format 2 keeps the symbol identity stable across body changes.
       ;; Returning to the indexed document cancels the one pending replacement.
       (is (= 1 (get-in result [:semantic :cancelled])))
-      (is (= 1 (get-in result [:semantic :unchanged]))))
+      (is (= 2 (get-in result [:semantic :unchanged]))))
     (store/with-store [graph project settings]
       (is (empty? (state/job-records graph reconcile/provider)))
-      (is (= 1 (count (state/indexed-records
+      (is (= 2 (count (state/indexed-records
                        graph reconcile/provider)))))))
 
 (deftest deleting-an-indexed-symbol-plans-a-delete
@@ -85,11 +89,11 @@
         (project-with-source "(ns sample.app)\n(defn useful [] :ok)")]
     (full/analyze! project settings)
     (store/with-store [graph project settings]
-      (record-indexed! graph (job graph) 10))
+      (record-all-indexed! graph 10))
     (Files/delete path)
     (let [result (incremental/analyze! project settings)]
       (is (= 1 (:deleted result)))
-      (is (= 1 (get-in result [:semantic :queued-deletes]))))
+      (is (= 2 (get-in result [:semantic :queued-deletes]))))
     (store/with-store [graph project settings]
       (is (= :delete (:semantic.job/operation (job graph)))))))
 
@@ -122,7 +126,7 @@
       (is (empty? (state/job-records graph reconcile/provider)))
       (let [result (reconcile/reconcile! graph project settings 20)]
         (is (true? (:recovered-missing-markers? result)))
-        (is (= 1 (:queued-upserts result)))
+        (is (= 2 (:queued-upserts result)))
         (is (= :upsert (:semantic.job/operation (job graph))))))))
 
 (defn reconciliation-operation-counts [symbol-count]
@@ -154,8 +158,9 @@
         (project-with-source "(ns sample.app)\n(defn useful [] :old)")]
     (full/analyze! project settings)
     (store/with-store [graph project settings]
-      (state/cancel-job! graph reconcile/provider
-                         (:semantic.job/symbol-id (job graph)))
+      (doseq [pending (state/job-records graph reconcile/provider)]
+        (state/cancel-job! graph reconcile/provider
+                           (:semantic.job/symbol-id pending)))
       (let [[file-id file-hash]
             (first
              (store/query
@@ -202,7 +207,7 @@
                         (original target plan))]
           (let [result (reconcile/reconcile! graph project settings 30)]
             (is (= 2 @attempts))
-            (is (= 1 (:queued-upserts result)))
+            (is (= 2 (:queued-upserts result)))
             (is (empty? (state/dirty-records graph reconcile/provider)))))))))
 
 (deftest one-file-failure-does-not-block-unrelated-semantic-work
@@ -235,7 +240,7 @@
           (let [result (reconcile/reconcile! graph project settings 30)
                 dirty (state/dirty-records graph reconcile/provider)]
             (is (= 1 (:deferred result)))
-            (is (= 1 (:queued-upserts result)))
+            (is (= 2 (:queued-upserts result)))
             (is (= :semantic-file-failed
                    (get-in result [:diagnostics 0 :kind])))
             (is (= "src/app.clj"

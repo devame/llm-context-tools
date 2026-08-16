@@ -7,7 +7,9 @@
   (:import [java.net ConnectException URI]
            [java.net.http HttpClient HttpClient$Version HttpRequest
             HttpRequest$BodyPublishers HttpResponse$BodyHandlers]
+           [java.nio ByteBuffer ByteOrder]
            [java.time Duration]
+           [java.util Base64]
            [java.util.concurrent CompletionException]))
 
 (def ^:private max-error-length 2000)
@@ -35,7 +37,7 @@
     (json/write-str value)))
 
 (defn- java-transport [^HttpClient http ^URI base
-                       {:keys [method path body timeout-ms]}]
+                       {:keys [method path body timeout-ms headers]}]
   (let [publisher (if (some? body)
                     (HttpRequest$BodyPublishers/ofString (json-body body))
                     (HttpRequest$BodyPublishers/noBody))
@@ -43,6 +45,8 @@
                   (.timeout (Duration/ofMillis timeout-ms))
                   (.header "Accept" "application/json")
                   (.header "Content-Type" "application/json"))
+        _ (doseq [[header value] headers]
+            (.header builder (name header) (str value)))
         request (-> builder
                     (.method (str/upper-case (name method)) publisher)
                     .build)
@@ -104,6 +108,63 @@
     (if (contains? expected-success (:status response))
       (:parsed response)
       (throw (api-error response request)))))
+
+(defn- decode-embedding [encoded shape]
+  (let [[tokens dimension] shape
+        bytes (.decode (Base64/getDecoder) ^String encoded)
+        expected-bytes (* (long tokens) (long dimension) Float/BYTES)]
+    (when-not (= expected-bytes (alength bytes))
+      (throw (ex-info "NextPlaid returned an invalid embedding length"
+                      {:type :next-plaid/invalid-embedding
+                       :shape shape
+                       :expected-bytes expected-bytes
+                       :actual-bytes (alength bytes)})))
+    (let [values (float-array (* (long tokens) (long dimension)))]
+      (-> (ByteBuffer/wrap bytes)
+          (.order ByteOrder/LITTLE_ENDIAN)
+          .asFloatBuffer
+          (.get values))
+      {:tokens (long tokens)
+       :dimension (long dimension)
+       :values values})))
+
+(defn encode-texts
+  "Encode query or document texts through the resident model. Embeddings use
+  compact primitive float arrays so callers can score bounded candidate pools
+  without materializing a second semantic index."
+  [client texts {:keys [input-type timeout-ms pool-factor]}]
+  (let [texts (vec texts)]
+    (when-not (seq texts)
+      (throw (ex-info "At least one text is required for encoding"
+                      {:type :next-plaid/invalid-request})))
+    (when-not (contains? #{:query :document} input-type)
+      (throw (ex-info "Encoding input type must be query or document"
+                      {:type :next-plaid/invalid-request
+                       :input-type input-type})))
+    (let [result
+          (request!
+           client
+           {:method :post
+            :path "/encode"
+            :timeout-ms (or timeout-ms
+                            (get-in client [:settings :query-timeout-ms])
+                            1000)
+            :headers {"X-Embeddings-Format" "base64"}
+            :body (cond-> {:texts texts :input_type (name input-type)}
+                    (and (= :document input-type) (some? pool-factor))
+                    (assoc :pool_factor pool-factor))})
+          encoded (:embeddings_b64 result)
+          shapes (:shapes result)]
+      (when-not (and (= (count texts) (:num_texts result))
+                     (= (count texts) (count encoded))
+                     (= (count texts) (count shapes)))
+        (throw (ex-info "NextPlaid returned an incomplete encoding response"
+                        {:type :next-plaid/invalid-embedding-response
+                         :requested (count texts)
+                         :num-texts (:num_texts result)
+                         :embedding-count (count encoded)
+                         :shape-count (count shapes)})))
+      (mapv decode-embedding encoded shapes))))
 
 (defn- model-name-matches? [expected actual]
   (let [short-name (last (str/split expected #"/"))]

@@ -26,10 +26,10 @@
    :model-path nil
    :quantization :int8
    :index-path ".llm-context/semantic/next-plaid"
-   :index-name "llm-context-v3"
+   :index-name "llm-context-v4"
    :nbits 4
    :start-from-scratch 0
-   :document-version 3
+   :document-version 4
    :max-document-bytes 6000
    :chunk-overlap-lines 8
    :pool-factor 2
@@ -63,6 +63,12 @@
   :intent-max-seeds 4
   :intent-rerank true
   :intent-candidate-count 100
+  :candidate-reranker
+  {:enabled true
+   :mode :shadow
+   :candidate-count 50
+   :query-timeout-ms 5000
+   :document-cache-size 2048}
   :query-router
   {:enabled true
    :next-plaid-version "1.6.4"

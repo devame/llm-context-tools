@@ -3,6 +3,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [llm-context.intent :as intent]
+            [llm-context.model-packages :as model-packages]
             [llm-context.source-role :as source-role])
   (:import [java.io PushbackReader]
            [java.nio.file FileAlreadyExistsException Files OpenOption Path StandardOpenOption]))
@@ -44,7 +45,8 @@
 
 (defn- validation-errors [config]
   (let [lateon (get-in config [:semantic :lateon-code])
-        router (get-in config [:context :query-router])]
+        router (get-in config [:context :query-router])
+        reranker (get-in config [:context :candidate-reranker])]
     (cond-> []
     (not (map? config))
     (conj "configuration must be an EDN map")
@@ -103,6 +105,24 @@
 
     (not (pos-int? (get-in config [:context :intent-candidate-count])))
     (conj ":context/:intent-candidate-count must be a positive integer")
+
+    (not (map? reranker))
+    (conj ":context/:candidate-reranker must be a map")
+
+    (not (boolean? (:enabled reranker)))
+    (conj ":context/:candidate-reranker/:enabled must be true or false")
+
+    (not (contains? #{:shadow :enforce} (:mode reranker)))
+    (conj ":context/:candidate-reranker/:mode must be :shadow or :enforce")
+
+    (not (pos-int? (:candidate-count reranker)))
+    (conj ":context/:candidate-reranker/:candidate-count must be a positive integer")
+
+    (not (pos-int? (:query-timeout-ms reranker)))
+    (conj ":context/:candidate-reranker/:query-timeout-ms must be a positive integer")
+
+    (not (pos-int? (:document-cache-size reranker)))
+    (conj ":context/:candidate-reranker/:document-cache-size must be a positive integer")
 
     (not (map? router))
     (conj ":context/:query-router must be a map")
@@ -295,11 +315,18 @@
   config)
 
 (defn load-config
-  "Load defaults plus the optional project-local llm-context.edn file."
+  "Load defaults, an optional verified installation model registry, and the
+  optional project-local llm-context.edn file. Project configuration remains
+  authoritative so a repository can deliberately select another verified
+  model installation."
   [{:keys [^Path config-file]}]
   (let [user-config (when (Files/exists config-file (make-array java.nio.file.LinkOption 0))
-                      (read-edn (.toFile config-file)))]
-    (validate! (deep-merge (defaults) (or user-config {})))))
+                      (read-edn (.toFile config-file)))
+        registry (model-packages/read-registry
+                  (System/getenv "LLM_CONTEXT_MODEL_REGISTRY"))]
+    (validate! (deep-merge (defaults)
+                           (model-packages/config-overlay registry)
+                           (or user-config {})))))
 
 (defn init!
   "Create the canonical project configuration without overwriting user data."

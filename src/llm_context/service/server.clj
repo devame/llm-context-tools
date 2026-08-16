@@ -6,6 +6,7 @@
             [llm-context.context :as context]
             [llm-context.export :as export]
             [llm-context.intent :as intent]
+            [llm-context.intent.reranker :as candidate-reranker]
             [llm-context.intent.router :as intent-router]
             [llm-context.query :as query]
             [llm-context.semantic.reconcile :as semantic-reconcile]
@@ -13,6 +14,7 @@
             [llm-context.semantic.state :as semantic-state]
             [llm-context.semantic.worker :as semantic-worker]
             [llm-context.service.client :as client]
+            [llm-context.service.progress :as analysis-progress]
             [llm-context.service.transport :as transport]
             [llm-context.service.watcher :as watcher]
             [llm-context.store :as store])
@@ -57,21 +59,46 @@
     (query/topics-command graph subcommand args)
     (throw (ex-info (str "Unknown query: " subcommand) {:exit-code 2})))))
 
-(defn- semantic-status [graph runtime-state]
+(defn- runtime-view [runtime-state]
   (let [runtime (select-keys runtime-state
                              [:status :reason :detail :endpoint :log-path
                               :worker-status :worker-detail :worker-progress
-                              :query-router-status :query-router-detail])]
-    (let [summary (semantic-state/semantic-summary
-                   graph semantic-reconcile/provider
-                   (System/currentTimeMillis))
-          runtime
-          (cond-> runtime
-            (:log-path runtime) (update :log-path str))]
-      (assoc summary
-             :availability
-             (if (= :ready (:status runtime)) :available :unavailable)
-             :runtime runtime))))
+                              :query-router-status :query-router-detail
+                              :candidate-reranker-status
+                              :candidate-reranker-detail])]
+    (cond-> runtime
+      (:log-path runtime) (update :log-path str))))
+
+(defn- semantic-status [graph runtime-state]
+  (let [runtime (runtime-view runtime-state)
+        summary (semantic-state/semantic-summary
+                 graph semantic-reconcile/provider
+                 (System/currentTimeMillis))]
+    (assoc summary
+           :graph-state :ready
+           :availability
+           (if (= :ready (:status runtime)) :available :unavailable)
+           :analysis-progress (:analysis-progress runtime-state)
+           :runtime runtime)))
+
+(defn- updating-semantic-status [runtime-state]
+  (let [runtime (runtime-view runtime-state)
+        previous (:last-semantic-status runtime-state)
+        baseline (or previous
+                     {:indexed 0 :indexed-records 0 :desired 0
+                      :pending 0 :leased 0 :failed 0 :dirty 0
+                      :coverage-percent 0.0 :completeness :unknown})]
+    (assoc baseline
+           :graph-state :updating
+           :availability
+           (if (= :ready (:status runtime)) :available :unavailable)
+           :analysis-progress (:analysis-progress runtime-state)
+           :runtime runtime)))
+
+(defn- current-semantic-status! [graph runtime-state]
+  (let [status (semantic-status graph @runtime-state)]
+    (swap! runtime-state assoc :last-semantic-status status)
+    status))
 
 (defn- service-progress! [event]
   (println
@@ -98,7 +125,10 @@
           (.put analysis-mutexes graph mutex)
           mutex))))
 
-(defn- analyze! [graph generation project settings force-full?]
+(defn- analyze!
+  ([graph generation project settings force-full?]
+   (analyze! graph generation project settings force-full? service-progress!))
+  ([graph generation project settings force-full? progress-fn]
   (let [prepared
         (locking (analysis-mutex graph)
           (let [full? (or force-full?
@@ -107,12 +137,12 @@
                 incremental-prepared
                 (when-not full?
                   (incremental/prepare-current
-                   graph project settings service-progress!))]
+                   graph project settings progress-fn))]
             (if (:complete-result incremental-prepared)
               incremental-prepared
               (let [candidate (if full?
                                 (full/prepare-current
-                                 project settings service-progress! :full)
+                                 project settings progress-fn :full)
                                 incremental-prepared)]
                 (if (:stale? candidate)
                   candidate
@@ -122,7 +152,7 @@
                      graph generation
                      #(if full?
                         (full/commit-candidate!
-                         graph project settings candidate service-progress!)
+                         graph project settings candidate progress-fn)
                         (incremental/commit-candidate!
                          graph project settings candidate)))})))))]
     (cond
@@ -131,10 +161,38 @@
       prepared
       (:full? prepared)
         (full/finish-candidate!
-         graph project settings (:result prepared) service-progress!)
+         graph project settings (:result prepared) progress-fn)
       :else
       (incremental/finish-candidate!
-       graph project settings (:result prepared)))))
+       graph project settings (:result prepared))))))
+
+(defn- run-analysis! [graph generation project settings force-full? runtime-state]
+  (let [progress-state (:progress-state @runtime-state)
+        operation (if force-full? :full-analysis :incremental-analysis)
+        _ (when progress-state
+            (let [snapshot (analysis-progress/begin! progress-state operation)]
+              (swap! runtime-state assoc :analysis-progress snapshot)))
+        progress-fn
+        (fn [event]
+          (when progress-state
+            (swap! runtime-state assoc
+                   :analysis-progress
+                   (analysis-progress/record! progress-state event)))
+          (service-progress! event))]
+    (try
+      (let [result (analyze! graph generation project settings force-full?
+                             progress-fn)]
+        (when progress-state
+          (swap! runtime-state assoc
+                 :analysis-progress
+                 (analysis-progress/complete! progress-state result)))
+        result)
+      (catch Throwable error
+        (when progress-state
+          (swap! runtime-state assoc
+                 :analysis-progress
+                 (analysis-progress/fail! progress-state error)))
+        (throw error)))))
 
 (defn- read-consistently
   "Run a multi-query read without acquiring the graph monitor. A concurrent
@@ -176,7 +234,8 @@
   (let [runtime @runtime-state]
     (case (:op request)
     :ping :pong
-    :analyze (analyze! graph generation project settings (:full? request))
+    :analyze (run-analysis! graph generation project settings (:full? request)
+                            runtime-state)
     :query
     (if (= "search" (:subcommand request))
       (let [{:keys [term mode source-preference intent-rerank?
@@ -217,6 +276,7 @@
            {:mode mode :source-preference source-preference
             :intent-rerank? intent-rerank?
             :intent-advisory advisory
+            :candidate-reranker (:candidate-reranker runtime)
             :seed-mode (when intent-rerank?
                          (get-in settings [:context :intent-seed-mode]))})))
       (read-consistently
@@ -278,6 +338,8 @@
                             {:source-preference (:source-preference options)
                              :intent-rerank? (:intent-rerank? options)
                              :intent-advisory advisory
+                             :candidate-reranker
+                             (:candidate-reranker runtime)
                              :seed-mode (:seed-mode options)
                              :max-seeds (:max-seeds options)})
                            resolution
@@ -291,8 +353,11 @@
         packet))
     :export (read-consistently graph generation true
                                #(export/render % (:format request)))
-    :semantic-status (read-consistently graph generation false
-                                        #(semantic-status % runtime))
+    :semantic-status
+    (if (odd? @generation)
+      (updating-semantic-status runtime)
+      (read-consistently graph generation false
+                         #(current-semantic-status! % runtime-state)))
     :semantic-failures
     (read-consistently graph generation false
                        #(semantic-state/failure-records
@@ -304,9 +369,9 @@
     :semantic-retry-failed
     (with-graph-write
       graph generation
-      #(do
+         #(do
          (semantic-reconcile/retry-failed! graph project settings)
-         (semantic-status graph runtime)))
+         (current-semantic-status! graph runtime-state)))
     :semantic-sync
     (do
       ;; An explicit sync is also the operator's repair action for exhausted
@@ -316,7 +381,7 @@
       (with-graph-write graph generation
                         #(semantic-reconcile/mark-full! graph))
       (read-consistently graph generation false
-                         #(semantic-status % runtime)))
+                         #(current-semantic-status! % runtime-state)))
     :stop :stopping
     (throw (ex-info (str "Unknown service operation: " (:op request))
                     {:exit-code 2})))))
@@ -406,6 +471,7 @@
           running (atom true)
           graph-generation (atom 0)
           semantic-enabled? (semantic-reconcile/enabled? settings)
+          progress-state (analysis-progress/create project)
           runtime-state (atom {:status (if semantic-enabled?
                                          :starting :disabled)
                                :worker-status (if semantic-enabled?
@@ -413,13 +479,35 @@
                                :query-router-status
                                (if (get-in settings
                                            [:context :query-router :enabled])
-                                 :starting :disabled)})
+                                 :starting :disabled)
+                               :candidate-reranker-status
+                               (if (get-in settings
+                                           [:context :candidate-reranker
+                                            :enabled])
+                                 :starting :disabled)
+                               :progress-state progress-state
+                               :analysis-progress
+                               (analysis-progress/snapshot progress-state)})
           worker-state (atom nil)]
       (with-open [lock-channel channel
                   service-lock lock]
        (try
         (with-open [graph (store/open project settings)
                     server (transport/open-listener project)]
+          ;; Capture a last committed snapshot before any later analysis can
+          ;; make the generation sentinel odd. Status can then report the
+          ;; previous graph while a replacement is being committed.
+          (try
+            (current-semantic-status! graph runtime-state)
+            (catch Throwable error
+              (swap! runtime-state assoc
+                     :last-semantic-status
+                     {:graph-state :unknown
+                      :availability :unavailable
+                      :analysis-progress
+                      (analysis-progress/snapshot progress-state)
+                      :runtime {:status :starting
+                                :detail (.getMessage error)}})))
           (Files/writeString
            descriptor-path
            (pr-str
@@ -450,20 +538,36 @@
                                 :detail (.getMessage error)
                                 :worker-status :not-running})))))
                 router-future
-                (when (get-in settings [:context :query-router :enabled])
+                (when (or (get-in settings [:context :query-router :enabled])
+                          (get-in settings
+                                  [:context :candidate-reranker :enabled]))
                   (future
                     (try
                       (let [router-runtime (router-factory project settings)]
                         (swap! runtime-state assoc
-                               :query-router-status (:status router-runtime)
+                               :query-router-status
+                               (if (get-in settings
+                                           [:context :query-router :enabled])
+                                 (:status router-runtime) :disabled)
                                :query-router (:client router-runtime)
+                               :candidate-reranker-status
+                               (if (get-in settings
+                                           [:context :candidate-reranker
+                                            :enabled])
+                                 (:status router-runtime) :disabled)
+                               :candidate-reranker (:reranker router-runtime)
                                :query-router-runtime router-runtime))
                       (catch Throwable error
                         (swap! runtime-state assoc
                                :query-router-status :failed
                                :query-router-detail (.getMessage error)
+                               :candidate-reranker-status :failed
+                               :candidate-reranker-detail (.getMessage error)
                                :query-router
                                (intent-router/unavailable
+                                :startup-failed (.getMessage error))
+                               :candidate-reranker
+                               (candidate-reranker/unavailable
                                 :startup-failed (.getMessage error)))))))
                 worker-future
                 (when semantic-enabled?
@@ -500,8 +604,9 @@
                     project settings
                     (fn []
                       (try
-                        (let [result (analyze! graph graph-generation
-                                               project settings false)]
+                        (let [result (run-analysis! graph graph-generation
+                                                     project settings false
+                                                     runtime-state)]
                           (println
                            (format
                             "Watched analysis: %d files, %d changed, %d deleted"

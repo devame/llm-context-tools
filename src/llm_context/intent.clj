@@ -1,6 +1,6 @@
 (ns llm-context.intent
-  "Repository-neutral natural-language query planning, structural reranking,
-  and bounded traversal-root selection."
+  "Repository-neutral natural-language query planning, structural
+  qualification, and bounded traversal-root selection."
   (:require [clojure.set :as set]
             [clojure.string :as str]))
 
@@ -8,26 +8,8 @@
 
 (def ^:private stop-terms
   #{"a" "an" "and" "are" "before" "code" "does" "for" "from" "how"
-    "in" "is" "it" "metabase" "of" "or" "repository" "the" "to" "what"
+    "in" "is" "it" "of" "or" "repository" "the" "to" "what"
     "where" "which" "with"})
-
-(def ^:private concept-specs
-  [{:concept :code-concept/http-endpoint
-    :query-pattern #"(?i)\b(?:api|apis|endpoint|endpoints|http route|http routes)\b"
-    :expanded-terms #{"api" "endpoint" "handler" "http" "ring" "route" "routes"}
-    :lexical-expansions ["routes" "route" "handler" "api"]}
-   {:concept :code-concept/test
-    :query-pattern #"(?i)\b(?:fixture|fixtures|spec|specs|test|tests|testing)\b"
-    :expanded-terms #{"fixture" "spec" "test"}
-    :lexical-expansions ["test" "spec" "fixture"]}
-   {:concept :code-concept/permission
-    :query-pattern #"(?i)\b(?:authorization|authorize|permission|permissions|policy)\b"
-    :expanded-terms #{"authorize" "permission" "perms" "policy" "read-check"}
-    :lexical-expansions ["permission" "perms" "authorize" "policy"]}
-   {:concept :code-concept/validation
-    :query-pattern #"(?i)\b(?:coerce|coercion|validate|validated|validation)\b"
-    :expanded-terms #{"check" "coerce" "schema" "validate" "validation"}
-    :lexical-expansions ["validate" "validation" "coerce" "schema"]}])
 
 (defn normalize-seed-mode [value]
   (let [mode (cond
@@ -80,18 +62,6 @@
                  (= requested-mode :single) :lookup
                  :else :adaptive)
          resolved-mode (if (= requested-mode :single) :single :multi)
-         concepts (->> concept-specs
-                       (keep #(when (re-find (:query-pattern %) (or query ""))
-                                (:concept %)))
-                       set)
-         expanded (->> concept-specs
-                       (filter #(contains? concepts (:concept %)))
-                       (mapcat :expanded-terms)
-                       set)
-         lexical-expansions (->> concept-specs
-                                 (filter #(contains? concepts (:concept %)))
-                                 (mapcat :lexical-expansions)
-                                 distinct vec)
          default-max-seeds (or default-max-seeds 4)
          default-candidate-count (or default-candidate-count 50)
          multi-candidate-count (or multi-candidate-count 100)
@@ -103,13 +73,10 @@
       :max-seeds max-seeds
       :candidate-count (if (= resolved-mode :multi)
                          multi-candidate-count default-candidate-count)
-      ;; Semantic top-k has a direct latency cost. Query breadth comes from
-      ;; expanded lexical generation while this budget stays independent.
+      ;; Semantic top-k has a direct latency cost and remains independent from
+      ;; the unchanged-query lexical channel.
       :semantic-candidate-count semantic-candidate-count
       :query-terms (terms query)
-      :concepts concepts
-      :expanded-terms expanded
-      :lexical-expansions lexical-expansions
       :reason (cond
                 (not= requested-mode :auto) :explicit-seed-mode
                 :else :shape-neutral-retrieval)})))
@@ -123,6 +90,10 @@
 (defn- materially-qualified? [candidate]
   (true? (:structurally-qualified? candidate)))
 
+(defn- complete-aggregate? [aggregate]
+  (contains? #{:complete-static :complete-resolved}
+             (:completeness aggregate)))
+
 (defn resolve-plan
   "Resolve an evidence plan from an explicit override or an advisory model
   prior plus retrieved structure. The advisory result never changes the
@@ -132,11 +103,34 @@
   (let [minimum-margin (double (or minimum-advisory-margin 0.0))
         margin (double (or (:margin advisory) 0.0))
         confident? (>= margin minimum-margin)
-        suggestion (when (and (= :available (:status advisory)) confident?)
-                     (:suggested-shape advisory))
+        raw-suggestion (when (= :available (:status advisory))
+                         (:suggested-shape advisory))
+        suggestion (when confident? raw-suggestion)
         relevant-count (count (filter relevance-qualified? candidates))
         qualified-count (count (filter materially-qualified? candidates))
         relationship-count (long (or exact-relationship-count 0))
+        complete-aggregate-count
+        (count (filter #(some complete-aggregate? (:aggregates %)) candidates))
+        set-evidence? (or (pos? complete-aggregate-count)
+                          (>= qualified-count 2))
+        set-required? (or (= :set (:shape plan))
+                          (= :set raw-suggestion))
+        answerability
+        (cond
+          (and set-required? set-evidence?)
+          {:status :supported
+           :required-evidence :complete-aggregate-or-qualified-set
+           :reason :set-evidence-present}
+
+          set-required?
+          {:status :insufficient
+           :required-evidence :complete-aggregate-or-qualified-set
+           :reason :set-evidence-absent}
+
+          :else
+          {:status :unknown
+           :required-evidence :query-shape-specific
+           :reason :no-enforced-requirement})
         evidence-status (cond
                           (pos? qualified-count) :structural-evidence
                           (pos? relevant-count) :relevance-only
@@ -148,6 +142,7 @@
         support-base
         {:relevant-candidates relevant-count
          :qualified-candidates qualified-count
+         :complete-aggregates complete-aggregate-count
          :exact-relationships relationship-count
          :advisory-margin margin
          :minimum-advisory-margin minimum-margin
@@ -158,12 +153,13 @@
              :evidence-status evidence-status
              :seed-selection-authority seed-selection-authority
              :structural-support (assoc support-base :supports-advice? nil)
+             :answerability answerability
              :advisory advisory)
       (let [supported?
             (case suggestion
               :lookup (and (= qualified-count 1)
                            (zero? relationship-count))
-              :set (>= qualified-count 2)
+              :set set-evidence?
               :flow (and (>= qualified-count 2)
                          (pos? relationship-count))
               false)
@@ -190,124 +186,95 @@
                :seed-selection-authority seed-selection-authority
                :structural-support
                (assoc support-base :supports-advice? supported?)
+               :answerability answerability
                :advisory advisory)))))
 
 (defn- candidate-text [candidate]
-  (str/join " " (keep candidate
-                       [:name :qualified-name :file :signature :doc])))
+  (str/join
+   " "
+   (concat
+    (keep candidate [:name :qualified-name :file :signature :doc])
+    (mapcat (fn [{:keys [name kind completeness members]}]
+              (concat [name (some-> kind clojure.core/name)
+                       (some-> completeness clojure.core/name)]
+                      (map :key members) (map :value members)))
+            (:aggregates candidate)))))
 
-(defn- endpoint-evidence [candidate candidate-terms]
-  (let [name (str/lower-case (or (:name candidate) ""))
-        doc (str/lower-case (or (:doc candidate) ""))]
-    (cond-> []
-      (re-find #"(?:^|[-_/])(routes?|handler)(?:$|[-_/])" name)
-      (conj [:route-like-identifier 3.0])
-      (or (str/includes? doc "/api/")
-          (str/includes? doc "`/api")
-          (contains? candidate-terms "api"))
-      (conj [:api-path-or-term 2.0])
-      (contains? candidate-terms "endpoint")
-      (conj [:endpoint-term 1.0]))))
+(defn- aggregate-evidence [plan candidate]
+  (when (= :set (:advisory-shape plan))
+    (if (some complete-aggregate? (:aggregates candidate))
+      [[:complete-aggregate 4.0]]
+      (when (seq (:aggregates candidate))
+        [[:partial-aggregate 0.5]]))))
 
-(defn- concept-evidence [plan candidate candidate-terms]
-  (let [identifier-terms
-        (terms (str (:name candidate) " " (:qualified-name candidate)))]
-    (mapcat
-     (fn [concept]
-       (case concept
-         :code-concept/http-endpoint
-         (endpoint-evidence candidate candidate-terms)
-         :code-concept/test
-         (when (= :test (:source-role candidate)) [[:test-source 2.0]])
-         :code-concept/permission
-         (when (or (seq (set/intersection
-                         identifier-terms
-                         #{"authorize" "permission" "perms" "policy"}))
-                   (and (contains? identifier-terms "read")
-                        (contains? identifier-terms "check")))
-           [[:permission-like-identifier 1.5]])
-         :code-concept/validation
-         (when (seq (set/intersection
-                     identifier-terms
-                     #{"check" "coerce" "schema" "validate" "validation"}))
-           [[:validation-like-identifier 1.5]])
-         []))
-     (:concepts plan))))
+(defn- canonical-definition? [candidate]
+  (and (contains? #{:scope/top-level :scope/namespace :scope/module}
+                  (:scope candidate))
+       (contains? #{:role/definition :role/macro :role/protocol
+                    :role/variable :role/namespace :role/module}
+                  (:role candidate))))
+
+(defn- structural-evidence [plan candidate]
+  (concat
+   (aggregate-evidence plan candidate)
+   (when (canonical-definition? candidate)
+     [[:canonical-definition 1.0]])))
 
 (defn- qualification-reasons
   "Return structural evidence that makes a candidate a valid traversal root
-  for the requested target concept. This uses graph metadata and identifier
-  shape, never repository-specific path allowlists."
+  for the requested answer shape. This uses canonical graph metadata, never
+  repository vocabulary or path allowlists."
   [plan evidence]
   (let [reasons (set (map first evidence))
-        concepts (:concepts plan)]
-    (cond
-      ;; A request for endpoint tests targets tests rather than route exports.
-      (contains? concepts :code-concept/test)
-      (set/intersection reasons #{:test-source})
+        set-request? (= :set (:advisory-shape plan))]
+    (if set-request?
+      (set/intersection reasons #{:complete-aggregate})
+      (set/intersection reasons #{:canonical-definition}))))
 
-      (contains? concepts :code-concept/http-endpoint)
-      (set/intersection reasons #{:route-like-identifier})
-
-      (contains? concepts :code-concept/permission)
-      (set/intersection reasons #{:permission-like-identifier})
-
-      (contains? concepts :code-concept/validation)
-      (set/intersection reasons #{:validation-like-identifier})
-
-      :else #{})))
-
-(defn rerank
-  "Conservatively rerank candidates using query coverage and supported
-  structural concepts. Existing retrieval scores remain untouched."
+(defn qualify
+  "Annotate lexical diagnostics and structural evidence without changing
+  candidate order. Semantic ordering belongs to the learned reranker."
   [query candidates plan]
-  (let [active? (or (seq (:concepts plan)) (= :multi (:seed-mode plan)))
-        enriched
+  (let [enriched
         (mapv
          (fn [rank candidate]
            (let [candidate-terms (terms (candidate-text candidate))
                  direct (set/intersection (:query-terms plan) candidate-terms)
-                 expanded (set/intersection (:expanded-terms plan) candidate-terms)
-                 evidence (vec (concept-evidence plan candidate candidate-terms))
+                 evidence (vec (structural-evidence plan candidate))
                  qualification (qualification-reasons plan evidence)
                  evidence-score (reduce + 0.0 (map second evidence))
                  score (+ (* 1.0 (count direct))
-                          (* 0.5 (count expanded))
                           evidence-score)
                  relevance-reasons
-                 (vec (concat
-                       (map #(keyword (str "query-term-" %)) (sort direct))
-                       (map #(keyword (str "expanded-term-" %))
-                            (sort expanded))))
+                 (vec (map #(keyword (str "query-term-" %)) (sort direct)))
                  structural-reasons (vec (sort qualification))
-                 concept-reasons (vec (map first evidence))
+                 evidence-reasons (vec (map first evidence))
                  structurally-qualified? (boolean (seq structural-reasons))]
              (assoc candidate
-                    :pre-rerank-rank rank
+                    :pre-rerank-rank (or (:pre-rerank-rank candidate) rank)
+                    :qualification-rank rank
                     :intent-score score
-                    :relevance-qualified? (boolean (or (seq direct)
-                                                       (seq expanded)))
+                    :relevance-qualified? (boolean (seq direct))
                     :relevance-reasons relevance-reasons
                     :structurally-qualified? structurally-qualified?
                     ;; Compatibility aliases remain explicit: qualification is
                     ;; structural, while reasons retain all reranking evidence.
                     :intent-qualified? structurally-qualified?
                     :structural-reasons structural-reasons
-                    :concept-reasons concept-reasons
+                    :evidence-reasons evidence-reasons
                     :intent-reasons
-                    (vec (concat relevance-reasons concept-reasons)))))
-         (range 1 (inc (count candidates))) candidates)
-        ordered (if active?
-                  (sort-by (juxt (comp not :structurally-qualified?)
-                                 (comp - :intent-score)
-                                 :pre-rerank-rank)
-                           enriched)
-                  enriched)]
-    {:results (mapv #(assoc %1 :post-rerank-rank %2)
-                    ordered (range 1 (inc (count ordered))))
-     :provider :built-in
-     :status (if active? :applied :not-needed)
-     :reordered? (not= (mapv :id candidates) (mapv :id ordered))}))
+                    (vec (concat relevance-reasons evidence-reasons)))))
+         (range 1 (inc (count candidates))) candidates)]
+    {:results enriched
+     :provider :built-in-structural-qualification
+     :status :annotated
+     :reordered? false}))
+
+(defn rerank
+  "Compatibility alias for callers of the former deterministic reranker.
+  This function now annotates only and never changes candidate order."
+  [query candidates plan]
+  (qualify query candidates plan))
 
 (defn- namespace-key [candidate]
   (some-> (:qualified-name candidate)

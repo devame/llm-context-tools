@@ -13,6 +13,12 @@
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Seed mode"
                         (intent/normalize-seed-mode "everything"))))
 
+(deftest repository-names-remain-meaningful-query-terms
+  (is (contains? (:query-terms (intent/analyze "where is northwind configured?"))
+                 "northwind"))
+  (is (contains? (:query-terms (intent/analyze "where is metabase configured?"))
+                 "metabase")))
+
 (deftest advisory-shapes-require-structural-support
   (let [plan (intent/analyze "show the relevant code")
         advice {:provider :mixedbread-32m :status :available
@@ -62,7 +68,7 @@
     (is (= :no-evidence (:evidence-status resolved)))
     (is (= :rank-fallback (:seed-selection-authority resolved)))))
 
-(deftest endpoint-reranking-uses-structural-evidence-without-changing-scores
+(deftest structural-qualification-never-reorders-learned-results
   (let [query "what modules expose HTTP endpoints?"
         plan (intent/analyze query)
         candidates [{:id "model" :name "type->model"
@@ -76,18 +82,21 @@
                     {:id "routes" :name "routes"
                      :qualified-name "app.session.api/routes"
                      :file "src/app/session/api.clj" :doc "`/api/session` routes."
+                     :scope :scope/top-level :role :role/variable
                      :score 0.012}]
         result (intent/rerank query candidates plan)]
-    (is (= ["routes" "safe" "model"] (mapv :id (:results result))))
-    (is (= 0.012 (:score (first (:results result)))))
-    (is (true? (:intent-qualified? (first (:results result)))))
-    (is (true? (:structurally-qualified? (first (:results result)))))
-    (is (= [:route-like-identifier]
-           (:structural-reasons (first (:results result)))))
+    (is (= ["model" "safe" "routes"] (mapv :id (:results result))))
+    (is (= 0.031 (:score (first (:results result)))))
+    (is (false? (:intent-qualified? (first (:results result)))))
+    (is (false? (:structurally-qualified? (first (:results result)))))
+    (is (= [:canonical-definition]
+           (:structural-reasons (last (:results result)))))
+    (is (true? (:intent-qualified? (last (:results result)))))
+    (is (true? (:structurally-qualified? (last (:results result)))))
     (is (false? (:intent-qualified? (second (:results result)))))
     (is (seq (:relevance-reasons (second (:results result)))))
-    (is (= :applied (:status result)))
-    (is (:reordered? result))))
+    (is (= :annotated (:status result)))
+    (is (false? (:reordered? result)))))
 
 (deftest multi-seed-selection-is-bounded-and-diverse
   (let [plan (assoc (intent/analyze "list API endpoints") :max-seeds 2)
@@ -164,3 +173,33 @@
              plan [(candidate "a" true) (candidate "b" true)]
              {:advisory (advice :set) :exact-relationship-count 0
               :minimum-advisory-margin 0.02}))))))
+(deftest complete-aggregate-can-qualify-one-authoritative-set-root
+  (let [query "which transport providers are available?"
+        advisory {:provider :fixture :status :available
+                  :suggested-shape :set :margin 0.8}
+        plan (assoc (intent/analyze query) :advisory-shape :set)
+        candidate
+        {:id "symbol:providers"
+         :name "built-in-providers"
+         :qualified-name "neutral.transport/built-in-providers"
+         :file "src/neutral/transport.clj"
+         :aggregates
+         [{:kind :aggregate.kind/literal-set
+           :completeness :complete-static
+           :member-count 3
+           :member-kind :keyword
+           :members [{:value ":rail"} {:value ":road"}
+                     {:value ":river"}]}]}
+        qualified (intent/qualify query [candidate] plan)
+        result (first (:results qualified))
+        resolved (intent/resolve-plan
+                  plan (:results qualified)
+                  {:advisory advisory :minimum-advisory-margin 0.1
+                   :exact-relationship-count 0})]
+    (is (:structurally-qualified? result))
+    (is (= [:complete-aggregate] (:structural-reasons result)))
+    (is (= :set (:shape resolved)))
+    (is (= :model-plus-structure (:planning-authority resolved)))
+    (is (= :supported (get-in resolved [:answerability :status])))
+    (is (= 1 (get-in resolved [:structural-support
+                               :complete-aggregates])))))

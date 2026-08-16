@@ -13,10 +13,10 @@
 (def lateon
   (get-in (config/defaults) [:semantic :lateon-code]))
 
-(deftest semantic-document-contract-is-version-three
-  (is (= 3 document/current-document-version))
-  (is (= 3 (:document-version lateon)))
-  (is (= "llm-context-v3" (:index-name lateon))))
+(deftest semantic-document-contract-is-version-four
+  (is (= 4 document/current-document-version))
+  (is (= 4 (:document-version lateon)))
+  (is (= "llm-context-v4" (:index-name lateon))))
 
 (defn file [path source language]
   {:entity/type :entity.type/file
@@ -256,17 +256,36 @@
       (store/replace-file! graph file symbols)
       (store/write-graph-metadata!
        graph {:analyzer-name "fixture" :analyzer-version "1"
-              :janet-catalog-version "1" :semantic-document-version 3
+              :janet-catalog-version "1" :semantic-document-version 4
               :semantic-index-name "fixture"})
       (:counts
        (db-support/with-operation-counts
          (document/build-file graph project lateon (:file/id file)))))))
 
+(deftest aggregate-evidence-is-labelled-in-semantic-document-text
+  (let [source "(def providers #{:rail :road})"
+        file (file "src/providers.clj" source :language/clojure)
+        symbol (assoc (symbol-entity file "symbol:providers" "providers"
+                                     1 1 1 (inc (count source)))
+                      :symbol/kind :symbol.kind/variable
+                      :symbol/doc "All built-in providers")
+        aggregate {:id "aggregate:providers"
+                   :kind :aggregate.kind/literal-set
+                   :completeness :complete-static
+                   :member-count 2 :member-kind :keyword
+                   :members [{:ordinal 0 :value ":rail" :evidence :literal}
+                             {:ordinal 1 :value ":road" :evidence :literal}]}
+        built (document/build lateon symbol file source [] [aggregate])
+        text (get-in built [:chunks 0 :text])]
+    (is (str/includes? text "Aggregate kind: literal-set"))
+    (is (str/includes? text "Aggregate completeness: complete-static"))
+    (is (str/includes? text "Aggregate members: :rail, :road"))))
+
 (deftest file-document-build-has-constant-database-cardinality
   (let [small (document-build-operation-counts 10)
         large (document-build-operation-counts 200)]
     (is (= small large))
-    (is (= 4 (:query large)))
+    (is (= 5 (:query large)))
     (is (= 1 (:pull large)))
     (is (= 1 (:pull-many large)))
     (is (zero? (:transact large)))))

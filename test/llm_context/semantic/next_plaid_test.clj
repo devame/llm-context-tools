@@ -136,13 +136,13 @@
                              :llm_file_id "file:src/a.clj"
                              :llm_document_hash "sha256:document"
                              :llm_model_revision (:model-revision settings)
-                             :llm_document_version 3
+                             :llm_document_version 4
                              :llm_chunk_index 0
                              :llm_chunk_count 1}]})])
          requests)]
     (is (= [(dissoc document-chunk :text)]
            (index/indexed-documents client ["symbol:a" "symbol:b"])))
-    (is (= "/indices/llm-context-v3/metadata/get"
+    (is (= "/indices/llm-context-v4/metadata/get"
            (:path (first @requests))))
     (is (= "llm_symbol_id IN (?, ?)"
            (get-in (first @requests) [:body :condition])))))
@@ -188,6 +188,28 @@
                      [:body :params :n_ivf_probe])))
     (is (nil? (get-in (first @requests)
                       [:body :params :centroid_score_threshold])))))
+
+(deftest direct-encoding-decodes-compact-little-endian-floats
+  (let [requests (atom [])
+        client (scripted-client
+                (atom [(response 200
+                                 {:num_texts 1
+                                  :embeddings_b64 ["AACAPwAAAD8="]
+                                  :shapes [[1 2]]})])
+                requests)
+        [embedding]
+        (next-plaid/encode-texts
+         client ["unchanged question"]
+         {:input-type :query :timeout-ms 321})]
+    (is (= 1 (:tokens embedding)))
+    (is (= 2 (:dimension embedding)))
+    (is (= [1.0 0.5] (vec (:values embedding))))
+    (is (= "/encode" (:path (first @requests))))
+    (is (= 321 (:timeout-ms (first @requests))))
+    (is (= "base64"
+           (get-in (first @requests) [:headers "X-Embeddings-Format"])))
+    (is (= {:texts ["unchanged question"] :input_type "query"}
+           (:body (first @requests))))))
 
 (deftest api-errors-are-typed-bounded-and-retriable
   (let [client (scripted-client

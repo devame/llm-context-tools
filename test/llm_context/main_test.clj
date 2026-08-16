@@ -2,11 +2,14 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [llm-context.analysis.check :as analysis-check]
+            [llm-context.analysis.full :as analysis-full]
             [llm-context.cli :as cli]
             [llm-context.config :as config]
             [llm-context.main :as main]
             [llm-context.project :as project]
             [llm-context.service.client :as service-client]
+            [llm-context.service.progress :as analysis-progress]
+            [llm-context.store :as store]
             [llm-context.version :as version])
   (:import [java.nio.file Files]))
 
@@ -87,6 +90,24 @@
       (is (= {:op :analyze :full? true} (first @request)))
       (is (= 86400000 (:request-timeout (second @request)))))))
 
+(deftest local-analysis-publishes-durable-progress-when-no-service-owns-project
+  (let [root (Files/createTempDirectory
+              "llm-context-local-analysis-progress-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        context (assoc (project/context (str root)) :options {:quiet? true})]
+    (with-redefs [service-client/request (fn [& _] nil)
+                  store/graph-state (constantly :empty)
+                  analysis-full/analyze!
+                  (fn [_ _ progress]
+                    (progress {:stage :discover-start})
+                    {:mode :full :files 1 :entities 2
+                     :diagnostics [] :semantic {:enabled? false}})]
+      (is (zero? (cli/execute context "analyze" ["--full"])))
+      (let [snapshot (analysis-progress/read-state context)]
+        (is (= :complete (:state snapshot)))
+        (is (= :full-analysis (:operation snapshot)))
+        (is (= :discover-start (:stage snapshot)))))))
+
 (deftest analysis-check-is-read-only-and-does-not-contact-the-service
   (let [root (Files/createTempDirectory
               "llm-context-analysis-check-"
@@ -165,6 +186,16 @@
            clojure.lang.ExceptionInfo
            #"LateOn semantic worker failed: fixture decoding failed"
            (cli/execute context "semantic" ["sync" "--wait"]))))))
+
+(deftest semantic-status-accepts-watch-options
+  (is (= {:watch? true :interval-ms 1500}
+         (#'cli/parse-semantic-status-options
+          ["--watch" "--interval-ms" "1500"])))
+  (is (= {:watch? false :interval-ms 2000}
+         (#'cli/parse-semantic-status-options [])))
+  (is (thrown-with-msg?
+       clojure.lang.ExceptionInfo #"requires a positive integer"
+       (#'cli/parse-semantic-status-options ["--interval-ms" "0"]))))
 
 (deftest initialization-confirms-the-project-root
   (let [root (Files/createTempDirectory

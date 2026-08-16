@@ -135,7 +135,7 @@
     (store/with-store [graph project (config/defaults)]
       (store/replace-file! graph file entities)
       (let [packet (context/build graph {:focus "a" :depth 1 :max-tokens 1000})]
-        (is (= 3 (:packet/version packet)))
+        (is (= 4 (:packet/version packet)))
         (is (= :exact (get-in packet [:focus-resolution :strategy])))
         (is (= ["symbol:a"]
                (mapv :id (get-in packet [:focus-resolution :selected]))))
@@ -166,6 +166,55 @@
             {:mode :intent :strategy :hybrid
              :selected [{:id "symbol:missing"}]
              :alternatives []}))))))
+
+(deftest container-seeds-expand-to-exact-members
+  (let [root (Files/createTempDirectory
+              "llm-context-container-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        project (project/context (str root))
+        file {:entity/type :entity.type/file :file/id "file:transport.clj"
+              :file/path "src/neutral/transport.clj"
+              :file/language :language/clojure
+              :file/content-hash (ids/content-hash "transport")
+              :file/size 9 :file/modified-at 1}
+        symbol (fn [id name qualified kind line]
+                 {:entity/type :entity.type/symbol :symbol/id id
+                  :symbol/name name :symbol/qualified-name qualified
+                  :symbol/kind kind :symbol/file (:file/id file)
+                  :symbol/platform :clj :symbol/analyzer :test
+                  :symbol/scope :scope/top-level :symbol/role :role/definition
+                  :symbol/indexable? true
+                  :source/start-line line :source/start-column 1
+                  :source/end-line line :source/end-column 12})
+        container (symbol "symbol:transport" "neutral.transport"
+                          "neutral.transport" :symbol.kind/namespace 1)
+        rail (symbol "symbol:rail" "rail" "neutral.transport/rail"
+                     :symbol.kind/function 3)
+        road (symbol "symbol:road" "road" "neutral.transport/road"
+                     :symbol.kind/function 6)
+        contains-edge
+        (fn [id target line]
+          {:entity/type :entity.type/edge :edge/id id
+           :edge/kind :edge.kind/contains :edge/from (:symbol/id container)
+           :edge/to (:symbol/id target) :edge/target-text (:symbol/name target)
+           :edge/resolution :resolution/exact :edge/confidence 1.0
+           :edge/evidence :analyzer-container
+           :source/start-line line :source/start-column 1
+           :source/end-line line :source/end-column 12})]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-file!
+       graph file
+       [container rail road
+        (contains-edge "edge:transport-rail" rail 3)
+        (contains-edge "edge:transport-road" road 6)])
+      (let [packet (context/build graph {:focus "neutral.transport"
+                                         :depth 1 :max-tokens 1000})
+            summary (first (:containers packet))]
+        (is (= "symbol:transport" (:id summary)))
+        (is (= :complete-static (:completeness summary)))
+        (is (= ["neutral.transport/rail" "neutral.transport/road"]
+               (mapv :qualified-name (:members summary))))
+        (is (re-find #"neutral.transport/rail" (context/markdown packet)))))))
 
 (deftest disconnected-symbols-do-not-enter-focused-context
   (let [root (Files/createTempDirectory

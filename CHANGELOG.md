@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.12.0
+
+- Added graph-format 4 aggregate and concept entities so retrieval can combine
+  granular symbols with bounded module and repository-level meaning.
+- Added adaptive query planning, structural evidence qualification, diverse
+  seed selection, and exact-relationship-aware context expansion.
+- Added the verified 32M Mixedbread candidate reranker with shadow/enforce
+  modes, bounded caches, telemetry, and deterministic fallback.
+- Added durable full-analysis and semantic progress reporting that can be
+  watched safely from another terminal.
+- Added one verified model-package contract for semantic retrieval, query
+  routing/reranking, and optional answer reading, including pinned manifests,
+  local or Hugging Face-compatible sources, runtime registries, and mandatory
+  SHA-256 verification with no unverified escape hatch.
+
 ## 0.11.0
 
 - Added a pinned public cross-repository semantic evaluation suite for

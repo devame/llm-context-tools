@@ -184,7 +184,7 @@
       :symbol/analyzer :clj-kondo
       :symbol/scope :scope/namespace
       :symbol/role :role/namespace
-      :symbol/indexable? false}
+      :symbol/indexable? true}
      (range-data definition))))
 
 (defn- var-symbol [file platform definition]

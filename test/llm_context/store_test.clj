@@ -576,3 +576,47 @@
                                '[:find [?id ...]
                                  :where [?edge :edge/id ?id]]
                                []))))))
+
+(deftest file-replacement-owns-aggregate-memberships-atomically
+  (let [project (temp-project)
+        file (file-entity "src/catalog.clj" "catalog")
+        owner (symbol-entity file "neutral.catalog/providers" 1)
+        aggregate-id (ids/aggregate-id
+                      {:owner-id (:symbol/id owner)
+                       :kind :aggregate.kind/literal-set})
+        aggregate {:entity/type :entity.type/aggregate
+                   :aggregate/id aggregate-id
+                   :aggregate/name "providers"
+                   :aggregate/kind :aggregate.kind/literal-set
+                   :aggregate/owner (:symbol/id owner)
+                   :aggregate/file (:file/id file)
+                   :aggregate/completeness :complete-static
+                   :aggregate/member-count 1
+                   :aggregate/member-kind :keyword
+                   :aggregate/analyzer :fixture}
+        membership {:entity/type :entity.type/membership
+                    :membership/id
+                    (ids/membership-id {:aggregate-id aggregate-id
+                                        :ordinal 0 :value ":river"})
+                    :membership/aggregate aggregate-id
+                    :membership/value ":river"
+                    :membership/value-kind :keyword
+                    :membership/ordinal 0
+                    :membership/evidence :literal}]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-file! graph file [owner aggregate membership])
+      (is (= #{aggregate-id}
+             (set (store/query graph
+                               '[:find [?id ...]
+                                 :where [_ :aggregate/id ?id]] []))))
+      (is (= #{":river"}
+             (set (store/query graph
+                               '[:find [?value ...]
+                                 :where [_ :membership/value ?value]] []))))
+      (store/replace-file! graph file [owner])
+      (is (empty? (store/query graph
+                               '[:find [?id ...]
+                                 :where [_ :aggregate/id ?id]] [])))
+      (is (empty? (store/query graph
+                               '[:find [?id ...]
+                                 :where [_ :membership/id ?id]] []))))))

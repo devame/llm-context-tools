@@ -31,13 +31,13 @@
 (deftest full-replacement-preserves-only-compatible-semantic-state
   (let [settings (config/defaults)
         analyzers {:clj-kondo {:configuration-fingerprint "config:a"}}
-        active {:llm-context/graph-format 3
+        active {:llm-context/graph-format 4
                 :llm-context/analyzer-version "2025.10.23"
                 :llm-context/analyzer-configuration-fingerprint "config:a"
                 :llm-context/semantic-fingerprint-version 1
                 :llm-context/janet-catalog-version 1
-                :llm-context/semantic-document-version 3
-                :llm-context/semantic-index-name "llm-context-v3"}
+                :llm-context/semantic-document-version 4
+                :llm-context/semantic-index-name "llm-context-v4"}
         reset-count (atom 0)
         persist! (fn [metadata]
                    (with-redefs [store/graph-metadata (constantly metadata)

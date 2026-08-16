@@ -58,12 +58,22 @@ cached once per user. Repository-derived data is not stored there: every
 project owns its graph and semantic index below its own `.llm-context/`
 directory. Open a new terminal after an installer changes `PATH`.
 
-Set `LLM_CONTEXT_VERSION=0.11.0` to pin a release or
+Set `LLM_CONTEXT_VERSION=0.12.0` to pin a release or
 `LLM_CONTEXT_INSTALL_DIR` to choose another destination. The installers are
 idempotent: running them again replaces the jar and launcher only after
 checksum validation and reuse a verified model snapshot. Set
 `LLM_CONTEXT_MODEL_CACHE` to relocate the model, or
 `LLM_CONTEXT_SKIP_SEMANTIC=1` for a graph-only installation.
+
+All model packages are replaceable through one verified manifest contract.
+Set `LLM_CONTEXT_MODEL_MANIFEST` to a local EDN manifest,
+`LLM_CONTEXT_MODEL_MANIFEST_SHA256` to its SHA-256, and
+`LLM_CONTEXT_MODEL_ROLES` to a comma-separated selection of
+`semantic-retriever`, `query-router-reranker`, and `answer-reader`. Custom
+manifests without a checksum, mutable revisions, and model files that do not
+match their declared hashes are rejected. The answer reader is opt-in because
+the core CLI does not require its approximately 731 MB GGUF; demo deployments
+can select all three roles.
 
 Re-run the installer to update, or remove the installed directory to uninstall.
 
@@ -131,6 +141,7 @@ llm-context export --format edn|json|jsonl|markdown [--output PATH]
 llm-context summary [--output PATH]
 llm-context integrate claude|codex|generic [--force]
 llm-context semantic status
+llm-context semantic status --watch [--interval-ms N]
 llm-context semantic sync [--wait]
 llm-context semantic failures
 llm-context semantic dirty
@@ -160,8 +171,13 @@ support, and final planning authority remain inspectable in retrieval
 provenance. The router reuses NextPlaid and a 33 MB INT8 ONNX artifact; it does
 not require Python or start a model per query.
 
-After planning, candidates are structurally reranked without rewriting model
-scores. Accepted lookup plans select one seed; set and flow plans select
+After source-role policy, the same 32M ColBERT model reranks a bounded candidate
+prefix against the unchanged question. It defaults to `:shadow` until the model
+passes the frozen reranking suite; `:enforce` applies its ordering.
+Deterministic code then annotates exact
+structural evidence without changing model order. A model timeout or failure
+preserves fused order and is visible in provenance. Accepted lookup plans
+select one seed; set and flow plans select
 bounded, file-diverse roots under one shared traversal and token budget. Every
 relationship admitted afterward is still an exact canonical graph edge.
 Without either resident model, retrieval falls back to Datalevin and planning
@@ -233,6 +249,12 @@ Use it as a read-only source validation gate.
  {:default-max-tokens 8000
   :trace-depth 4
   :trace-limit 200
+  :candidate-reranker
+  {:enabled true
+   :mode :shadow
+   :candidate-count 50
+   :query-timeout-ms 5000
+   :document-cache-size 2048}
   :query-router
   {:enabled true
    :model "mixedbread-ai/mxbai-edge-colbert-v0-32m"
@@ -260,10 +282,15 @@ source of truth. The disposable LateOn index lives under
 under `.llm-context/query-router/next-plaid/`. JSONL, JSON, EDN, and Markdown
 are deterministic projections for interoperability, debugging, and artifacts.
 
-Release `0.9.0` introduces graph format 3. Existing generated graphs must be
+Current builds use graph format 4 and semantic document/index format 4. In
+addition to exact symbols and relationships, safe top-level literal
+collections are stored as source-backed aggregates with explicit membership
+and completeness; namespace/module containers provide deterministic coarse
+summaries. Existing generated graphs must be
 rebuilt once with `llm-context analyze --full`; source and configuration files
 are never changed. Normal queries detect older state and print this instruction
-instead of opening it as if it were current.
+instead of opening it as if it were current. Complete-inventory questions only
+qualify when a complete source-backed aggregate is present.
 
 ## Resident service
 
@@ -296,6 +323,12 @@ filesystem. Windows uses authenticated loopback TCP. An OS file lock prevents
 two service processes from owning the same project.
 
 Use `llm-context semantic status` to inspect lag and
+`llm-context semantic status --watch` to monitor a full or incremental graph
+replacement from another terminal. Status remains available while the graph
+is being committed: it reports the last committed counters plus the live
+analysis stage. The service also writes an atomic
+`.llm-context/analysis-progress.edn` snapshot, and marks a previously running
+operation as interrupted when the service restarts.
 `llm-context semantic sync --wait` when automation needs all queued embeddings
 visible before continuing. Logs are under `.llm-context/logs/`; they contain
 identifiers and bounded errors, not source documents.

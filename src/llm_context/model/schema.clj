@@ -2,11 +2,12 @@
   (:require [clojure.spec.alpha :as s]
             [clojure.string :as str]))
 
-(def graph-format-version 3)
+(def graph-format-version 4)
 
 (def entity-types #{:entity.type/file :entity.type/symbol :entity.type/edge
                     :entity.type/reference :entity.type/topic
-                    :entity.type/effect :entity.type/analysis})
+                    :entity.type/effect :entity.type/aggregate
+                    :entity.type/membership :entity.type/analysis})
 (def symbol-kinds #{:symbol.kind/function :symbol.kind/method :symbol.kind/class
                     :symbol.kind/interface :symbol.kind/module :symbol.kind/namespace
                     :symbol.kind/macro :symbol.kind/protocol
@@ -34,6 +35,14 @@
   #{:external :dynamic :ambiguous :unresolved})
 (def topic-kinds
   #{:event :subscription :effect :coeffect :state-key})
+(def aggregate-kinds
+  #{:aggregate.kind/literal-set :aggregate.kind/literal-vector
+    :aggregate.kind/literal-list :aggregate.kind/literal-map})
+(def aggregate-completeness
+  #{:complete-static :complete-resolved :partial-static :dynamic :unknown})
+(def membership-value-kinds
+  #{:string :keyword :symbol :number :boolean :nil :character
+    :map :set :vector :list :other})
 
 (s/def :entity/type entity-types)
 (s/def :file/id (s/and string? #(str/starts-with? % "file:")))
@@ -90,6 +99,26 @@
 (s/def :effect/symbol :symbol/id)
 (s/def :effect/detail string?)
 (s/def :effect/confidence (s/and number? #(<= 0.0 (double %) 1.0)))
+
+(s/def :aggregate/id (s/and string? #(str/starts-with? % "aggregate:")))
+(s/def :aggregate/name (s/and string? seq))
+(s/def :aggregate/kind aggregate-kinds)
+(s/def :aggregate/owner :symbol/id)
+(s/def :aggregate/file :file/id)
+(s/def :aggregate/completeness aggregate-completeness)
+(s/def :aggregate/member-count nat-int?)
+(s/def :aggregate/member-kind keyword?)
+(s/def :aggregate/analyzer keyword?)
+(s/def :aggregate/search-text (s/and string? seq))
+
+(s/def :membership/id
+  (s/and string? #(str/starts-with? % "membership:")))
+(s/def :membership/aggregate :aggregate/id)
+(s/def :membership/key string?)
+(s/def :membership/value string?)
+(s/def :membership/value-kind membership-value-kinds)
+(s/def :membership/ordinal nat-int?)
+(s/def :membership/evidence keyword?)
 
 (s/def :source/start-line pos-int?)
 (s/def :source/start-column pos-int?)
@@ -218,6 +247,27 @@
                  :source/start-byte :source/end-byte :source/snippet
                  :entity/evidence :entity/analyzer :entity/record-kind])
    valid-optional-source-range?))
+(s/def ::aggregate
+  (s/and
+   (s/keys :req [:entity/type :aggregate/id :aggregate/name
+                 :aggregate/kind :aggregate/owner :aggregate/file
+                 :aggregate/completeness :aggregate/member-count
+                 :aggregate/member-kind :aggregate/analyzer]
+           :opt [:aggregate/search-text
+                 :source/start-line :source/start-column
+                 :source/end-line :source/end-column
+                 :source/start-byte :source/end-byte])
+   valid-optional-source-range?))
+(s/def ::membership
+  (s/and
+   (s/keys :req [:entity/type :membership/id :membership/aggregate
+                 :membership/value :membership/value-kind
+                 :membership/ordinal :membership/evidence]
+           :opt [:membership/key
+                 :source/start-line :source/start-column
+                 :source/end-line :source/end-column
+                 :source/start-byte :source/end-byte])
+   valid-optional-source-range?))
 
 (def entity-specs
   {:entity.type/file ::file
@@ -225,7 +275,9 @@
    :entity.type/edge ::edge
    :entity.type/reference ::reference
    :entity.type/topic ::topic
-   :entity.type/effect ::effect})
+   :entity.type/effect ::effect
+   :entity.type/aggregate ::aggregate
+   :entity.type/membership ::membership})
 
 (defn validate-entity!
   "Validate a canonical entity and return it unchanged."
@@ -281,7 +333,13 @@
     entity))
 
 (defn with-derived-attributes [entity]
-  (with-symbol-search-text entity))
+  (cond-> (with-symbol-search-text entity)
+    (= :entity.type/aggregate (:entity/type entity))
+    (assoc :aggregate/search-text
+           (or (:aggregate/search-text entity)
+               (str (:aggregate/name entity) "\n"
+                    (name (:aggregate/kind entity)) "\n"
+                    (name (:aggregate/completeness entity)))))))
 
 (def datalevin-schema
   {:llm-context/meta-key {:db/valueType :db.type/string
@@ -461,6 +519,41 @@
                    :db/index true}
    :effect/detail {:db/valueType :db.type/string}
    :effect/confidence {:db/valueType :db.type/double}
+
+   :aggregate/id {:db/valueType :db.type/string
+                  :db/unique :db.unique/identity}
+   :aggregate/name {:db/valueType :db.type/string
+                    :db/index true}
+   :aggregate/kind {:db/valueType :db.type/keyword
+                    :db/index true}
+   :aggregate/owner {:db/valueType :db.type/ref
+                     :db/index true}
+   :aggregate/file {:db/valueType :db.type/ref
+                    :db/index true}
+   :aggregate/completeness {:db/valueType :db.type/keyword
+                            :db/index true}
+   :aggregate/member-count {:db/valueType :db.type/long}
+   :aggregate/member-kind {:db/valueType :db.type/keyword
+                           :db/index true}
+   :aggregate/analyzer {:db/valueType :db.type/keyword
+                        :db/index true}
+   :aggregate/search-text {:db/valueType :db.type/string
+                           :db/fulltext true
+                           :db.fulltext/domains ["aggregates"]}
+
+   :membership/id {:db/valueType :db.type/string
+                   :db/unique :db.unique/identity}
+   :membership/aggregate {:db/valueType :db.type/ref
+                          :db/index true}
+   :membership/key {:db/valueType :db.type/string
+                    :db/index true}
+   :membership/value {:db/valueType :db.type/string
+                      :db/index true}
+   :membership/value-kind {:db/valueType :db.type/keyword
+                           :db/index true}
+   :membership/ordinal {:db/valueType :db.type/long}
+   :membership/evidence {:db/valueType :db.type/keyword
+                         :db/index true}
 
    :entity/evidence {:db/valueType :db.type/keyword
                      :db/index true}

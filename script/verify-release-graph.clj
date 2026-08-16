@@ -37,14 +37,18 @@
                   db
                   #{:entity.type/file :entity.type/symbol
                     :entity.type/edge :entity.type/reference
-                    :entity.type/topic :entity.type/effect})]
+                    :entity.type/topic :entity.type/effect
+                    :entity.type/aggregate :entity.type/membership})]
     (d/pull-many db '[*] eids)))
 
 (def identity-attributes
-  [:file/id :symbol/id :topic/id :edge/id :reference/id :effect/id])
+  [:file/id :symbol/id :topic/id :edge/id :reference/id :effect/id
+   :aggregate/id :membership/id])
 
 (def reference-attributes
-  #{:symbol/file :edge/from :edge/to :reference/symbol :effect/symbol})
+  #{:symbol/file :edge/from :edge/to :reference/symbol :effect/symbol
+    :aggregate/owner :aggregate/file :membership/aggregate
+    :membership/member})
 
 (defn stored-snapshot
   "Return a database-independent canonical snapshot. Datalevin entity IDs and
@@ -183,14 +187,14 @@
       (check! (= :ready (store/graph-state graph))
               "Packaged graph is not query-compatible"
               {:mode label :state (store/graph-state graph)})
-      (check! (= 3 (:llm-context/graph-format (store/graph-metadata graph)))
-              "Packaged graph metadata is not format 3"
+      (check! (= 4 (:llm-context/graph-format (store/graph-metadata graph)))
+              "Packaged graph metadata is not format 4"
               {:mode label :metadata (store/graph-metadata graph)})
-      (check! (= 3 (:llm-context/semantic-document-version
+      (check! (= 4 (:llm-context/semantic-document-version
                     (store/graph-metadata graph)))
               "Packaged graph metadata has the wrong semantic document version"
               {:mode label :metadata (store/graph-metadata graph)})
-      (check! (= "llm-context-v3"
+      (check! (= "llm-context-v4"
                  (:llm-context/semantic-index-name
                   (store/graph-metadata graph)))
               "Packaged graph metadata has the wrong semantic index name"

@@ -74,6 +74,8 @@
     :symbol/kind
     :symbol/platform
     :symbol/analyzer
+    :symbol/scope
+    :symbol/role
     :symbol/signature
     :symbol/doc
     :source/start-line
@@ -88,6 +90,8 @@
                :kind (:symbol/kind entity)
                :platform (:symbol/platform entity)
                :analyzer (:symbol/analyzer entity)
+               :scope (:symbol/scope entity)
+               :role (:symbol/role entity)
                :file (:file/path file)
                :file-id (:file/id file)
                :line (:source/start-line entity)}
@@ -149,6 +153,119 @@
            (map (juxt :id identity))
            (into {})))
     {}))
+
+(defn aggregates-for-symbols
+  "Return deterministic aggregate evidence keyed by canonical owner symbol ID.
+  Memberships are source facts; completeness is analyzer-owned and must be
+  checked before treating the members as an exhaustive inventory."
+  [db symbol-ids]
+  (if-not (seq symbol-ids)
+    {}
+    (let [aggregate-rows
+          (d/q '[:find ?owner-id ?aggregate-id ?name ?kind ?completeness
+                        ?member-count ?member-kind ?path ?line
+                 :in $ [?owner-id ...]
+                 :where
+                 [?owner :symbol/id ?owner-id]
+                 [?aggregate :aggregate/owner ?owner]
+                 [?aggregate :aggregate/id ?aggregate-id]
+                 [?aggregate :aggregate/name ?name]
+                 [?aggregate :aggregate/kind ?kind]
+                 [?aggregate :aggregate/completeness ?completeness]
+                 [?aggregate :aggregate/member-count ?member-count]
+                 [?aggregate :aggregate/member-kind ?member-kind]
+                 [?aggregate :aggregate/file ?file]
+                 [?file :file/path ?path]
+                 [(get-else $ ?aggregate :source/start-line 1) ?line]]
+               db (vec symbol-ids))
+          aggregate-ids (mapv second aggregate-rows)
+          member-rows
+          (if (seq aggregate-ids)
+            (d/q '[:find ?aggregate-id ?ordinal ?key ?value ?value-kind
+                          ?evidence
+                   :in $ [?aggregate-id ...]
+                   :where
+                   [?aggregate :aggregate/id ?aggregate-id]
+                   [?member :membership/aggregate ?aggregate]
+                   [?member :membership/ordinal ?ordinal]
+                   [(get-else $ ?member :membership/key "") ?key]
+                   [?member :membership/value ?value]
+                   [?member :membership/value-kind ?value-kind]
+                   [?member :membership/evidence ?evidence]]
+                 db aggregate-ids)
+            [])
+          members-by-aggregate
+          (->> member-rows
+               (map (fn [[aggregate-id ordinal key value value-kind evidence]]
+                      [aggregate-id
+                       {:ordinal ordinal :key (when (seq key) key)
+                        :value value :value-kind value-kind
+                        :evidence evidence}]))
+               (group-by first)
+               (into {}
+                     (map (fn [[aggregate-id rows]]
+                            [aggregate-id
+                             (->> rows (map second)
+                                  (sort-by (juxt :ordinal :value)) vec)]))))]
+      (->> aggregate-rows
+           (map (fn [[owner-id aggregate-id name kind completeness
+                      member-count member-kind path line]]
+                  [owner-id
+                   {:id aggregate-id :name name :kind kind
+                    :completeness completeness :member-count member-count
+                    :member-kind member-kind :file path :line line
+                    :members (get members-by-aggregate aggregate-id [])}]))
+           (group-by first)
+           (into {}
+                 (map (fn [[owner-id rows]]
+                        [owner-id
+                         (->> rows (map second) (sort-by :id) vec)])))))))
+
+(defn containers-for-symbols
+  "Return exact namespace/module membership for selected container symbols.
+  The result is a deterministic coarse summary backed only by canonical
+  `contains` edges."
+  [db symbol-ids]
+  (if-not (seq symbol-ids)
+    []
+    (let [rows
+          (d/q '[:find ?container-id ?container-name ?container-kind
+                        ?member-id ?member-name ?qualified ?member-kind
+                        ?path ?line
+                 :in $ [?container-id ...]
+                 :where
+                 [?container :symbol/id ?container-id]
+                 [?container :symbol/qualified-name ?container-name]
+                 [?container :symbol/kind ?container-kind]
+                 [(contains? #{:symbol.kind/namespace :symbol.kind/module}
+                             ?container-kind)]
+                 [?edge :edge/from ?container]
+                 [?edge :edge/kind :edge.kind/contains]
+                 [?edge :edge/to ?member]
+                 [?member :symbol/id ?member-id]
+                 [?member :symbol/name ?member-name]
+                 [?member :symbol/qualified-name ?qualified]
+                 [?member :symbol/kind ?member-kind]
+                 [?member :symbol/file ?file]
+                 [?file :file/path ?path]
+                 [(get-else $ ?member :source/start-line 1) ?line]]
+               db (vec symbol-ids))]
+      (->> rows
+           (group-by first)
+           (map (fn [[container-id entries]]
+                  (let [[_ container-name container-kind] (first entries)]
+                    {:id container-id :name container-name
+                     :kind container-kind :completeness :complete-static
+                     :members
+                     (->> entries
+                          (map (fn [[_ _ _ member-id member-name qualified
+                                     member-kind path line]]
+                                 {:id member-id :name member-name
+                                  :qualified-name qualified :kind member-kind
+                                  :file path :line line}))
+                          (sort-by (juxt :qualified-name :id)) vec)})))
+           (sort-by :name)
+           vec))))
 
 (defn adjacent-exact
   "Return a bounded exact-edge frontier over symbol and topic IDs. Filtering

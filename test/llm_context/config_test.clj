@@ -31,6 +31,12 @@
     (is (= 4 (get-in loaded [:context :intent-max-seeds])))
     (is (true? (get-in loaded [:context :intent-rerank])))
     (is (= 100 (get-in loaded [:context :intent-candidate-count])))
+    (is (true? (get-in loaded [:context :candidate-reranker :enabled])))
+    (is (= :shadow (get-in loaded [:context :candidate-reranker :mode])))
+    (is (= 50 (get-in loaded [:context :candidate-reranker
+                              :candidate-count])))
+    (is (= 5000 (get-in loaded [:context :candidate-reranker
+                                :query-timeout-ms])))
     (is (= "mixedbread-ai/mxbai-edge-colbert-v0-32m"
            (get-in loaded [:context :query-router :model])))
     (is (= 250 (get-in loaded [:context :query-router :query-timeout-ms])))

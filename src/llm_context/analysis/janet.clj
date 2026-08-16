@@ -92,7 +92,8 @@
     :symbol/kind :symbol.kind/module
     :symbol/file (:file/id file)
     :symbol/platform :janet
-    :symbol/analyzer :janet-semantic}
+    :symbol/analyzer :janet-semantic
+    :symbol/indexable? true}
    (range-data root)))
 
 (defn- definition-form-node? [source-bytes node]

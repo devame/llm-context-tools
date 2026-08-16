@@ -104,12 +104,65 @@
       (is (= #{"symbol:caller"}
              (set (map :id (query/entry-points graph))))))))
 
+(deftest aggregate-members-contribute-independent-lexical-candidates
+  (let [{:keys [project file entities]} (fixture)
+        owner (first entities)
+        aggregate {:entity/type :entity.type/aggregate
+                   :aggregate/id "aggregate:transports"
+                   :aggregate/name "built-in-transports"
+                   :aggregate/kind :aggregate.kind/literal-set
+                   :aggregate/owner (:symbol/id owner)
+                   :aggregate/file (:file/id file)
+                   :aggregate/completeness :complete-static
+                   :aggregate/member-count 2
+                   :aggregate/member-kind :keyword
+                   :aggregate/analyzer :neutral-fixture
+                   :aggregate/search-text
+                   "built-in transports rail river complete static registry"
+                   :source/start-line 1 :source/start-column 1
+                   :source/end-line 3 :source/end-column 1}
+        member {:entity/type :entity.type/membership
+                :membership/id "membership:river"
+                :membership/aggregate (:aggregate/id aggregate)
+                :membership/value ":river"
+                :membership/value-kind :keyword
+                :membership/ordinal 1
+                :membership/evidence :literal
+                :source/start-line 2 :source/start-column 2}]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-file! graph file (into entities [aggregate member]))
+      (let [results (query/aggregate-symbols graph "river" 10)]
+        (is (= [(:symbol/id owner)] (mapv :id results)))
+        (is (= :complete-static
+               (get-in results [0 :aggregates 0 :completeness])))
+        (is (= ":river"
+               (get-in results [0 :aggregates 0 :members 0 :value]))))
+      (with-redefs [query/symbols
+                    (fn [_ received _]
+                      (is (= "river" received)
+                          "the lexical channel receives the unchanged query")
+                      [])]
+        (let [response
+              (query/search-explain-with-attempt
+               graph (config/defaults) "river"
+               {:mode :fts-only :status :not-requested :candidates []}
+               {:mode :fts-only :intent-rerank? true
+                :intent-advisory
+                {:provider :fixture :status :available
+                 :suggested-shape :set :margin 0.8}})]
+          (is (= [(:symbol/id owner)] (mapv :id (:results response))))
+          (is (= :supported
+                 (get-in response [:retrieval :query-plan
+                                   :answerability :status]))))))))
+
 (deftest advisory-flow-plan-requires-an-exact-candidate-relationship
   (let [{:keys [project file entities]} (fixture)
         candidates [{:id "symbol:caller" :name "validate-input"
-                     :qualified-name "sample/validate-input" :file "src/a.clj"}
+                     :qualified-name "sample/validate-input" :file "src/a.clj"
+                     :scope :scope/top-level :role :role/definition}
                     {:id "symbol:callee" :name "validate-output"
-                     :qualified-name "sample/validate-output" :file "src/b.clj"}]
+                     :qualified-name "sample/validate-output" :file "src/b.clj"
+                     :scope :scope/top-level :role :role/definition}]
         advisory {:provider :mixedbread-32m :status :available
                   :suggested-shape :flow
                   :scores {:flow 10.0 :lookup 9.9 :set 9.8}
@@ -117,9 +170,9 @@
     (store/with-store [graph project (config/defaults)]
       (store/replace-file! graph file entities)
       (with-redefs [query/symbols (fn [_ _ limit]
-                                    ;; Original query plus four validation
-                                    ;; expansions share one bounded budget.
-                                    (is (= 20 limit))
+                                    ;; The original query is the only lexical
+                                    ;; request and receives the full budget.
+                                    (is (= 100 limit))
                                     candidates)]
         (let [response
               (query/search-explain-with-attempt
@@ -141,9 +194,11 @@
                           %)
                        entities)
         candidates [{:id "symbol:caller" :name "validate-input"
-                     :qualified-name "sample/validate-input" :file "src/a.clj"}
+                     :qualified-name "sample/validate-input" :file "src/a.clj"
+                     :scope :scope/top-level :role :role/definition}
                     {:id "symbol:callee" :name "validate-output"
-                     :qualified-name "sample/validate-output" :file "src/b.clj"}]
+                     :qualified-name "sample/validate-output" :file "src/b.clj"
+                     :scope :scope/top-level :role :role/definition}]
         advisory {:provider :mixedbread-32m :status :available
                   :suggested-shape :flow :scores {:flow 10.0 :set 9.8}
                   :margin 0.2}]

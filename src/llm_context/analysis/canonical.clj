@@ -8,7 +8,8 @@
             [llm-context.model.schema :as schema]))
 
 (def identity-attributes
-  [:file/id :symbol/id :topic/id :edge/id :reference/id :effect/id])
+  [:file/id :symbol/id :topic/id :edge/id :reference/id :effect/id
+   :aggregate/id :membership/id])
 
 (defn entity-identity
   "Return the canonical identity tuple for a graph entity."
@@ -43,10 +44,11 @@
     :scope/top-level))
 
 (defn default-indexable?
-  "Definitions are indexable by default. Namespace/module containers remain
-  graph-navigation facts but do not produce semantic documents."
-  [{:symbol/keys [kind]}]
-  (not (contains? #{:symbol.kind/namespace :symbol.kind/module} kind)))
+  "Every top-level definition and container is indexable in graph format 4.
+  Namespace/module semantic documents provide a deterministic coarse-grained
+  complement to exact child-symbol documents."
+  [_]
+  true)
 
 (defn- normalize-scope [scope]
   (get {:namespace :scope/namespace
@@ -195,6 +197,13 @@
     (recur by-identity
            (require-target! by-identity entity :effect/symbol :symbol/id
                             #{:entity.type/symbol}))
+    :entity.type/aggregate
+    (require-target! by-identity entity :aggregate/file :file/id
+                     #{:entity.type/file})
+    :entity.type/membership
+    (recur by-identity
+           (require-target! by-identity entity :membership/aggregate
+                            :aggregate/id #{:entity.type/aggregate}))
     nil))
 
 (defn- audit-range!
@@ -243,6 +252,15 @@
         :entity.type/effect
         (require-target! by-identity entity :effect/symbol :symbol/id
                          #{:entity.type/symbol})
+        :entity.type/aggregate
+        (do
+          (require-target! by-identity entity :aggregate/owner :symbol/id
+                           #{:entity.type/symbol})
+          (require-target! by-identity entity :aggregate/file :file/id
+                           #{:entity.type/file}))
+        :entity.type/membership
+        (require-target! by-identity entity :membership/aggregate
+                         :aggregate/id #{:entity.type/aggregate})
         nil)
       (audit-range! by-identity entity))
     entities))

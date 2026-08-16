@@ -62,7 +62,8 @@
             :reason :model-missing
             :detail "/missing/model"
             :worker-status :not-running
-            :query-router-status :disabled}
+            :query-router-status :disabled
+            :candidate-reranker-status :disabled}
            (get-in (client/request project {:op :semantic-status})
                    [:value :runtime])))
     (is (= 0 (get-in (client/request project
@@ -299,8 +300,40 @@
                      (catch clojure.lang.ExceptionInfo error
                        (ex-data error)))]
           (is (= :graph/update-in-progress (:type read)))
+          (let [status (#'server/dispatch
+                        nil {} graph generation runtime-state
+                        {:op :semantic-status})]
+            (is (= :updating (:graph-state status)))
+            (is (= 0 (:pending status))))
           (deliver release-commit true)
           (is (= {:mode :full} (deref analysis 1000 ::timeout))))))))
+
+(deftest semantic-status-preserves-the-last-committed-snapshot-during-update
+  (let [graph (Object.)
+        generation (atom 1)
+        runtime-state
+        (atom {:status :ready
+               :analysis-progress {:state :running
+                                   :operation :full-analysis
+                                   :completed 12
+                                   :total 100}
+               :last-semantic-status {:indexed 90
+                                      :indexed-records 90
+                                      :desired 100
+                                      :pending 10
+                                      :leased 0
+                                      :failed 0
+                                      :dirty 0
+                                      :coverage-percent 90.0
+                                      :completeness :partial}})]
+    (let [status (#'server/dispatch nil {} graph generation runtime-state
+                                     {:op :semantic-status})]
+      (is (= :updating (:graph-state status)))
+      (is (= :partial (:completeness status)))
+      (is (= 90 (:indexed status)))
+      (is (= :running (get-in status [:analysis-progress :state])))
+      (is (= 12 (get-in status [:analysis-progress :completed])))
+      (is (= :ready (get-in status [:runtime :status]))))))
 
 (deftest graph-read-discards-work-overlapped-by-a-write
   (let [graph (Object.)

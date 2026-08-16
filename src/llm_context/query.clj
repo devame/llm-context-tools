@@ -3,6 +3,7 @@
             [clojure.string :as str]
             [llm-context.graph.read :as graph-read]
             [llm-context.intent :as intent]
+            [llm-context.intent.reranker :as learned-reranker]
             [llm-context.model.schema :as schema]
             [llm-context.semantic.hybrid :as hybrid]
             [llm-context.semantic.mode :as retrieval-mode]
@@ -19,6 +20,8 @@
      :references (get counts :entity.type/reference 0)
      :topics (get counts :entity.type/topic 0)
      :effects (get counts :entity.type/effect 0)
+     :aggregates (get counts :entity.type/aggregate 0)
+     :memberships (get counts :entity.type/membership 0)
      :languages (graph-read/grouped-counts db :file/language)
      :symbol-kinds (graph-read/grouped-counts db :symbol/kind)
      :edge-resolution (graph-read/grouped-counts db :edge/resolution)
@@ -153,6 +156,37 @@
                        :qualified-name))
          (mapv #(dissoc % ::exact? ::substring? ::score))))))
 
+(defn aggregate-symbols
+  "Find canonical owner symbols through the independent aggregate full-text
+  domain. This increases recall for registry and inventory questions without
+  inventing symbol relationships or replacing ordinary symbol retrieval."
+  ([graph term] (aggregate-symbols graph term 32))
+  ([graph term limit]
+   (let [query-form
+         (cond-> '[:find ?symbol-id ?score
+                   :in $ ?query
+                   :where
+                   [(fulltext $ ?query
+                              {:domains ["aggregates"]
+                               :display :refs+scores})
+                    [[?aggregate ?attribute ?value ?score]]]
+                   [?aggregate :aggregate/owner ?symbol]
+                   [?symbol :symbol/id ?symbol-id]
+                   :order-by [?score :desc ?symbol-id :asc]]
+           true (conj :limit (long limit)))
+         rows (try
+                (store/query graph query-form [term])
+                (catch Exception _ []))
+         ids (->> rows (map first) distinct vec)
+         symbols (graph-read/symbols-by-ids (store/database graph) ids)
+         aggregates (graph-read/aggregates-for-symbols
+                     (store/database graph) ids)]
+     (mapv (fn [id]
+             (assoc (get symbols id)
+                    :retrieval-classes #{:aggregate}
+                    :aggregates (get aggregates id [])))
+           (filter #(contains? symbols %) ids)))))
+
 (defn edit-distance
   "Small allocation-bounded Levenshtein distance used only after indexed
   candidate selection for missing-symbol suggestions."
@@ -284,22 +318,33 @@
                         {:candidate-count (:candidate-count options)
                          :timeout-ms (:semantic-timeout-ms options)})))))
 
-(defn- intent-lexical-results [graph term limit plan enabled?]
-  (if-not (and enabled? (seq (:lexical-expansions plan)))
-    (symbols graph term limit)
-    (let [queries (into [term] (:lexical-expansions plan))
-          per-query-limit (max 10 (quot limit (count queries)))]
-      (->> queries
-           (mapcat #(symbols graph % per-query-limit))
-           (reduce (fn [{:keys [seen results] :as state} candidate]
-                     (if (contains? seen (:id candidate))
-                       state
-                       {:seen (conj seen (:id candidate))
-                        :results (conj results candidate)}))
-                   {:seen #{} :results []})
-           :results
-           (take limit)
-           vec))))
+(defn- intent-lexical-results [graph term limit enabled?]
+  (let [channels (if enabled?
+                   [(symbols graph term limit)
+                    (aggregate-symbols graph term limit)]
+                   [(symbols graph term limit)])]
+    (->> channels
+         (apply concat)
+         (reduce (fn [{:keys [seen results]} candidate]
+                   (if (contains? seen (:id candidate))
+                     (update {:seen seen :results results} :results
+                             (fn [values]
+                               (mapv (fn [existing]
+                                       (if (= (:id existing) (:id candidate))
+                                         (merge-with
+                                          (fn [left right]
+                                            (if (and (set? left) (set? right))
+                                              (set/union left right)
+                                              (or right left)))
+                                          existing candidate)
+                                         existing))
+                                     values)))
+                     {:seen (conj seen (:id candidate))
+                      :results (conj results candidate)}))
+                 {:seen #{} :results []})
+         :results
+         (take limit)
+         vec)))
 
 (def ^:private flow-edge-kinds
   #{:edge.kind/calls :edge.kind/macro-invokes})
@@ -337,7 +382,7 @@
     graph config term semantic-attempt {}))
   ([graph config term semantic-attempt options-or-mode]
    (let [{:keys [mode source-preference intent-rerank? seed-mode max-seeds
-                 intent-advisory]}
+                 intent-advisory candidate-reranker]}
          (if (map? options-or-mode)
            options-or-mode
            {:mode options-or-mode})
@@ -365,7 +410,7 @@
                              (get-in config [:semantic :lateon-code :candidate-count])
                              50)
          lexical-results (intent-lexical-results
-                          graph term candidate-limit plan intent-rerank?)
+                          graph term candidate-limit intent-rerank?)
          response
          (case mode
            :fts-only (hybrid/fts-explain lexical-results)
@@ -373,29 +418,57 @@
                          graph config term [] semantic-attempt mode)
            :hybrid (hybrid/fuse-with-metadata
                     graph config term lexical-results semantic-attempt mode))
+         aggregate-evidence
+         (graph-read/aggregates-for-symbols
+          (store/database graph) (mapv :id (:results response)))
+         response
+         (update response :results
+                 (fn [results]
+                   (mapv (fn [candidate]
+                           (if-let [aggregates
+                                    (seq (get aggregate-evidence
+                                              (:id candidate)))]
+                             (assoc candidate
+                                    :aggregates (vec aggregates)
+                                    :retrieval-classes
+                                    (conj (set (:retrieval-classes candidate))
+                                          :aggregate))
+                             candidate))
+                         results)))
          preferred
          (source-role/prefer
           (:results response) term source-preference
           (get-in config [:context :source-role-overrides]))
          {:keys [requested resolved reason]} (:resolution preferred)
          reranked (if intent-rerank?
-                    (intent/rerank term (:results preferred) plan)
+                    (learned-reranker/safely-rerank
+                     candidate-reranker term (:results preferred))
                     {:results (:results preferred)
                      :provider :none :status :not-requested
+                     :candidate-count 0 :cache-hits 0 :cache-misses 0
+                     :latency-ms 0
                      :reordered? false})
+         qualification-plan
+         (assoc plan :advisory-shape (:suggested-shape intent-advisory))
+         qualified (if intent-rerank?
+                     (intent/qualify term (:results reranked)
+                                     qualification-plan)
+                     {:results (:results reranked)
+                      :provider :none :status :not-requested
+                      :reordered? false})
          resolved-plan
          (if intent-rerank?
            (intent/resolve-plan
-            plan (:results reranked)
+            plan (:results qualified)
             {:advisory (or intent-advisory
                            {:provider :none :status :not-requested})
              :minimum-advisory-margin
              (get-in config [:context :query-router :minimum-margin])
              :exact-relationship-count
-             (exact-relationship-count graph (:results reranked))})
+             (exact-relationship-count graph (:results qualified))})
            plan)]
      (assoc response
-            :results (:results reranked)
+            :results (:results qualified)
             :retrieval
             (assoc (:retrieval response)
                    :requested-source-preference requested
@@ -403,11 +476,17 @@
                    :source-preference-reason reason
                    :source-role-counts (:role-counts preferred)
                    :source-preference-reordered? (:reordered? preferred)
-                   :query-plan (dissoc resolved-plan
-                                       :query-terms :expanded-terms)
-                   :reranker {:provider (:provider reranked)
-                              :status (:status reranked)
-                              :reordered? (:reordered? reranked)})))))
+                   :query-plan (dissoc resolved-plan :query-terms)
+                   :reranker (select-keys
+                              reranked
+                              [:provider :status :reason :detail :model
+                               :model-revision :mode :candidate-count
+                               :cache-hits :cache-misses :latency-ms
+                               :would-reorder? :reordered?])
+                   :structural-qualification
+                   {:provider (:provider qualified)
+                    :status (:status qualified)
+                    :reordered? false})))))
 
 (defn search-explain
   ([graph semantic-client config term]
@@ -415,7 +494,8 @@
   ([graph semantic-client config term {:keys [mode source-preference
                                               intent-rerank?
                                               semantic-timeout-ms seed-mode
-                                              max-seeds intent-advisory]
+                                              max-seeds intent-advisory
+                                              candidate-reranker]
                                        :or {mode retrieval-mode/default
                                             source-preference :none}}]
    (let [mode (retrieval-mode/normalize mode)
@@ -443,7 +523,8 @@
         :candidate-count (:semantic-candidate-count plan)})
       {:mode mode :source-preference source-preference
        :intent-rerank? intent-rerank? :seed-mode seed-mode
-       :max-seeds max-seeds :intent-advisory intent-advisory}))))
+       :max-seeds max-seeds :intent-advisory intent-advisory
+       :candidate-reranker candidate-reranker}))))
 
 (defn callers [graph target]
   (->> (store/query

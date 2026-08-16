@@ -59,11 +59,17 @@ parse or embed files independently.
 ## Semantic document identity
 
 A semantic document is derived from one graph symbol and includes its language,
-kind, names, signature, documentation, path, relationships, and source body.
-Large symbols produce deterministic chunks that repeat identifying metadata.
-In graph format 3 only canonical symbols with `:symbol/indexable? true` are
-eligible; namespace/module containers and analyzer-local lexical bindings are
-not semantic documents.
+kind, names, signature, documentation, path, relationships, source body, and
+owned aggregate evidence. Large symbols produce deterministic chunks that
+repeat identifying metadata. In graph format 4 canonical symbols with
+`:symbol/indexable? true` are eligible; this includes namespace/module
+containers whose exact `contains` edges form deterministic coarse summaries.
+Analyzer-local lexical bindings remain excluded.
+
+Top-level literal collections are parsed without evaluation into aggregate and
+membership facts. Their semantic sections label collection kind,
+completeness, member kind/count, and bounded members. Partial or dynamic
+collections improve discovery but cannot qualify a complete inventory.
 
 The document hash covers:
 
@@ -81,7 +87,7 @@ Each indexed chunk carries at least:
  :file-id "file:..."
  :document-hash "sha256:..."
  :model-revision "734b659a57935ef50562d79581c3ff1f8d825c93"
- :document-version 3
+ :document-version 4
  :chunk-index 0}
 ```
 
@@ -108,7 +114,7 @@ delete is safe.
 
 A full graph replacement resets obsolete semantic state, persists format
 metadata, and reconciles every desired document into the versioned
-`llm-context-v3` NextPlaid index. Older index contents are unreachable.
+`llm-context-v4` NextPlaid index. Older index contents are unreachable.
 Graph-revision watermarks prevent candidates from an older canonical snapshot
 from being accepted, and reconciliation recreates missing reset or queue work
 after an interrupted update.

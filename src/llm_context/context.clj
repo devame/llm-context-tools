@@ -156,8 +156,12 @@
                        (assoc result (:edge-id relationship) relationship))
                      (sorted-map))
              vals vec)
+        aggregates
+        (->> (graph-read/aggregates-for-symbols db symbol-ids)
+             vals (apply concat) (sort-by :id) vec)
+        containers (graph-read/containers-for-symbols db symbol-ids)
         packet
-        {:packet/version 3
+        {:packet/version 4
          :focus focus
          :focus-resolution focus-resolution
          :budget
@@ -183,6 +187,8 @@
                         :selected-path (:path entry)))
                selected-topics)
          :relationships relationships
+         :aggregates aggregates
+         :containers containers
          :effects (graph-read/effects-for-symbols db symbol-ids)
          :diagnostics {:references
                        (graph-read/reference-summary db symbol-ids)}
@@ -260,13 +266,15 @@
            :ranking-reason (:ranking-reason symbol)
            :pre-rerank-rank (:pre-rerank-rank symbol)
            :post-rerank-rank (:post-rerank-rank symbol)
+           :learned-score (:learned-score symbol)
            :intent-score (:intent-score symbol)
            :relevance-qualified? (:relevance-qualified? symbol)
            :relevance-reasons (:relevance-reasons symbol)
            :structurally-qualified? (:structurally-qualified? symbol)
            :structural-reasons (:structural-reasons symbol)
            :intent-qualified? (:intent-qualified? symbol)
-           :intent-reasons (:intent-reasons symbol)})
+           :intent-reasons (:intent-reasons symbol)
+           :aggregates (:aggregates symbol)})
         candidates (mapv candidate (range 1 (inc (count results))) results)
         plan (or (:query-plan retrieval)
                  {:shape :lookup :seed-mode :single :max-seeds 1})
@@ -396,6 +404,18 @@
               (get-in packet [:focus-resolution :retrieval :query-plan
                               :structural-support :exact-relationships] 0)
               " exact execution relationships"
+              "\nComplete aggregate support: "
+              (get-in packet [:focus-resolution :retrieval :query-plan
+                              :structural-support :complete-aggregates] 0)
+              "\nAnswerability: "
+              (name (get-in packet [:focus-resolution :retrieval
+                                    :query-plan :answerability :status]
+                            :unknown))
+              " ("
+              (name (get-in packet [:focus-resolution :retrieval
+                                    :query-plan :answerability :reason]
+                            :not-evaluated))
+              ")"
               "\nSemantic retrieval: "
               (name (get-in packet [:focus-resolution :retrieval :status]
                             :unknown))
@@ -405,8 +425,65 @@
               (get-in packet [:focus-resolution :retrieval
                               :effective-timeout-ms] 0)
               " ms"
+              "\nLearned reranker: "
+              (name (get-in packet [:focus-resolution :retrieval
+                                    :reranker :provider] :none))
+              " / "
+              (name (get-in packet [:focus-resolution :retrieval
+                                    :reranker :status] :unknown))
+              " in "
+              (get-in packet [:focus-resolution :retrieval
+                              :reranker :latency-ms] 0)
+              " ms; "
+              (get-in packet [:focus-resolution :retrieval
+                              :reranker :candidate-count] 0)
+              " candidates; cache "
+              (get-in packet [:focus-resolution :retrieval
+                              :reranker :cache-hits] 0)
+              " hit / "
+              (get-in packet [:focus-resolution :retrieval
+                              :reranker :cache-misses] 0)
+              " miss"
               "\n"))
        "\n"
+       (when (seq (:aggregates packet))
+         (str "## Aggregates\n\n"
+              (str/join
+               "\n"
+               (for [{:keys [id name kind completeness member-count
+                             member-kind file line members]}
+                     (:aggregates packet)]
+                 (str "- `" name "` — " (clojure.core/name kind)
+                      ", " (clojure.core/name completeness) ", " member-count " "
+                      (clojure.core/name member-kind) " members at `" file ":" line "`"
+                      " (`" id "`)"
+                      (when (seq members)
+                        (str "\n  - Members: "
+                             (str/join
+                              ", "
+                              (map (fn [{:keys [key value evidence]}]
+                                     (str (if key (str key " => " value) value)
+                                          " [" (clojure.core/name evidence) "]"))
+                                   members)))))))
+              "\n\n"))
+       (when (seq (:containers packet))
+         (str "## Containers\n\n"
+              (str/join
+               "\n"
+               (for [{:keys [id name kind completeness members]}
+                     (:containers packet)]
+                 (str "- `" name "` — " (clojure.core/name kind)
+                      ", " (clojure.core/name completeness)
+                      " (`" id "`)"
+                      (when (seq members)
+                        (str "\n  - Contains: "
+                             (str/join
+                              ", "
+                              (map (fn [{:keys [qualified-name kind]}]
+                                     (str "`" qualified-name "` ["
+                                          (clojure.core/name kind) "]"))
+                                   members)))))))
+              "\n\n"))
        (when (seq (get-in packet [:focus-resolution :inventory]))
          (str "## Structurally qualified inventory\n\n"
               (str/join

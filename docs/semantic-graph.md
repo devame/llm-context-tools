@@ -1,6 +1,6 @@
 # Semantic graph model
 
-Graph format 3 makes analyzer output a canonical, provenance-bearing
+Graph format 4 makes analyzer output a canonical, provenance-bearing
 interchange contract while preserving the separation between navigable project
 facts and diagnostic observations.
 
@@ -20,6 +20,12 @@ facts and diagnostic observations.
 - Topics identify literal events, subscriptions, effects, coeffects, and
   application-state keys used by focused ClojureScript adapters.
 - Effects are derived only from resolved qualified APIs and retain evidence.
+- Aggregates describe non-evaluated top-level literal sets, vectors, maps, and
+  quoted lists. They identify their owner symbol, source file, member count,
+  producer, and whether static analysis proved the collection complete.
+- Memberships preserve deterministic literal or unresolved-expression values
+  and point to one aggregate. Only complete aggregate memberships can support
+  exhaustive inventory claims.
 - Symbols, edges, references, and effects carry normalized analyzer, evidence,
   and record-kind provenance. Structural adapters add paired zero-based UTF-8
   byte offsets, with an exclusive end, alongside one-based display coordinates.
@@ -30,7 +36,8 @@ at command and export boundaries.
 
 ## Ownership and incremental replacement
 
-A file owns its symbols, outgoing edges, references, and effects. Topics are
+A file owns its symbols, outgoing edges, references, effects, aggregates, and
+memberships. Topics are
 project-global and are pruned when no edge references them. Whole-project
 analyzers produce normalized facts grouped by owning file and a deterministic
 semantic fingerprint. An unchanged source file is replaced when another file
@@ -57,8 +64,8 @@ implicitly by Datalevin.
 
 Literal extraction is structural rather than regex-based. Janet adapters walk
 Tree-sitter nodes. Focused Clojure adapters use tools.reader with evaluation
-disabled and create topic facts only for values proven static by the parsed
-form.
+disabled. The aggregate producer accepts only safe top-level collection forms,
+marks unresolved expressions partial, and never executes project code.
 
 Malformed or conflicting analyzer snapshots fail closed before persistence.
 Queries are gated while a graph update is active, and project-level locks
@@ -70,4 +77,5 @@ Datalevin metadata records graph format, analyzer name/version, Janet catalog
 version, semantic document version, and versioned NextPlaid index name. Normal
 queries refuse an incompatible graph with an instruction to run
 `llm-context analyze --full`. The rebuild changes only generated project state.
-Graph format 3 requires that full rebuild; format-2 data is not migrated.
+Graph format 4 requires that full rebuild; older generated graph data is not
+migrated.

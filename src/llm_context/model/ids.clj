@@ -63,3 +63,15 @@
                                          [(name kind) symbol-id detail
                                           start-line start-column]))
                        0 32)))
+
+(defn aggregate-id
+  [{:keys [owner-id kind]}]
+  (str "aggregate:"
+       (subs (sha256 (str/join "\u001f" [owner-id (name kind)])) 0 32)))
+
+(defn membership-id
+  [{:keys [aggregate-id ordinal key value]}]
+  (str "membership:"
+       (subs (sha256 (str/join "\u001f"
+                               [aggregate-id ordinal (or key "") value]))
+             0 32)))

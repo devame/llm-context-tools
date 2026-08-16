@@ -98,8 +98,8 @@
                    :edge/confidence 0.0
                    :edge/evidence :tree-sitter-syntax})))))
 
-(deftest graph-format-three-has-explicit-symbol-and-range-contracts
-  (is (= 3 schema/graph-format-version))
+(deftest graph-format-four-has-explicit-symbol-aggregate-and-range-contracts
+  (is (= 4 schema/graph-format-version))
   (testing "semantic symbols cannot silently omit their role or scope"
     (is (thrown? clojure.lang.ExceptionInfo
                  (schema/validate-entity!

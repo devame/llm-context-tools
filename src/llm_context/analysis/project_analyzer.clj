@@ -1,6 +1,7 @@
 (ns llm-context.analysis.project-analyzer
   "Coordinate authoritative whole-project analyzer snapshots."
   (:require [clojure.set :as set]
+            [llm-context.analysis.aggregate :as aggregate]
             [llm-context.analysis.canonical :as canonical]
             [llm-context.analysis.clj-kondo :as clj-kondo]
             [llm-context.analysis.clojure :as clojure-analysis]
@@ -62,7 +63,9 @@
      :exact-edges (get by-type :entity.type/edge 0)
      :references (get by-type :entity.type/reference 0)
      :topics (get by-type :entity.type/topic 0)
-     :effects (get by-type :entity.type/effect 0)}))
+     :effects (get by-type :entity.type/effect 0)
+     :aggregates (get by-type :entity.type/aggregate 0)
+     :memberships (get by-type :entity.type/membership 0)}))
 
 (defn- outputs-by-path!
   "Require the analyzer boundary to be a bijection with discovery. Silent
@@ -86,7 +89,8 @@
     (into {} (map (fn [[path values]] [path (first values)])) grouped)))
 
 (defn- canonical-output-owner
-  [entity file-path-by-id symbol-file-by-id topic-owner-by-id]
+  [entity file-path-by-id symbol-file-by-id aggregate-file-by-id
+   topic-owner-by-id]
   (case (:entity/type entity)
     :entity.type/file (:file/path entity)
     :entity.type/symbol (get file-path-by-id (:symbol/file entity))
@@ -96,6 +100,11 @@
     (get file-path-by-id (get symbol-file-by-id (:reference/symbol entity)))
     :entity.type/effect
     (get file-path-by-id (get symbol-file-by-id (:effect/symbol entity)))
+    :entity.type/aggregate
+    (get file-path-by-id (:aggregate/file entity))
+    :entity.type/membership
+    (get file-path-by-id
+         (get aggregate-file-by-id (:membership/aggregate entity)))
     :entity.type/topic (get topic-owner-by-id (:topic/id entity))
     nil))
 
@@ -118,6 +127,12 @@
         (into {} (keep (fn [entity]
                          (when (= :entity.type/symbol (:entity/type entity))
                            [(:symbol/id entity) (:symbol/file entity)])))
+              entities)
+        aggregate-file-by-id
+        (into {} (keep (fn [entity]
+                         (when (= :entity.type/aggregate
+                                  (:entity/type entity))
+                           [(:aggregate/id entity) (:aggregate/file entity)])))
               entities)
         topic-owner-by-id
         (reduce
@@ -143,6 +158,7 @@
              result
              (let [path (canonical-output-owner
                          entity file-path-by-id symbol-file-by-id
+                         aggregate-file-by-id
                          topic-owner-by-id)]
                (when-not path
                  (throw
@@ -226,7 +242,7 @@
         materialized (:value materialize-phase)
         materialize-ms (:elapsed-ms materialize-phase)
         clojure-materialization (:clojure-metrics materialized)
-        raw-outputs (:outputs materialized)
+        raw-outputs (aggregate/enrich-outputs files (:outputs materialized))
         canonical-phase
         (run-phase progress :canonicalization
                    #(if defer-finalization?

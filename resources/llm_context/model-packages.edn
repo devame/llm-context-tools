@@ -1,0 +1,37 @@
+{:contract-version 1
+ :roles
+ {:semantic-retriever
+  {:model "lightonai/LateOn-Code"
+   :revision "734b659a57935ef50562d79581c3ff1f8d825c93"
+   :format :next-plaid-onnx
+   :entrypoint "model_int8.onnx"
+   :base-url "https://huggingface.co/lightonai/LateOn-Code/resolve/734b659a57935ef50562d79581c3ff1f8d825c93"
+   :files
+   {"model_int8.onnx" "a62a88b4e3ebb76e8bc5f0263d17b773c667d27bc73c5120e3131048dd1554ef"
+    "tokenizer.json" "a388b94942e98e5c661c6c23f919842285738bfd123a0d148dea0c56287505d0"
+    "config_sentence_transformers.json" "34942289dec20e285b07132aa1d09980ed776a0bc34e531dd7b49c4701876871"
+    "config.json" "424fa6fedd42b6a78257145a6068c17cc7e67ac5d7cc3c011ed9d8141c9159d4"
+    "onnx_config.json" "eedf90bb3b71b7500a973e140b72a736c4c5ca4b6746c1f69fcc64b29924a8d5"}}
+
+  :query-router-reranker
+  {:model "mixedbread-ai/mxbai-edge-colbert-v0-32m"
+   :revision "963e23afa1478d8bcc12e5d7115adcfdbd22c3af"
+   :format :next-plaid-onnx
+   :entrypoint "model_int8.onnx"
+   :base-url "https://huggingface.co/mixedbread-ai/mxbai-edge-colbert-v0-32m/resolve/963e23afa1478d8bcc12e5d7115adcfdbd22c3af"
+   :files
+   {"model_int8.onnx" "264ba680e960af9fffb4f78c3af1e4ff92520678b8e136c79434d88fb2549e1b"
+    "tokenizer.json" "594291000b476c98ed600cbb1914ff128c79642a9433aac86213c7a5562d7c1a"
+    "config_sentence_transformers.json" "0c4eb4090ff55ddee69380ad5ea88a3a89500651996a56953af72bafdb7965b6"
+    "config.json" "a60a035a715a686dca530cf41da553a571e26ea45288d04d750b9da1a27c268d"
+    "onnx_config.json" "e10f017e4a8355f6b15f5be5f67295c90d5b25e487568bf0b0d9ee3259dc0eb7"}}
+
+  :answer-reader
+  {:model "LiquidAI/LFM2.5-1.2B-Instruct-GGUF"
+   :revision "76022b8bfa64af5862d6bce90a676c3cc9b17b52"
+   :format :gguf
+   :alias "lfm2.5-1.2b-instruct"
+   :entrypoint "LFM2.5-1.2B-Instruct-Q4_K_M.gguf"
+   :base-url "https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF/resolve/76022b8bfa64af5862d6bce90a676c3cc9b17b52"
+   :files
+   {"LFM2.5-1.2B-Instruct-Q4_K_M.gguf" "b1b3de114215d9507409a662a501a631095a479a419584e8a2ded6304b19b4f5"}}}}

@@ -46,6 +46,45 @@
       (is (empty? (store/query graph
                                '[:find [?id ...] :where [_ :file/id ?id]] []))))))
 
+(deftest aggregate-facts-converge-across-full-and-incremental-analysis
+  (let [root (Files/createTempDirectory
+              "llm-context-incremental-aggregate-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        src (.resolve root "src")
+        path (.resolve src "transport.clj")
+        project (project/context (str root))
+        settings (assoc-in (config/defaults) [:semantic :providers] [])
+        values
+        (fn []
+          (store/with-store [graph project settings]
+            (set (store/query
+                  graph
+                  '[:find [?value ...]
+                    :where [?member :membership/value ?value]] []))))]
+    (Files/createDirectories src
+                             (make-array java.nio.file.attribute.FileAttribute 0))
+    (spit (str path)
+          "(ns neutral.transport) (def built-ins #{:rail :river})")
+    (full/analyze! project settings)
+    (is (= #{":rail" ":river"} (values)))
+    (store/with-store [graph project settings]
+      (is (= #{[:complete-static 2]}
+             (store/query
+              graph
+              '[:find ?completeness ?count
+                :where
+                [?aggregate :aggregate/completeness ?completeness]
+                [?aggregate :aggregate/member-count ?count]] []))))
+
+    (spit (str path)
+          "(ns neutral.transport) (def built-ins #{:road :sea})")
+    (is (= 1 (:changed (incremental/analyze! project settings))))
+    (is (= #{":road" ":sea"} (values)))
+
+    (Files/delete path)
+    (is (= 1 (:deleted (incremental/analyze! project settings))))
+    (is (empty? (values)))))
+
 (deftest incremental-snapshots-repersist-cross-file-resolution-changes
   (let [root (Files/createTempDirectory
               "llm-context-incremental-resolution-"

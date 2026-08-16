@@ -3,6 +3,7 @@
   symbols and their exact source ranges."
   (:require [clojure.string :as str]
             [datalevin.core :as d]
+            [llm-context.graph.read :as graph-read]
             [llm-context.model.canonical-hash :as canonical-hash]
             [llm-context.model.ids :as ids]
             [llm-context.source :as source]
@@ -14,10 +15,11 @@
   {:edge.kind/calls "Calls"
    :edge.kind/imports "Imports"
    :edge.kind/references "References"
+   :edge.kind/contains "Contains"
    :edge.kind/extends "Extends"
    :edge.kind/implements "Implements"})
 
-(def current-document-version 3)
+(def current-document-version 4)
 
 (def ^:private legacy-excluded-symbol-kinds
   #{:symbol.kind/module :symbol.kind/namespace})
@@ -91,7 +93,24 @@
                      (str label ": " (str/join ", " targets)))))))
        sort))
 
-(defn- document-header [symbol file relationships]
+(defn- aggregate-lines [aggregates]
+  (mapcat
+   (fn [{:keys [kind completeness member-count member-kind members]}]
+     (let [shown (take 64 members)]
+       [(str "Aggregate kind: " (name kind))
+        (str "Aggregate completeness: " (name completeness))
+        (str "Aggregate member kind: " (name member-kind))
+        (str "Aggregate member count: " member-count)
+        (str "Aggregate members: "
+             (str/join ", "
+                       (map (fn [{:keys [key value]}]
+                              (if key (str key " => " value) value))
+                            shown))
+             (when (> member-count (count shown))
+               (str ", ... " (- member-count (count shown)) " omitted")))]))
+   aggregates))
+
+(defn- document-header [symbol file relationships aggregates]
   (->> (concat
         [(label-value "Language" (language-name (:file/language file)))
          (label-value "Kind" (some-> (:symbol/kind symbol) name
@@ -101,7 +120,8 @@
          (label-value "File" (:file/path file))
          (label-value "Signature" (:symbol/signature symbol))
          (label-value "Documentation" (:symbol/doc symbol))]
-        (relationships-by-kind relationships))
+        (relationships-by-kind relationships)
+        (aggregate-lines aggregates))
        (remove nil?)
        (str/join "\n")))
 
@@ -208,14 +228,16 @@
 
 (defn build
   "Build one versioned semantic document from canonical graph data."
-  [lateon symbol file source relationships]
+  ([lateon symbol file source relationships]
+   (build lateon symbol file source relationships []))
+  ([lateon symbol file source relationships aggregates]
   (when-not (= current-document-version (:document-version lateon))
     (throw
      (ex-info "Configured semantic document version is incompatible with this runtime"
               {:configured-version (:document-version lateon)
                :required-version current-document-version})))
   (let [body (extract-range source symbol)
-        header (document-header symbol file relationships)
+        header (document-header symbol file relationships aggregates)
         chunks (render-chunks header body lateon)
         hash (document-hash lateon chunks)
         total (count chunks)]
@@ -239,7 +261,7 @@
               :chunk-count total
               :text text})
            (range total)
-           chunks)}))
+           chunks)})))
 
 (defn- graph-format [db]
   (d/q '[:find ?format .
@@ -250,7 +272,7 @@
 (defn indexable-symbol?
   "True only for symbols admitted by the canonical indexability contract.
 
-  Graph format 3 makes :symbol/indexable? authoritative. The kind fallback is
+  Graph formats 3+ make :symbol/indexable? authoritative. The kind fallback is
   retained only for legacy graphs and focused fixtures without graph metadata."
   [format symbol]
   (if (contains? symbol :symbol/indexable?)
@@ -406,13 +428,16 @@
 (defn- build-selected [db lateon file source-state symbols]
   (let [relationships
         (relationships-for-symbols db (mapv :symbol/id symbols))
+        aggregates
+        (graph-read/aggregates-for-symbols db (mapv :symbol/id symbols))
         results
         (mapv
          (fn [symbol]
            (try
               {:document
               (build lateon symbol file (:source-text source-state)
-                     (get relationships (:symbol/id symbol) []))}
+                     (get relationships (:symbol/id symbol) [])
+                     (get aggregates (:symbol/id symbol) []))}
              (catch clojure.lang.ExceptionInfo error
                {:diagnostic
                 {:level :warning
