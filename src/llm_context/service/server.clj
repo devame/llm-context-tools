@@ -134,42 +134,44 @@
   ([graph generation project settings force-full?]
    (analyze! graph generation project settings force-full? service-progress!))
   ([graph generation project settings force-full? progress-fn]
-  (let [prepared
-        (locking (analysis-mutex graph)
-          (let [full? (or force-full?
-                          (not= :ready (store/graph-state graph))
-                          (not (incremental/index-present? graph)))
-                incremental-prepared
-                (when-not full?
-                  (incremental/prepare-current
-                   graph project settings progress-fn))]
-            (if (:complete-result incremental-prepared)
-              incremental-prepared
-              (let [candidate (if full?
-                                (full/prepare-current
-                                 project settings progress-fn :full)
-                                incremental-prepared)]
-                (if (:stale? candidate)
-                  candidate
-                  {:full? full?
-                   :result
-                   (with-graph-write
-                     graph generation
-                     #(if full?
-                        (full/commit-candidate!
-                         graph project settings candidate progress-fn)
-                        (incremental/commit-candidate!
-                         graph project settings candidate)))})))))]
-    (cond
-      (:complete-result prepared) (:complete-result prepared)
-      (:stale? prepared)
-      prepared
-      (:full? prepared)
-        (full/finish-candidate!
-         graph project settings (:result prepared) progress-fn)
-      :else
-      (incremental/finish-candidate!
-       graph project settings (:result prepared))))))
+   ;; Finalization reads and writes semantic operational state. Keep it inside
+   ;; the same operation mutex as preparation and graph commit so shutdown and
+   ;; a second watcher event cannot close or reuse the graph midway through it.
+   (locking (analysis-mutex graph)
+     (let [full? (or force-full?
+                     (not= :ready (store/graph-state graph))
+                     (not (incremental/index-present? graph)))
+           incremental-prepared
+           (when-not full?
+             (incremental/prepare-current
+              graph project settings progress-fn))
+           prepared
+           (if (:complete-result incremental-prepared)
+             incremental-prepared
+             (let [candidate (if full?
+                               (full/prepare-current
+                                project settings progress-fn :full)
+                               incremental-prepared)]
+               (if (:stale? candidate)
+                 candidate
+                 {:full? full?
+                  :result
+                  (with-graph-write
+                    graph generation
+                    #(if full?
+                       (full/commit-candidate!
+                        graph project settings candidate progress-fn)
+                       (incremental/commit-candidate!
+                        graph project settings candidate)))})))]
+       (cond
+         (:complete-result prepared) (:complete-result prepared)
+         (:stale? prepared) prepared
+         (:full? prepared)
+         (full/finish-candidate!
+          graph project settings (:result prepared) progress-fn)
+         :else
+         (incremental/finish-candidate!
+          graph project settings (:result prepared)))))))
 
 (defn- run-analysis! [graph generation project settings force-full? runtime-state]
   (let [progress-state (:progress-state @runtime-state)

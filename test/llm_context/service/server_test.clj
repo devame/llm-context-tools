@@ -342,6 +342,40 @@
           (deliver release-commit true)
           (is (= {:mode :full} (deref analysis 1000 ::timeout))))))))
 
+(deftest analysis-serialization-includes-finalization
+  (let [graph (Object.)
+        generation (atom 0)
+        preparations (atom 0)
+        entered-finalization (promise)
+        release-finalization (promise)
+        runtime-state (atom {})]
+    (with-redefs [full/prepare-current
+                  (fn [& _]
+                    (swap! preparations inc)
+                    {:candidate true})
+                  full/commit-candidate!
+                  (fn [& _] {:mode :full :started 0})
+                  full/finish-candidate!
+                  (fn [& _]
+                    (deliver entered-finalization true)
+                    @release-finalization
+                    {:mode :full})]
+      (let [first-analysis
+            (future
+              (#'server/dispatch nil {} graph generation runtime-state
+                                 {:op :analyze :full? true}))]
+        (is (= true (deref entered-finalization 1000 false)))
+        (let [second-analysis
+              (future
+                (#'server/dispatch nil {} graph generation runtime-state
+                                   {:op :analyze :full? true}))]
+          (Thread/sleep 100)
+          (is (= 1 @preparations))
+          (deliver release-finalization true)
+          (is (= {:mode :full} (deref first-analysis 1000 ::timeout)))
+          (is (= {:mode :full} (deref second-analysis 1000 ::timeout)))
+          (is (= 2 @preparations)))))))
+
 (deftest semantic-status-preserves-the-last-committed-snapshot-during-update
   (let [graph (Object.)
         generation (atom 1)
