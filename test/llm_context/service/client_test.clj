@@ -2,12 +2,13 @@
   (:require [clojure.test :refer [deftest is]]
             [llm-context.project :as project]
             [llm-context.service.client :as client]
+            [llm-context.service.lifecycle :as lifecycle]
             [llm-context.service.transport :as transport])
   (:import [java.net StandardProtocolFamily UnixDomainSocketAddress]
            [java.nio.channels ServerSocketChannel]
            [java.nio.file Files LinkOption OpenOption]))
 
-(deftest stale-unix-endpoint-is-reported-without-throwing
+(deftest stale-unix-endpoint-is-reclaimed-without-throwing
   (when-not (transport/windows?)
     (let [root (Files/createTempDirectory
                 "llm-context-stale-service-"
@@ -31,9 +32,57 @@
                   :token "stale-token"})
          (make-array OpenOption 0))
         (let [response (client/request project {:op :ping})]
-          (is (= false (:ok response)))
-          (is (= :service/unreachable (:type response)))
-          (is (false? (client/available? project))))
+          (is (nil? response))
+          (is (false? (client/available? project)))
+          (is (not (Files/exists (client/descriptor-path project)
+                                 (make-array LinkOption 0))))
+          (is (not (Files/exists socket-path
+                                 (make-array LinkOption 0)))))
         (finally
           (Files/deleteIfExists socket-path)
           (Files/deleteIfExists (client/descriptor-path project)))))))
+
+(deftest unreachable-endpoint-is-not-reclaimed-while-service-lock-is-owned
+  (when-not (transport/windows?)
+    (let [root (Files/createTempDirectory
+                "llm-context-owned-service-"
+                (make-array java.nio.file.attribute.FileAttribute 0))
+          project (project/context (str root))
+          socket-path (transport/socket-path project)
+          stale-listener (ServerSocketChannel/open StandardProtocolFamily/UNIX)]
+      (try
+        (Files/createDirectories
+         (:state-dir project)
+         (make-array java.nio.file.attribute.FileAttribute 0))
+        (.bind stale-listener (UnixDomainSocketAddress/of socket-path))
+        (.close stale-listener)
+        (Files/writeString
+         (client/descriptor-path project)
+         (pr-str {:transport :unix
+                  :socket-path (str socket-path)
+                  :token "owned-token"})
+         (make-array OpenOption 0))
+        (with-open [_ (lifecycle/acquire! project)]
+          (let [response (client/request project {:op :ping})]
+            (is (= false (:ok response)))
+            (is (= :service/unreachable (:type response)))
+            (is (Files/exists (client/descriptor-path project)
+                              (make-array LinkOption 0)))
+            (is (Files/exists socket-path (make-array LinkOption 0)))))
+        (finally
+          (Files/deleteIfExists socket-path)
+          (Files/deleteIfExists (client/descriptor-path project)))))))
+
+(deftest malformed-unowned-descriptor-is-reclaimed
+  (let [root (Files/createTempDirectory
+              "llm-context-malformed-service-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        project (project/context (str root))]
+    (Files/createDirectories
+     (:state-dir project)
+     (make-array java.nio.file.attribute.FileAttribute 0))
+    (Files/writeString (client/descriptor-path project) "{:broken"
+                       (make-array OpenOption 0))
+    (is (nil? (client/request project {:op :ping})))
+    (is (not (Files/exists (client/descriptor-path project)
+                           (make-array LinkOption 0))))))

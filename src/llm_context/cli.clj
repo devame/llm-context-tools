@@ -804,10 +804,15 @@
         (println "not running"))
       0)
     "stop" (let [response (service-client/request cli-context {:op :stop})]
-             (if (:ok response)
-               (do (println "stopped") 0)
-               (throw (ex-info "No service is running for this project"
-                               {:exit-code 2}))))
+             (cond
+               (:ok response) (do (println "stopped") 0)
+               (nil? response) (do (println "not running") 0)
+               :else
+               (throw
+                (ex-info (or (:error response)
+                             "Unable to stop the project service")
+                         {:exit-code (or (:exit-code response) 1)
+                          :type (:type response)}))))
     (throw (ex-info (str "Unknown service command: " (first args))
                     {:exit-code 2}))))
 

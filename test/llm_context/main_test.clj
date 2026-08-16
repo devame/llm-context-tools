@@ -153,6 +153,16 @@
            #"Project service request timed out"
            (cli/execute context "query" ["stats"]))))))
 
+(deftest stopping-an-absent-or-reclaimed-service-is-idempotent
+  (let [root (Files/createTempDirectory
+              "llm-context-service-stop-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        context (assoc (project/context (str root)) :options {:quiet? true})
+        output (with-out-str
+                 (with-redefs [service-client/request (fn [& _] nil)]
+                   (is (zero? (cli/execute context "service" ["stop"])))))]
+    (is (= "not running\n" output))))
+
 (deftest semantic-sync-requires-the-project-service
   (let [root (Files/createTempDirectory
               "llm-context-semantic-sync-"

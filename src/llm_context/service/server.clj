@@ -14,6 +14,7 @@
             [llm-context.semantic.state :as semantic-state]
             [llm-context.semantic.worker :as semantic-worker]
             [llm-context.service.client :as client]
+            [llm-context.service.lifecycle :as lifecycle]
             [llm-context.service.progress :as analysis-progress]
             [llm-context.service.transport :as transport]
             [llm-context.service.watcher :as watcher]
@@ -21,8 +22,7 @@
   (:import [java.io PushbackReader]
            [java.lang ProcessHandle]
            [java.net SocketException]
-           [java.nio.channels FileChannel OverlappingFileLockException]
-           [java.nio.file Files OpenOption StandardOpenOption]
+           [java.nio.file Files]
            [java.util UUID WeakHashMap]
            [java.util.concurrent ArrayBlockingQueue RejectedExecutionException
             ThreadPoolExecutor ThreadPoolExecutor$AbortPolicy TimeUnit]))
@@ -435,22 +435,7 @@
      (ThreadPoolExecutor$AbortPolicy.))))
 
 (defn- acquire-service-lock [project]
-  (let [path (.resolve ^java.nio.file.Path (:state-dir project) "service.lock")
-        channel
-        (FileChannel/open
-         path
-         (into-array java.nio.file.OpenOption
-                     [StandardOpenOption/CREATE StandardOpenOption/WRITE]))
-        lock (try
-               (.tryLock channel)
-               (catch OverlappingFileLockException _ nil))]
-    (if lock
-      {:channel channel :lock lock}
-      (do
-        (.close channel)
-        (throw
-         (ex-info "A service already owns this project"
-                  {:exit-code 2 :type :service/already-owned}))))))
+  (lifecycle/acquire! project))
 
 (defn start!
   "Run a foreground loopback-only service for one project."
@@ -459,15 +444,23 @@
   ([project {:keys [runtime-factory router-factory]
              :or {runtime-factory semantic-runtime/start!
                   router-factory intent-router/start!}}]
-   (let [descriptor-path (client/descriptor-path project)]
-    (when (client/available? project)
-      (throw (ex-info "A service is already running for this project"
-                      {:exit-code 2})))
-    (Files/createDirectories (:state-dir project)
-                             (make-array java.nio.file.attribute.FileAttribute 0))
-    (let [{:keys [channel lock]} (acquire-service-lock project)
+   (when (client/available? project)
+     (throw (ex-info "A service is already running for this project"
+                     {:exit-code 2})))
+   (Files/createDirectories (:state-dir project)
+                            (make-array java.nio.file.attribute.FileAttribute 0))
+   (let [service-lease (acquire-service-lock project)
           settings (config/load-config project)
           token (str (UUID/randomUUID))
+          instance-id (str (UUID/randomUUID))
+          shutdown-hook
+          (Thread.
+           ^Runnable
+           #(try
+              (lifecycle/delete-owned! project instance-id)
+              (catch Throwable _))
+           "llm-context-service-cleanup")
+          shutdown-hook-registered? (atom false)
           running (atom true)
           graph-generation (atom 0)
           semantic-enabled? (semantic-reconcile/enabled? settings)
@@ -489,8 +482,7 @@
                                :analysis-progress
                                (analysis-progress/snapshot progress-state)})
           worker-state (atom nil)]
-      (with-open [lock-channel channel
-                  service-lock lock]
+      (with-open [service-lock service-lease]
        (try
         (with-open [graph (store/open project settings)
                     server (transport/open-listener project)]
@@ -508,18 +500,16 @@
                       (analysis-progress/snapshot progress-state)
                       :runtime {:status :starting
                                 :detail (.getMessage error)}})))
-          (Files/writeString
-           descriptor-path
-           (pr-str
-            (merge
-             (transport/endpoint-descriptor server)
-             {:token token
-              :pid (.pid (ProcessHandle/current))
-              :semantic-status (:status @runtime-state)}))
-           (into-array OpenOption [StandardOpenOption/CREATE
-                                   StandardOpenOption/TRUNCATE_EXISTING
-                                   StandardOpenOption/WRITE]))
-          (transport/secure-owner-only! descriptor-path)
+          (lifecycle/write-descriptor!
+           project
+           (merge
+            (transport/endpoint-descriptor server)
+            {:token token
+             :instance-id instance-id
+             :pid (.pid (ProcessHandle/current))
+             :semantic-status (:status @runtime-state)}))
+          (.addShutdownHook (Runtime/getRuntime) shutdown-hook)
+          (reset! shutdown-hook-registered? true)
           (let [runtime-future
                 (when semantic-enabled?
                   (future
@@ -664,10 +654,14 @@
                   (future-cancel runtime-future))
                 (when (and router-future
                            (not (future-done? router-future)))
-                  (future-cancel router-future))
-                (Files/deleteIfExists descriptor-path)))))
+                  (future-cancel router-future))))))
         (finally
+          (when @shutdown-hook-registered?
+            (try
+              (.removeShutdownHook (Runtime/getRuntime) shutdown-hook)
+              (catch IllegalStateException _)))
+          (lifecycle/delete-owned! project instance-id)
           (when-let [router-runtime (:query-router-runtime @runtime-state)]
             (intent-router/stop! router-runtime))
-          (semantic-runtime/stop! @runtime-state))))))
+          (semantic-runtime/stop! @runtime-state)))))
    0))

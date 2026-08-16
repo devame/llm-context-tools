@@ -1,23 +1,22 @@
 (ns llm-context.service.client
   (:require [clojure.edn :as edn]
+            [llm-context.service.lifecycle :as lifecycle]
             [llm-context.service.transport :as transport])
   (:import [java.io PushbackReader]
            [java.net InetAddress InetSocketAddress Socket
             StandardProtocolFamily UnixDomainSocketAddress]
-           [java.nio.channels Channels SocketChannel]
-           [java.nio.file Files LinkOption Path]))
+           [java.nio.channels Channels SocketChannel]))
 
 (def ^:private connect-timeout-ms 750)
 (def ^:private request-timeout-ms 30000)
 
 (defn descriptor-path [project]
-  (.resolve ^Path (:state-dir project) "service.edn"))
+  (lifecycle/descriptor-path project))
 
 (defn descriptor [project]
-  (let [path (descriptor-path project)]
-    (when (Files/exists path (make-array LinkOption 0))
-      (try (edn/read-string (Files/readString path))
-           (catch Throwable _ nil)))))
+  (let [{:keys [exists? valid? value]}
+        (lifecycle/descriptor-snapshot project)]
+    (when (and exists? valid?) value)))
 
 (defn- unavailable-response [type message]
   {:ok false :error message :exit-code 1 :type type})
@@ -48,7 +47,12 @@
 
 (defn- read-response [input]
   (with-open [reader (PushbackReader. (java.io.InputStreamReader. input))]
-    (edn/read {:eof nil} reader)))
+    (let [response (edn/read {:eof ::eof} reader)]
+      (when-not (and (map? response) (contains? response :ok))
+        (throw
+         (ex-info "Project service returned an invalid response envelope"
+                  {:response response})))
+      response)))
 
 (defn- tcp-request
   [{:keys [host port token]} payload connect-timeout request-timeout]
@@ -73,47 +77,85 @@
       (.println writer (pr-str (assoc payload :token token)))
       (read-response (Channels/newInputStream channel)))))
 
+(defn- reclaimable-error? [response]
+  (contains? #{:service/unreachable :service/io-error
+               :service/protocol-error}
+             (:type response)))
+
+(defn- reclaim-or-report [project snapshot response]
+  (if (reclaimable-error? response)
+    (case (:status (lifecycle/reclaim-stale! project (:content snapshot)))
+      (:reclaimed :absent) nil
+      response)
+    response))
+
+(defn- invalid-descriptor-response [project snapshot]
+  (case (:status (lifecycle/reclaim-stale! project (:content snapshot)))
+    (:reclaimed :absent) nil
+    (unavailable-response
+     :service/protocol-error
+     "Project service descriptor is unreadable while the service lock is owned")))
+
+(defn- usable-descriptor? [{:keys [transport token port socket-path]}]
+  (and (string? token)
+       (case (or transport :tcp)
+         :unix (string? socket-path)
+         :tcp (integer? port)
+         false)))
+
 (defn request
   "Send one authenticated EDN request.
 
-  Return nil only when no service descriptor exists. Once a project advertises
-  a resident service, connection and response failures are explicit so callers
-  never mistake a busy or unreachable service for permission to open a second
-  Datalevin connection."
+  Return nil when no descriptor exists or when an unreachable stale descriptor
+  was safely reclaimed under the project service lock. Timeouts and failures
+  while another process owns the lock remain explicit, so callers never open a
+  second Datalevin connection beside a live or potentially busy service."
   ([project payload]
    (request project payload {}))
   ([project payload {:keys [connect-timeout request-timeout]
                      :or {connect-timeout connect-timeout-ms
                           request-timeout request-timeout-ms}}]
-   (when-let [{:keys [transport] :as endpoint} (descriptor project)]
-     (try
-       ;; Descriptors written before Unix transport did not carry :transport.
-       (case (or transport :tcp)
-         :unix
-         (let [operation (future (unix-request endpoint payload))
-               response (deref operation request-timeout ::timeout)]
-           (if (= ::timeout response)
-             (do
-               (future-cancel operation)
-               (throw (java.net.SocketTimeoutException.)))
-             response))
-         :tcp (tcp-request endpoint payload connect-timeout request-timeout)
-         (throw (ex-info (str "Unknown project service transport: " transport)
-                         {:transport transport})))
-       (catch java.util.concurrent.ExecutionException error
-         ;; Unix requests run in a future so a stuck connect can be bounded.
-         ;; Future.get/deref wraps the actual socket exception, so unwrap it
-         ;; before classifying the endpoint failure.
-         (communication-error-response
-          request-timeout (or (.getCause error) error)))
-       (catch java.net.SocketTimeoutException error
-         (communication-error-response request-timeout error))
-       (catch java.net.ConnectException error
-         (communication-error-response request-timeout error))
-       (catch java.io.IOException error
-         (communication-error-response request-timeout error))
-       (catch RuntimeException error
-         (communication-error-response request-timeout error))))))
+   (let [{:keys [exists? valid? value] :as snapshot}
+         (lifecycle/descriptor-snapshot project)]
+     (cond
+       (not exists?) nil
+       (or (not valid?) (not (usable-descriptor? value)))
+       (invalid-descriptor-response project snapshot)
+       :else
+       (let [{:keys [transport] :as endpoint} value
+             response
+             (try
+               ;; Descriptors written before Unix transport did not carry
+               ;; :transport.
+               (case (or transport :tcp)
+                 :unix
+                 (let [operation (future (unix-request endpoint payload))
+                       response (deref operation request-timeout ::timeout)]
+                   (if (= ::timeout response)
+                     (do
+                       (future-cancel operation)
+                       (throw (java.net.SocketTimeoutException.)))
+                     response))
+                 :tcp (tcp-request endpoint payload connect-timeout
+                                   request-timeout)
+                 (throw
+                  (ex-info
+                   (str "Unknown project service transport: " transport)
+                   {:transport transport})))
+               (catch java.util.concurrent.ExecutionException error
+                 ;; Unix requests run in a future so a stuck connect can be
+                 ;; bounded. Deref wraps the actual socket exception.
+                 (communication-error-response
+                  request-timeout (or (.getCause error) error)))
+               (catch java.net.SocketTimeoutException error
+                 (communication-error-response request-timeout error))
+               (catch java.net.ConnectException error
+                 (communication-error-response request-timeout error))
+               (catch java.io.IOException error
+                 (communication-error-response request-timeout error))
+               (catch RuntimeException error
+                 (communication-error-response request-timeout error)))]
+         (reclaim-or-report project snapshot response))))))
 
 (defn available? [project]
   (= {:ok true :value :pong} (request project {:op :ping})))

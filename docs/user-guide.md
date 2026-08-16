@@ -37,6 +37,12 @@ They persist only files whose facts changed, including unchanged source files
 whose cross-file resolution changed. If a resident service owns the project,
 analysis is sent to that process so there is only one Datalevin writer.
 
+If an abrupt service death leaves `.llm-context/service.edn` or
+`.llm-context/service.sock` behind, the next command safely removes them after
+proving that the OS service lock has no owner. A timeout is not treated as a
+dead service. `llm-context service stop` is safe to repeat and reports
+`not running` after stale state has been reclaimed.
+
 Run `llm-context analyze --check` to apply the same discovery, analyzer,
 canonicalization, and whole-snapshot integrity checks without opening or
 changing the graph database.

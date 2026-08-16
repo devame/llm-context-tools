@@ -322,6 +322,14 @@ in different network namespaces share the service when they share the project
 filesystem. Windows uses authenticated loopback TCP. An OS file lock prevents
 two service processes from owning the same project.
 
+The descriptor and Unix socket are advertisements, not ownership records: an
+abrupt process or JVM failure can leave them behind. On the next command,
+`llm-context` removes an unreachable or malformed advertisement only after it
+acquires the OS service lock and confirms that no service owns the project.
+Timeouts are never reclaimed automatically because they can represent a live,
+busy service. Descriptor publication is atomic, normal JVM shutdown removes
+only the current instance's files, and `service stop` is idempotent.
+
 Use `llm-context semantic status` to inspect lag and
 `llm-context semantic status --watch` to monitor a full or incremental graph
 replacement from another terminal. Status remains available while the graph

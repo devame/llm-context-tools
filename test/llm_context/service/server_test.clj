@@ -2,6 +2,7 @@
   (:require [clojure.test :refer [deftest is]]
             [llm-context.analysis.full :as full]
             [llm-context.analysis.incremental :as incremental]
+            [llm-context.config :as config]
             [llm-context.context :as context]
             [llm-context.intent.router :as intent-router]
             [llm-context.query :as query]
@@ -9,6 +10,7 @@
             [llm-context.semantic.worker :as semantic-worker]
             [llm-context.project :as project]
             [llm-context.service.client :as client]
+            [llm-context.service.lifecycle :as lifecycle]
             [llm-context.service.server :as server]
             [llm-context.service.transport :as transport]
             [llm-context.store :as store])
@@ -172,6 +174,33 @@
     (is (= {:ok true :value :stopping}
            (client/request project {:op :stop})))
     (is (not= ::timeout (deref running 5000 ::timeout)))))
+
+(deftest startup-failure-removes-only-its-published-endpoint
+  (let [root (Files/createTempDirectory
+              "llm-context-service-startup-cleanup-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        project (project/context (str root))
+        settings (-> (config/load-config project)
+                     (assoc-in [:semantic :lateon-code :enabled] false)
+                     (assoc-in [:service :watch] false)
+                     (assoc-in [:context :query-router :enabled] false)
+                     (assoc-in [:context :candidate-reranker :enabled] false))
+        runtime-factory (fn [& _] {:status :disabled})]
+    (with-redefs [config/load-config (constantly settings)]
+      (with-redefs-fn
+        {#'server/request-executor
+         (fn [_] (throw (ex-info "executor startup failed" {})))}
+        #(is (thrown-with-msg?
+              clojure.lang.ExceptionInfo
+              #"executor startup failed"
+              (server/start! project
+                             {:runtime-factory runtime-factory
+                              :router-factory router-factory})))))
+    (is (not (Files/exists (client/descriptor-path project)
+                           (make-array LinkOption 0))))
+    (when-not (transport/windows?)
+      (is (not (Files/exists (transport/socket-path project)
+                             (make-array LinkOption 0)))))))
 
 (deftest service-reports-background-worker-failure-separately
   (let [root (Files/createTempDirectory
@@ -444,13 +473,12 @@
               "llm-context-unreadable-service-"
               (make-array java.nio.file.attribute.FileAttribute 0))
         project (project/context (str root))
+        release (promise)
         running
         (future
-          (with-open [server (java.net.ServerSocket.
+          (with-open [_ (lifecycle/acquire! project)
+                      server (java.net.ServerSocket.
                               0 1 (java.net.InetAddress/getLoopbackAddress))]
-            (Files/createDirectories
-             (:state-dir project)
-             (make-array java.nio.file.attribute.FileAttribute 0))
             (Files/writeString
              (client/descriptor-path project)
              (pr-str {:port (.getLocalPort server) :token "test"})
@@ -458,7 +486,8 @@
             (with-open [socket (.accept server)
                         writer (java.io.PrintWriter.
                                 (.getOutputStream socket) true)]
-              (.println writer "#object[unreadable]"))))]
+              (.println writer "#object[unreadable]")
+              @release)))]
     (loop [attempt 0]
       (when (and (not (Files/exists
                        (client/descriptor-path project)
@@ -466,8 +495,11 @@
                  (< attempt 100))
         (Thread/sleep 10)
         (recur (inc attempt))))
-    (is (= :service/protocol-error
-           (:type (client/request project {:op :ping}))))
+    (try
+      (is (= :service/protocol-error
+             (:type (client/request project {:op :ping}))))
+      (finally
+        (deliver release true)))
     (is (not= ::timeout (deref running 5000 ::timeout)))))
 
 (deftest advertised-service-timeout-is-not-treated-as-absent
