@@ -470,7 +470,9 @@ provider contract.
 Phase 0 also begins with `clojure -M:qualify-providers`. The initial harness
 proves synchronous transaction reports, asynchronous commit, and compact-copy
 round trips against the pinned Datalevin artifact in an isolated temporary
-database. `clojure -M:qualify-providers --next-plaid` additionally exercises
+database. It also abruptly halts child JVMs before and immediately after a
+synchronous commit and proves on reopen that only the acknowledged transaction
+survives. `clojure -M:qualify-providers --next-plaid` additionally exercises
 the packaged NextPlaid binary and verified model through a real child-process
 crash, restart, direct-resubmission measurement, delete-then-submit
 reconciliation, and a second clean restart.

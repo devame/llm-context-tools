@@ -9,7 +9,8 @@
     (is (= {:transaction-report true
             :transact-async true
             :compact-copy true
-            :bulk-init true}
+            :bulk-init true
+            :crash-boundary true}
            (:capabilities result)))
     (is (= :not-adopted
            (get-in result [:production-decisions :bulk-graph-build :status])))))

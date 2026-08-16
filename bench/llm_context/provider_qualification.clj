@@ -44,6 +44,45 @@
        (:db-before report)
        (:db-after report)))
 
+(defn- java-command []
+  (str (System/getProperty "java.home") java.io.File/separator "bin"
+       java.io.File/separator "java"))
+
+(defn- run-crash-child! [mode directory]
+  (let [process (-> (ProcessBuilder.
+                     ^java.util.List
+                     [(java-command) "-cp" (System/getProperty "java.class.path")
+                      "clojure.main" "-m"
+                      "llm-context.datalevin-crash-child"
+                      mode (str directory)])
+                    (.redirectErrorStream true)
+                    .start)
+        finished? (.waitFor process 30 TimeUnit/SECONDS)
+        output (String. (.readAllBytes (.getInputStream process)))]
+    (when-not finished?
+      (.destroyForcibly process)
+      (throw (ex-info "Datalevin crash qualification child timed out"
+                      {:mode mode :output output})))
+    {:exit (.exitValue process) :output output}))
+
+(defn- qualified-crash-boundary? [root]
+  (let [before (.resolve root "crash-before")
+        after (.resolve root "crash-after")
+        before-result (run-crash-child! "before-commit" before)
+        after-result (run-crash-child! "after-commit" after)
+        ids
+        (fn [directory]
+          (let [connection (d/get-conn (str directory) qualification-schema)]
+            (try
+              (set (d/q '[:find [?id ...]
+                          :where [_ :qualification/id ?id]]
+                        (d/db connection)))
+              (finally (d/close connection)))))]
+    (and (= 137 (:exit before-result))
+         (= 137 (:exit after-result))
+         (empty? (ids before))
+         (= #{"committed"} (ids after)))))
+
 (defn qualify-datalevin
   "Prove the pinned Datalevin transaction-report, async-commit, and compact-copy
   contracts in an isolated temporary database. Returns data; never exits."
@@ -126,6 +165,7 @@
               {:relationships (= 10 initial-value)
                :reopen (= 20 reopened-value)
                :validation invalid-rejected?})
+            crash-boundary? (qualified-crash-boundary? root)
             capabilities
             {:transaction-report
              (every? (fn [[report metadata]]
@@ -135,7 +175,8 @@
              (boolean (report-valid? (first (:async reports))
                                      (second (:async reports))))
              :compact-copy (= #{"sync" "async"} copied-ids)
-             :bulk-init (every? true? (vals bulk-result))}]
+             :bulk-init (every? true? (vals bulk-result))
+             :crash-boundary crash-boundary?}]
         {:provider :datalevin
          :artifact "org.datalevin/datalevin-embedded"
          :version version
