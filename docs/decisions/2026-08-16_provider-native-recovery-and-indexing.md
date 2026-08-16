@@ -314,11 +314,15 @@ by:
 - analyzer configuration fingerprint;
 - canonical graph format.
 
-On restart, matching files are reused and only missing or incompatible files
-are parsed. Finalization builds project-wide exact relationships from the
-complete staged file set, validates the candidate, and then invokes the
-existing identity-convergent persistence. Partial staging data is never
-queryable as the active graph.
+On restart, a complete generation matching the whole source inventory and
+analyzer contract is reused. clj-kondo's public contract produces one
+whole-project snapshot, not independently valid per-file parse results, so an
+incomplete generation cannot safely skip arbitrary source files. Its valid
+shards are retained and not rewritten, but the authoritative analyzer reruns
+before publishing a complete index. Finalization validates the complete
+candidate and invokes the existing identity-convergent persistence. Partial
+staging data is never queryable as the active graph. Normal edits continue to
+use the existing dependency-closure incremental analyzer.
 
 This phase is intentionally later: it adds a new durable format owned by
 llm-context, whereas redundant-write elimination and provider batching reuse
@@ -410,26 +414,48 @@ walking generated directories.
 | NextPlaid restarts with physical inconsistency | Qualified provider repair runs, then llm-context proves logical generation coverage |
 | Resident service dies | Host supervisor restarts it; startup classifies and cleans only stale project-owned artifacts |
 | Disk safety limit trips | Operation stops before another write and reports measured component growth |
-| Analyzer staging is partial | Matching staged files resume; active graph remains unavailable until complete validation and activation |
+| Analyzer staging is partial | Existing valid shards are retained, the whole-project provider reruns, and the active graph remains unavailable until complete validation and activation |
 
 ## Configuration contract
 
 Provider-specific options remain namespaced and validated at startup. Planned
 settings include:
 
-- `:store/:write-mode` with qualified values `:sync` and `:async`;
 - `:store/:max-transaction-weight`;
-- `:store/:maintenance-copy-directory`;
 - `:store/:minimum-free-space-bytes`;
 - `:store/:maximum-operation-growth-bytes`;
-- `:store/:sample-interval-ms`;
-- `:semantic/:provider-queue-limit` and retry/backoff controls;
-- `:analysis/:staging-directory` and retention controls;
+- `:store/:storage-sample-interval-ms`;
+- semantic retry, lease, visibility, batching, and concurrency controls;
+- `:analysis/:resumable-staging`, `:analysis/:staging-directory`, and
+  `:analysis/:maximum-staging-generation-bytes`;
 - supervisor generation options, without silently installing a service.
 
 Defaults preserve the currently qualified synchronous Datalevin path and
 durable semantic worker. Experimental settings fail closed when their
 capability is not qualified.
+
+`transact-async`, WAL, automatic compact-copy activation, and raw-datom bulk
+graph construction are not configuration values in this release. Their
+provider APIs are qualified where useful, but no alternate production
+correctness path is exposed without scale and fault evidence.
+
+## Implementation status
+
+| Phase | Status | Release outcome |
+| --- | --- | --- |
+| 0 provider qualification | Implemented | Datalevin transaction, async, copy, bulk, and abrupt-crash probes; optional real NextPlaid crash/restart probe |
+| 1 redundant writes | Implemented | Schema-driven equality skips unchanged canonical writes |
+| 2 graph maintenance | Implemented with safe boundary | Verified compact copies; no automatic activation; async writes not adopted |
+| 3 semantic ingestion | Implemented | Durable pending, leased, provider-accepted, visible, retry, and failure states |
+| 4 supervision and cleanup | Implemented | Read-only inventory, dry-run retention, and generated systemd/launchd/Windows supervisors |
+| 5 analyzer resumption | Implemented to provider boundary | Exact complete generations resume; partial generations remain inert and retained |
+| 6 shadow bulk build | Qualified and rejected | Raw loader works, but production adaptation would duplicate Datalevin identity/reference resolution |
+
+The remaining release gates are workload validation rather than unimplemented
+architecture: run a complete Metabase analysis and semantic synchronization,
+capture native-ext4 peak disk/RSS and throughput, rerun the public retrieval
+evaluation, and verify clean provider shutdown. These measurements determine
+whether 0.12.0 is publishable; they do not silently enable experimental paths.
 
 ## Validation gates
 
@@ -528,5 +554,6 @@ the scale qualification corpus, not the implementation contract.
   fewer writes when most entities are unchanged.
 - Some advanced features remain deliberately unavailable until fault tests
   pass; this is safer than assuming documentation for another version applies.
-- Analyzer-stage resumption remains substantial future work, but its contract
-  is now separated from database transaction recovery.
+- Analyzer-stage resumption is bounded by the analyzer provider contract:
+  complete exact generations resume, while partial whole-project generations
+  fail closed and are retained for a safe retry.
