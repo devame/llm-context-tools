@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.12.3
+
+- Automatically start the project service after local semantic analysis queues
+  durable indexing work, preventing a stopped service from leaving the queue
+  permanently pending.
+- Add `analyze --no-service` for one-shot graph analysis and CI workflows, and
+  report automatic service-start failures clearly.
+- Update onboarding, benchmark, and packaged-release verification instructions
+  for the new service lifecycle.
+
 ## 0.12.2
 
 - Added safe, non-evaluating ClojureScript `#js` literal support to aggregate
