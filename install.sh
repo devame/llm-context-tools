@@ -40,9 +40,36 @@ esac
   fail "Java 23 or newer is required; found Java $JAVA_MAJOR"
 
 if command -v curl >/dev/null 2>&1; then
-  download() { curl --fail --silent --show-error --location "$1" --output "$2"; }
+  DOWNLOAD_CONNECT_TIMEOUT=${LLM_CONTEXT_DOWNLOAD_CONNECT_TIMEOUT:-20}
+  DOWNLOAD_LOW_SPEED_LIMIT=${LLM_CONTEXT_DOWNLOAD_LOW_SPEED_LIMIT:-1024}
+  DOWNLOAD_LOW_SPEED_TIME=${LLM_CONTEXT_DOWNLOAD_LOW_SPEED_TIME:-60}
+  DOWNLOAD_RETRIES=${LLM_CONTEXT_DOWNLOAD_RETRIES:-3}
+  download() {
+    url=$1
+    output=$2
+    printf 'Downloading %s\n' "${url##*/}" >&2
+    curl --fail --show-error --location --progress-bar \
+      --connect-timeout "$DOWNLOAD_CONNECT_TIMEOUT" \
+      --speed-limit "$DOWNLOAD_LOW_SPEED_LIMIT" \
+      --speed-time "$DOWNLOAD_LOW_SPEED_TIME" \
+      --retry "$DOWNLOAD_RETRIES" \
+      --retry-delay 2 \
+      --retry-connrefused \
+      --output "$output" "$url"
+  }
 elif command -v wget >/dev/null 2>&1; then
-  download() { wget --quiet "$1" --output-document "$2"; }
+  DOWNLOAD_TIMEOUT=${LLM_CONTEXT_DOWNLOAD_TIMEOUT:-20}
+  DOWNLOAD_RETRIES=${LLM_CONTEXT_DOWNLOAD_RETRIES:-3}
+  download() {
+    url=$1
+    output=$2
+    printf 'Downloading %s\n' "${url##*/}" >&2
+    wget --timeout="$DOWNLOAD_TIMEOUT" \
+      --tries="$DOWNLOAD_RETRIES" \
+      --waitretry=2 \
+      --show-progress \
+      --output-document "$output" "$url"
+  }
 else
   fail "curl or wget is required to download the release"
 fi
