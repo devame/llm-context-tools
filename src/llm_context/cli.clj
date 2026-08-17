@@ -286,15 +286,11 @@
                       (with-graph
                         context settings
                         #((resolve-fn 'llm-context.store/graph-state) %)))
-        _ (when (and (= :incompatible graph-state) (not force-full?))
-            (throw
-             (ex-info
-              (str "This project graph uses an incompatible format. "
-                   "Run `llm-context analyze --full` to rebuild it.")
-              {:exit-code 2 :type :graph/rebuild-required})))
         ;; An interrupted batched rebuild is explicitly unavailable. A normal
         ;; analyze invocation repairs it with a new fully preflighted rebuild.
-        full? (or force-full? (contains? #{:empty :unavailable} graph-state))
+        ;; The same automatic boundary also upgrades older graph formats.
+        full? (or force-full?
+                   (contains? #{:empty :incompatible :unavailable} graph-state))
         progress (when-not (get-in context [:options :quiet?])
                    print-analysis-progress!)
         remote (if check?

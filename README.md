@@ -52,7 +52,7 @@ curl -fsSL https://raw.githubusercontent.com/devame/llm-context-tools/main/insta
   | LLM_CONTEXT_SKIP_SEMANTIC=1 sh
 ```
 
-Set `LLM_CONTEXT_VERSION=0.12.0` to pin the current release. See the
+Set `LLM_CONTEXT_VERSION=0.12.1` to pin the current release. See the
 [installation and troubleshooting guide](docs/user-guide.md#installation-and-troubleshooting)
 for custom locations, CUDA, and verified model packages.
 
@@ -63,14 +63,16 @@ Run these commands from the repository root:
 ```bash
 llm-context init
 llm-context doctor
-llm-context analyze --full
+llm-context analyze
 llm-context service start
 ```
 
 `init` confirms the project root and creates `llm-context.edn`. The first
-analysis builds the graph; later `analyze` runs are incremental. The optional
-resident service watches for changes, keeps the JVM warm, and runs semantic
-indexing in the background.
+analysis builds the graph; later `analyze` runs are incremental. If an upgrade
+introduces an incompatible graph format, `analyze` automatically performs the
+guarded full rebuild required to update it. The optional resident service
+watches for changes, keeps the JVM warm, and runs semantic indexing in the
+background.
 
 You can target a project without changing directories:
 
@@ -194,7 +196,9 @@ selected `deps.edn`, `bb.edn`, `shadow-cljs.edn`, and
 `.clj-kondo/config.edn` files. Unsupported extensions are ignored.
 
 Re-run the installer to update the CLI. If a release changes the graph format,
-commands will stop with an instruction to rebuild generated state:
+a normal `analyze` detects the older state and automatically performs a guarded
+full rebuild. To request that rebuild explicitly, or to force one for another
+reason, run:
 
 ```bash
 llm-context analyze --full
@@ -223,7 +227,7 @@ around the same JAR:
 
 ```bash
 npm pack
-npm install --global ./llm-context-0.12.0.tgz
+npm install --global ./llm-context-0.12.1.tgz
 llm-context doctor
 ```
 

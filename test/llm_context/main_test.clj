@@ -91,6 +91,24 @@
       (is (= {:op :analyze :full? true} (first @request)))
       (is (= 86400000 (:request-timeout (second @request)))))))
 
+(deftest incompatible-analysis-automatically-requests-a-full-rebuild
+  (let [root (Files/createTempDirectory
+              "llm-context-incompatible-analysis-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        context (assoc (project/context (str root)) :options {:quiet? true})
+        request (atom nil)]
+    (with-redefs [store/graph-state (constantly :incompatible)
+                  service-client/request
+                  (fn [_ payload options]
+                    (reset! request [payload options])
+                    {:ok true
+                     :value {:mode :full :files 1 :entities 1
+                             :diagnostics []
+                             :semantic {:enabled? false}}})]
+      (is (zero? (cli/execute context "analyze" [])))
+      (is (= {:op :analyze :full? true} (first @request)))
+      (is (= 86400000 (:request-timeout (second @request)))))))
+
 (deftest local-analysis-publishes-durable-progress-when-no-service-owns-project
   (let [root (Files/createTempDirectory
               "llm-context-local-analysis-progress-"
@@ -104,6 +122,24 @@
                     {:mode :full :files 1 :entities 2
                      :diagnostics [] :semantic {:enabled? false}})]
       (is (zero? (cli/execute context "analyze" ["--full"])))
+      (let [snapshot (analysis-progress/read-state context)]
+        (is (= :complete (:state snapshot)))
+        (is (= :full-analysis (:operation snapshot)))
+        (is (= :discover-start (:stage snapshot)))))))
+
+(deftest incompatible-analysis-rebuilds-locally-when-no-service-owns-project
+  (let [root (Files/createTempDirectory
+              "llm-context-local-incompatible-analysis-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        context (assoc (project/context (str root)) :options {:quiet? true})]
+    (with-redefs [service-client/request (fn [& _] nil)
+                  store/graph-state (constantly :incompatible)
+                  analysis-full/analyze!
+                  (fn [_ _ progress]
+                    (progress {:stage :discover-start})
+                    {:mode :full :files 1 :entities 2
+                     :diagnostics [] :semantic {:enabled? false}})]
+      (is (zero? (cli/execute context "analyze" [])))
       (let [snapshot (analysis-progress/read-state context)]
         (is (= :complete (:state snapshot)))
         (is (= :full-analysis (:operation snapshot)))

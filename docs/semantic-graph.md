@@ -76,6 +76,8 @@ coordinate full, incremental, and read-only analysis.
 Datalevin metadata records graph format, analyzer name/version, Janet catalog
 version, semantic document version, and versioned NextPlaid index name. Normal
 queries refuse an incompatible graph with an instruction to run
-`llm-context analyze --full`. The rebuild changes only generated project state.
+`llm-context analyze` automatically performs the required full rebuild;
+`llm-context analyze --full` forces it explicitly. The rebuild changes only
+generated project state.
 Graph format 4 requires that full rebuild; older generated graph data is not
-migrated.
+migrated in place.

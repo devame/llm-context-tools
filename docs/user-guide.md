@@ -13,7 +13,7 @@ Run these commands from the repository root:
 ```bash
 llm-context init
 llm-context doctor
-llm-context analyze --full
+llm-context analyze
 llm-context service start
 ```
 
@@ -270,14 +270,17 @@ recreates missing reconciliation work.
 ## Upgrade to graph format 4
 
 Graph format 4 adds aggregate evidence and container documents. After
-upgrading, run:
+upgrading, the next normal analysis detects an older graph and automatically
+rebuilds it. To force the upgrade explicitly, run:
 
 ```bash
 llm-context analyze --full
 ```
 
-Normal queries against an older graph stop with that actionable instruction.
-The rebuild removes only generated graph/queue metadata, records analyzer and
+Normal queries against an older graph remain fail-closed until the rebuild
+finishes. A normal `analyze` performs the upgrade automatically; `--full`
+forces the same rebuild explicitly. The rebuild removes only generated
+graph/queue metadata, records analyzer and
 catalog versions, and uses the current versioned NextPlaid index so stale
 vectors cannot appear in new results. Source files and `llm-context.edn` are
 untouched. If the project service is running, leave it running—the rebuild is
@@ -290,7 +293,8 @@ FP32 and INT8 variants of the pinned retrieval and routing models. Set
 `LLM_CONTEXT_SKIP_SEMANTIC=1` when only exact graph and FTS features are wanted.
 
 - If `doctor` reports Java failure, install JDK 23 or newer.
-- If graph format is incompatible, run `llm-context analyze --full`.
+- If graph format is incompatible, run `llm-context analyze`; it automatically
+  performs the required full rebuild. Use `--full` to force the rebuild.
 - If no files are discovered, confirm `init` was run at the repository root
   and inspect `:analysis :include` and `:exclude`.
 - If a supported file is absent, check Git ignore rules and

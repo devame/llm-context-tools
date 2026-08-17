@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.12.1
+
+- Automatically rebuild older incompatible graph formats on a normal
+  `llm-context analyze`, while keeping queries fail-closed until the rebuild
+  completes. `analyze --full` remains available to force a rebuild.
+- Published the installer download progress and timeout/retry improvements
+  from the 0.12.0 maintenance update.
+
 ## 0.12.0
 
 - Added graph-format 4 aggregate and concept entities so retrieval can combine
