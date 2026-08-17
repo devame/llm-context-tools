@@ -14,6 +14,14 @@
   routing/reranking, and optional answer reading, including pinned manifests,
   local or Hugging Face-compatible sources, runtime registries, and mandatory
   SHA-256 verification with no unverified escape hatch.
+- Added self-healing resident-service lifecycle handling, host-native
+  supervisors, and verified CUDA/accelerator selection for semantic runtimes.
+- Made full graph replacement resumable and storage-safe with bounded staging
+  generations, headroom checks, recovery status, safe cleanup, and read-only
+  storage inventory.
+- Added provider-aware crash recovery, verified compact graph copies, exact
+  semantic-document reuse, and serialized analysis finalization during
+  shutdown.
 
 ## 0.11.0
 
