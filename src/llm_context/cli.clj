@@ -50,6 +50,7 @@
        "  init [--yes]         Confirm the project root and write llm-context.edn\n"
        "  analyze              Update the semantic graph\n"
        "    --check            Validate a source snapshot without writing data\n"
+       "    --no-service       Do not start the semantic indexing service\n"
        "  query                Query the semantic graph\n"
        "  semantic             Inspect or synchronize LateOn indexing\n"
        "  maintenance          Inspect storage or create verified maintenance copies\n"
@@ -273,14 +274,36 @@
         (analysis-progress/fail! progress-state error)
         (throw error)))))
 
+(defn- maybe-start-semantic-service!
+  "Start the project service after local analysis has queued semantic work.
+  The analysis must finish first so the service never competes with the
+  analyzer for the project's Datalevin writer lock."
+  [context result local-analysis? check? no-service?]
+  (when (and local-analysis?
+             (not check?)
+             (not no-service?)
+             (true? (get-in result [:semantic :enabled?])))
+    (try
+      {:result ((resolve-fn 'llm-context.service.daemon/start!) context)}
+      (catch Exception error
+        {:error error}))))
+
+(defn- print-semantic-service-start! [service-result]
+  (let [{:keys [status pid log-path]} service-result
+        state (if (= :running status) "started" "starting")
+        pid-text (if pid (format " (pid %d)" pid) "")]
+    (println (format "Semantic indexing service %s%s; log: %s"
+                     state pid-text log-path))))
+
 (defmethod execute "analyze" [context _ args]
-  (when-let [unknown (first (remove #{"--full" "--check"} args))]
+  (when-let [unknown (first (remove #{"--full" "--check" "--no-service"} args))]
     (throw (ex-info (str "Unknown analyze option: " unknown) {:exit-code 2})))
   (when (and (some #{"--full"} args) (some #{"--check"} args))
     (throw (ex-info "analyze --full and --check cannot be combined"
                     {:exit-code 2})))
   (let [settings (config/load-config context)
         check? (boolean (some #{"--check"} args))
+        no-service? (boolean (some #{"--no-service"} args))
         force-full? (boolean (some #{"--full"} args))
         graph-state (when-not check?
                       (with-graph
@@ -313,33 +336,44 @@
 
           :else
           remote)]
-    (when-not (get-in context [:options :quiet?])
-      (println
-       (case (:mode result)
-         :check
-         (format (str "Validated %d files and %d canonical entities: "
-                      "%d symbols, %d exact edges, %d references "
-                      "(%d diagnostics)")
-                 (:files result) (:entities result) (:symbols result)
-                 (:exact-edges result) (:references result)
-                 (count (:diagnostics result)))
-         :incremental
-         (format "Analyzed %d files: %d changed, %d deleted (%d diagnostics)"
-                 (:files result) (:changed result) (:deleted result)
-                 (count (:diagnostics result)))
-         (format "Analyzed %d files into %d entities (%d diagnostics)"
-                 (:files result) (:entities result)
-                 (count (:diagnostics result)))))
-      (when (get-in result [:semantic :enabled?])
+    (let [service-start
+          (maybe-start-semantic-service!
+           context result (= unavailable remote) check? no-service?)]
+      (when-not (get-in context [:options :quiet?])
         (println
-         (format
-          "Semantic indexing queued: %d upserts, %d deletions (%d deferred)"
-          (get-in result [:semantic :queued-upserts] 0)
-          (get-in result [:semantic :queued-deletes] 0)
-          (get-in result [:semantic :deferred] 0))))
-      (doseq [diagnostic (:diagnostics result)]
-        (println "  " (diagnostic-message diagnostic))))
-    0))
+         (case (:mode result)
+           :check
+           (format (str "Validated %d files and %d canonical entities: "
+                        "%d symbols, %d exact edges, %d references "
+                        "(%d diagnostics)")
+                   (:files result) (:entities result) (:symbols result)
+                   (:exact-edges result) (:references result)
+                   (count (:diagnostics result)))
+           :incremental
+           (format "Analyzed %d files: %d changed, %d deleted (%d diagnostics)"
+                   (:files result) (:changed result) (:deleted result)
+                   (count (:diagnostics result)))
+           (format "Analyzed %d files into %d entities (%d diagnostics)"
+                   (:files result) (:entities result)
+                   (count (:diagnostics result)))))
+        (when (get-in result [:semantic :enabled?])
+          (println
+           (format
+            "Semantic indexing queued: %d upserts, %d deletions (%d deferred)"
+            (get-in result [:semantic :queued-upserts] 0)
+            (get-in result [:semantic :queued-deletes] 0)
+            (get-in result [:semantic :deferred] 0))))
+        (doseq [diagnostic (:diagnostics result)]
+          (println "  " (diagnostic-message diagnostic)))
+        (when-let [started (:result service-start)]
+          (print-semantic-service-start! started)))
+      (if-let [error (:error service-start)]
+        (do
+          (binding [*out* *err*]
+            (println (str "Semantic indexing service failed to start: "
+                          (or (.getMessage error) (str error)))))
+          1)
+        0))))
 
 (defn- require-argument [subcommand args]
   (or (first args)

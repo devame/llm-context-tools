@@ -14,7 +14,6 @@ Run these commands from the repository root:
 llm-context init
 llm-context doctor
 llm-context analyze
-llm-context service start
 ```
 
 `init` confirms the canonical root before writing `llm-context.edn`. The
@@ -35,7 +34,10 @@ cache stays under `.llm-context/cache/`.
 Subsequent `llm-context analyze` runs use source and semantic fingerprints.
 They persist only files whose facts changed, including unchanged source files
 whose cross-file resolution changed. If a resident service owns the project,
-analysis is sent to that process so there is only one Datalevin writer.
+analysis is sent to that process so there is only one Datalevin writer. When
+semantic indexing is enabled and no service owns the project, `analyze` starts
+one after queueing the durable semantic jobs. Use `analyze --no-service` for a
+one-shot graph-only or CI run.
 
 If an abrupt service death leaves `.llm-context/service.edn` or
 `.llm-context/service.sock` behind, the next command safely removes them after

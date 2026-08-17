@@ -64,15 +64,15 @@ Run these commands from the repository root:
 llm-context init
 llm-context doctor
 llm-context analyze
-llm-context service start
 ```
 
 `init` confirms the project root and creates `llm-context.edn`. The first
 analysis builds the graph; later `analyze` runs are incremental. If an upgrade
 introduces an incompatible graph format, `analyze` automatically performs the
-guarded full rebuild required to update it. The optional resident service
-watches for changes, keeps the JVM warm, and runs semantic indexing in the
-background.
+guarded full rebuild required to update it. When semantic indexing is enabled,
+`analyze` starts the project service after queueing work; the service watches
+for changes, keeps the JVM warm, and drains semantic jobs in the background.
+Use `llm-context analyze --no-service` for a one-shot graph-only or CI run.
 
 You can target a project without changing directories:
 
@@ -168,7 +168,8 @@ run:
 llm-context analyze --check
 ```
 
-The resident service is optional. Manage it with:
+When semantic indexing is enabled, `analyze` starts the resident service
+automatically. Manage it explicitly when needed with:
 
 ```bash
 llm-context service status

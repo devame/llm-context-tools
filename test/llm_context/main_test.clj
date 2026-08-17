@@ -8,6 +8,7 @@
             [llm-context.main :as main]
             [llm-context.project :as project]
             [llm-context.service.client :as service-client]
+            [llm-context.service.daemon :as service-daemon]
             [llm-context.service.progress :as analysis-progress]
             [llm-context.storage :as storage]
             [llm-context.store :as store]
@@ -127,6 +128,65 @@
         (is (= :full-analysis (:operation snapshot)))
         (is (= :discover-start (:stage snapshot)))))))
 
+(deftest local-semantic-analysis-starts-the-service-after-queueing-work
+  (let [root (Files/createTempDirectory
+              "llm-context-auto-service-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        context (assoc (project/context (str root)) :options {:quiet? true})
+        started? (atom false)]
+    (with-redefs [service-client/request (fn [& _] nil)
+                  store/graph-state (constantly :empty)
+                  analysis-full/analyze!
+                  (fn [_ _ _]
+                    {:mode :full :files 1 :entities 2
+                     :diagnostics []
+                     :semantic {:enabled? true :queued-upserts 2}})
+                  service-daemon/start!
+                  (fn [_]
+                    (reset! started? true)
+                    {:status :running :pid 42 :log-path "/tmp/service.log"})]
+      (is (zero? (cli/execute context "analyze" ["--full"])))
+      (is (true? @started?)))))
+
+(deftest no-service-keeps-local-semantic-analysis-one-shot
+  (let [root (Files/createTempDirectory
+              "llm-context-no-auto-service-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        context (assoc (project/context (str root)) :options {:quiet? true})]
+    (with-redefs [service-client/request (fn [& _] nil)
+                  store/graph-state (constantly :empty)
+                  analysis-full/analyze!
+                  (fn [_ _ _]
+                    {:mode :full :files 1 :entities 2
+                     :diagnostics []
+                     :semantic {:enabled? true :queued-upserts 2}})
+                  service-daemon/start!
+                  (fn [_] (throw (ex-info "service must not start" {})))]
+      (is (zero? (cli/execute context "analyze" ["--full" "--no-service"]))))))
+
+(deftest failed-automatic-service-start-is-reported
+  (let [root (Files/createTempDirectory
+              "llm-context-auto-service-failure-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        context (assoc (project/context (str root)) :options {:quiet? true})
+        error-output (java.io.StringWriter.)
+        exit-code (binding [*err* error-output]
+                    (with-redefs [service-client/request (fn [& _] nil)
+                                  store/graph-state (constantly :empty)
+                                  analysis-full/analyze!
+                                  (fn [_ _ _]
+                                    {:mode :full :files 1 :entities 2
+                                     :diagnostics []
+                                     :semantic {:enabled? true}})
+                                  service-daemon/start!
+                                  (fn [_]
+                                    (throw (ex-info "unable to launch service" {})))]
+                      (cli/execute context "analyze" ["--full"])))]
+    (is (= 1 exit-code))
+    (is (str/includes? (str error-output)
+                       "Semantic indexing service failed to start"))
+    (is (str/includes? (str error-output) "unable to launch service"))))
+
 (deftest incompatible-analysis-rebuilds-locally-when-no-service-owns-project
   (let [root (Files/createTempDirectory
               "llm-context-local-incompatible-analysis-"
@@ -154,6 +214,9 @@
     (with-redefs [service-client/request
                   (fn [& _]
                     (throw (ex-info "service must not be contacted" {})))
+                  service-daemon/start!
+                  (fn [_]
+                    (throw (ex-info "service must not start" {})))
                   analysis-check/check!
                   (fn [_ _]
                     (reset! checked? true)

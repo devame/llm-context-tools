@@ -47,7 +47,7 @@ Run the maintained Clojure and Janet retrieval corpus with:
 
 ```bash
 clojure -M:validate-semantic-corpus
-llm-context -C bench/retrieval-corpus/project analyze --full
+llm-context -C bench/retrieval-corpus/project analyze --full --no-service
 llm-context -C bench/retrieval-corpus/project service start
 clojure -M:semantic-bench \
   bench/retrieval-corpus/project \

@@ -76,11 +76,11 @@ mkdir -p "$INCREMENTAL_PROJECT" "$FULL_PROJECT"
 cp -R "$FIXTURE_DIR/base/." "$INCREMENTAL_PROJECT/"
 cp -R "$FIXTURE_DIR/base/." "$FULL_PROJECT/"
 
-run_jar -C "$INCREMENTAL_PROJECT" analyze --full \
+run_jar -C "$INCREMENTAL_PROJECT" analyze --full --no-service \
   >"$TEMP_DIR/initial-full.log"
 cp "$FIXTURE_DIR/updates/src/quality/core.clj" \
   "$INCREMENTAL_PROJECT/src/quality/core.clj"
-run_jar -C "$INCREMENTAL_PROJECT" analyze \
+run_jar -C "$INCREMENTAL_PROJECT" analyze --no-service \
   >"$TEMP_DIR/incremental.log"
 grep -Eq "Analyzed [0-9]+ files: 1 changed, 0 deleted" \
   "$TEMP_DIR/incremental.log" || {
@@ -104,7 +104,7 @@ grep -Eq "Validated 4 files and [0-9]+ canonical entities" \
   echo "analyze --check unexpectedly created a graph database" >&2
   exit 1
 }
-run_jar -C "$FULL_PROJECT" analyze --full >"$TEMP_DIR/final-full.log"
+run_jar -C "$FULL_PROJECT" analyze --full --no-service >"$TEMP_DIR/final-full.log"
 run_jar -C "$FULL_PROJECT" export --format edn \
   --output "$TEMP_DIR/full.edn"
 
