@@ -14,20 +14,44 @@
 (def ^:private definition-heads
   #{"def" "defonce"})
 
+(defn- valid-js-literal-key? [key]
+  (or (string? key)
+      (and (keyword? key)
+           (nil? (namespace key)))))
+
+(defn- read-js-literal [value]
+  "Read ClojureScript's #js syntax as safe data for aggregate analysis.
+
+  The compiler wraps this value in a JSValue marker because it needs to emit
+  JavaScript. Aggregate analysis only needs the literal shape, so retaining
+  the underlying map or vector is the useful non-evaluating representation."
+  (when-not (or (map? value) (vector? value))
+    (throw (RuntimeException.
+            "JavaScript literal must use map or vector notation")))
+  (when (and (map? value)
+             (not-every? valid-js-literal-key? (keys value)))
+    (throw (RuntimeException.
+            "JavaScript literal keys must be strings or unqualified keywords")))
+  value)
+
 (defn- read-options [language]
   {:eof eof
    :read-cond :allow
-   :features (if (= :language/clojurescript language) #{:cljs} #{:clj})
-   :default (fn [tag value] (tagged-literal tag value))})
+   :features (if (= :language/clojurescript language) #{:cljs} #{:clj})})
 
 (defn- top-level-forms [content language]
   (let [input (reader-types/indexing-push-back-reader content)
         options (read-options language)]
-    (loop [result []]
-      (let [form (reader/read options input)]
-        (if (identical? eof form)
-          result
-          (recur (conj result form)))))))
+    (binding [reader/*read-eval* false
+              reader/*data-readers*
+              (assoc reader/*data-readers* 'js #'read-js-literal)
+              reader/*default-data-reader-fn*
+              (fn [tag value] (tagged-literal tag value))]
+      (loop [result []]
+        (let [form (reader/read options input)]
+          (if (identical? eof form)
+            result
+            (recur (conj result form))))))))
 
 (defn- definition-form? [form]
   (and (seq? form)

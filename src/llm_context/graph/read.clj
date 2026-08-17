@@ -509,7 +509,12 @@
       {:indexed indexed :jobs jobs :dirty-files dirty-files})))
 
 (defn semantic-counts [db provider]
-  (let [desired
+  (let [entity-counts
+        (into {}
+              (d/q '[:find ?type (count ?entity)
+                     :where [?entity :entity/type ?type]]
+                   db))
+        desired
         (or (d/q '[:find (count ?symbol) .
                    :where
                    [?symbol :symbol/id _]
@@ -568,7 +573,10 @@
      :accepted accepted
      :failed (get by-status :failed 0)
      :oldest-pending-at oldest
-     :dirty dirty}))
+     :dirty dirty
+     :aggregate-analysis
+     {:aggregates (get entity-counts :entity.type/aggregate 0)
+      :memberships (get entity-counts :entity.type/membership 0)}}))
 
 (defn semantic-indexed-for-file [db provider file-id]
   (let [eids (d/q '[:find [?record ...]

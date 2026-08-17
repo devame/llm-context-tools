@@ -194,6 +194,13 @@ llm-context semantic retry --failed --wait
 llm-context semantic sync --wait
 ```
 
+The concise status output has two lines. The first tracks semantic documents;
+the second reports aggregate and membership facts produced by analysis,
+whether their owning semantic documents are complete, and any files whose
+optional aggregate extraction was skipped in the latest analysis. Aggregate
+facts are embedded in the owning symbol documents rather than indexed as a
+separate document type.
+
 Status defaults to one line: remaining documents, total desired documents, and
 measured documents per second. Add `--verbose` for runtime availability,
 desired/indexed coverage, leased and provider-accepted work, provider details,

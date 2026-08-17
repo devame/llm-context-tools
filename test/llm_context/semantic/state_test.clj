@@ -315,6 +315,36 @@
       (is (= "terminal"
              (:last-error (first (state/failure-records graph provider))))))))
 
+(deftest semantic-summary-reports-aggregate-analysis-facts
+  (let [project (fixture/temp-project)
+        file (fixture/file-entity "src/aggregate.clj" "source")
+        symbol (fixture/symbol-entity file "sample/providers" 1)
+        aggregate-id "aggregate:sample/providers"
+        aggregate {:entity/type :entity.type/aggregate
+                   :aggregate/id aggregate-id
+                   :aggregate/name "providers"
+                   :aggregate/kind :aggregate.kind/literal-set
+                   :aggregate/owner (:symbol/id symbol)
+                   :aggregate/file (:file/id file)
+                   :aggregate/completeness :complete-static
+                   :aggregate/member-count 1
+                   :aggregate/member-kind :string
+                   :aggregate/analyzer :test}
+        membership {:entity/type :entity.type/membership
+                    :membership/id "membership:sample/providers:0"
+                    :membership/aggregate aggregate-id
+                    :membership/value "\"http\""
+                    :membership/value-kind :string
+                    :membership/ordinal 0
+                    :membership/evidence :literal}]
+    (store/with-store [graph project (config/defaults)]
+      (store/replace-all! graph [file symbol aggregate membership])
+      (let [summary (state/semantic-summary graph provider 100)]
+        (is (= {:aggregates 1
+                :memberships 1
+                :semantic-documents :partial}
+               (:aggregate-analysis summary)))))))
+
 (deftest semantic-summary-uses-a-fixed-small-aggregate-set
   (let [project (fixture/temp-project)
         file (fixture/file-entity "src/status.clj" "source")
@@ -326,7 +356,9 @@
       (let [measured (db-support/with-operation-counts
                        (state/semantic-summary graph provider 100))]
         (is (= 200 (get-in measured [:value :desired])))
-        ;; Provider acceptance is one additional constant-size aggregate; the
-        ;; query count remains independent of repository/job cardinality.
-        (is (<= (get-in measured [:counts :query]) 7))
+        ;; Provider acceptance and aggregate-analysis stats are constant-size
+        ;; additions; query count remains independent of repository/job size.
+        (is (<= (get-in measured [:counts :query]) 8))
+        (is (= {:aggregates 0 :memberships 0 :semantic-documents :partial}
+               (get-in measured [:value :aggregate-analysis])))
         (is (zero? (get-in measured [:counts :pull-many])))))))

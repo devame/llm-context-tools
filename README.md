@@ -52,7 +52,7 @@ curl -fsSL https://raw.githubusercontent.com/devame/llm-context-tools/main/insta
   | LLM_CONTEXT_SKIP_SEMANTIC=1 sh
 ```
 
-Set `LLM_CONTEXT_VERSION=0.12.1` to pin the current release. See the
+Set `LLM_CONTEXT_VERSION=0.12.2` to pin the current release. See the
 [installation and troubleshooting guide](docs/user-guide.md#installation-and-troubleshooting)
 for custom locations, CUDA, and verified model packages.
 
@@ -88,8 +88,10 @@ llm-context semantic status --watch
 llm-context semantic status --verbose
 ```
 
-The concise view reports remaining documents and indexing speed. A semantic
-index is complete when verbose status shows:
+The concise view reports remaining documents and indexing speed, followed by a
+separate aggregate-analysis line showing aggregate and membership facts,
+whether their semantic documents are complete, and skipped files from the
+latest analysis. A semantic index is complete when verbose status shows:
 
 - `:indexed` equals `:desired`;
 - `:coverage-percent` is `100.0`;
@@ -227,7 +229,7 @@ around the same JAR:
 
 ```bash
 npm pack
-npm install --global ./llm-context-0.12.1.tgz
+npm install --global ./llm-context-0.12.2.tgz
 llm-context doctor
 ```
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.12.2
+
+- Added safe, non-evaluating ClojureScript `#js` literal support to aggregate
+  analysis, including nested objects and vectors with validation.
+- Added aggregate counts, semantic-document indexing state, and skipped-file
+  diagnostics to `llm-context semantic status`.
+
 ## 0.12.1
 
 - Automatically rebuild older incompatible graph formats on a normal

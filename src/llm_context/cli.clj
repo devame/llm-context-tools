@@ -420,10 +420,21 @@
 
 (defn- semantic-status [context settings]
   (let [remote (remote-value context {:op :semantic-status})]
-    (if (= unavailable remote)
-      (assoc (local-semantic-status context settings)
-             :runtime {:status :not-running})
-      remote)))
+    (let [status
+          (if (= unavailable remote)
+            (assoc (local-semantic-status context settings)
+                   :runtime {:status :not-running})
+            remote)
+          diagnostics (get-in status [:analysis-progress :result :diagnostics])
+          skipped-diagnostics
+          (filter #(= :aggregate-analysis-skipped (:kind %)) diagnostics)
+          skipped-paths (distinct (keep :file skipped-diagnostics))
+          skipped-files (if (seq skipped-paths)
+                          (count skipped-paths)
+                          (count skipped-diagnostics))]
+      (if (:aggregate-analysis status)
+        (assoc-in status [:aggregate-analysis :skipped-files] skipped-files)
+        status))))
 
 (defn- semantic-synchronized? [status]
   (and (zero? (:pending status))
@@ -508,10 +519,23 @@
      (str "semantic status unavailable"
           (when-let [error (:error status)] (str ": " error))))))
 
+(defn- aggregate-analysis-summary [status]
+  (if-let [{:keys [aggregates memberships semantic-documents skipped-files]}
+           (:aggregate-analysis status)]
+    (format "Aggregate analysis: %d aggregates, %d memberships; semantic documents: %s; skipped files: %d"
+            (long (or aggregates 0))
+            (long (or memberships 0))
+            (if (keyword? semantic-documents)
+              (name semantic-documents)
+              (str (or semantic-documents :unknown)))
+            (long (or skipped-files 0)))
+    "Aggregate analysis unavailable"))
+
 (defn- print-semantic-summary!
   ([status] (print-semantic-summary! status nil nil))
   ([status previous-status elapsed-ms]
    (println (semantic-status-summary status previous-status elapsed-ms))
+   (println (aggregate-analysis-summary status))
    (flush)))
 
 (defmethod execute "semantic" [context _ args]

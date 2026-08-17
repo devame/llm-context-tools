@@ -4,12 +4,14 @@
             [llm-context.analysis.canonical :as canonical]
             [llm-context.model.ids :as ids]))
 
-(defn- fixture [source name]
-  (let [path "src/neutral/catalog.clj"
-        file {:entity/type :entity.type/file
+(defn- fixture
+  ([source name]
+   (fixture source name :language/clojure "src/neutral/catalog.clj" :clj))
+  ([source name language path platform]
+   (let [file {:entity/type :entity.type/file
               :file/id (ids/file-id path)
               :file/path path
-              :file/language :language/clojure
+              :file/language language
               :file/content-hash (ids/content-hash source)
               :file/size (alength (.getBytes source
                                              java.nio.charset.StandardCharsets/UTF_8))
@@ -20,7 +22,7 @@
                 :symbol/qualified-name (str "neutral.catalog/" name)
                 :symbol/kind :symbol.kind/variable
                 :symbol/file (:file/id file)
-                :symbol/platform :clj
+                :symbol/platform platform
                 :symbol/analyzer :clj-kondo
                 :symbol/scope :scope/top-level
                 :symbol/role :role/variable
@@ -29,10 +31,10 @@
                 :source/start-line 2 :source/start-column 1
                 :source/end-line 2
                 :source/end-column (inc (count (second (clojure.string/split-lines source))))}
-        file-source {:relative-path path :language :language/clojure
+        file-source {:relative-path path :language language
                      :content source}
         output {:file file :entities [symbol] :diagnostics []}]
-    (aggregate/enrich-output file-source output)))
+     (aggregate/enrich-output file-source output))))
 
 (deftest complete-literal-collections-produce-canonical-membership-facts
   (let [source (str "(ns neutral.catalog)\n"
@@ -78,6 +80,38 @@
     (is (= :partial-static (:aggregate/completeness aggregate)))
     (is (clojure.string/includes? (:aggregate/search-text aggregate) ":rail"))
     (is (clojure.string/includes? (:aggregate/search-text aggregate) ":river"))))
+
+(deftest clojurescript-js-literals-produce-aggregate-facts
+  (let [source (str "(ns neutral.catalog)\n"
+                    "(def request-options #js {:method \"GET\"\n"
+                    "                          :headers #js {\"Accept\" \"application/json\"}})\n")
+        output (fixture source "request-options"
+                        :language/clojurescript
+                        "src/neutral/catalog.cljs"
+                        :cljs)
+        aggregate (some #(when (= :entity.type/aggregate (:entity/type %)) %)
+                        (:entities output))
+        members (filter #(= :entity.type/membership (:entity/type %))
+                        (:entities output))]
+    (is (empty? (:diagnostics output)))
+    (is (= :aggregate.kind/literal-map (:aggregate/kind aggregate)))
+    (is (= 2 (:aggregate/member-count aggregate)))
+    (is (= #{":headers" ":method"}
+           (set (map :membership/key members))))
+    (is (every? #(= :literal (:membership/evidence %)) members))))
+
+(deftest invalid-js-literal-keys-remain-a-contained-diagnostic
+  (let [source (str "(ns neutral.catalog)\n"
+                    "(def request-options #js {::method \"GET\"})\n")
+        output (fixture source "request-options"
+                        :language/clojurescript
+                        "src/neutral/catalog.cljs"
+                        :cljs)]
+    (is (= :aggregate-analysis-skipped
+           (:kind (first (:diagnostics output)))))
+    (is (clojure.string/includes?
+         (:message (first (:diagnostics output)))
+         "JavaScript literal keys must be strings or unqualified keywords"))))
 
 (deftest ordinary-definitions-and-unsupported-languages-are-not-promoted
   (testing "function bodies are not mistaken for literal registries"

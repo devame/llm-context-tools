@@ -175,6 +175,28 @@
     (is (str/includes? output ":pending 0"))
     (is (str/includes? output ":status :not-running"))))
 
+(deftest semantic-status-reports-aggregate-analysis-skips-separately
+  (let [root (Files/createTempDirectory
+              "llm-context-aggregate-status-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        context (assoc (project/context (str root)) :options {:quiet? true})
+        status {:desired 4 :indexed 4 :pending 0 :leased 0 :failed 0 :dirty 0
+                :completeness :complete
+                :aggregate-analysis {:aggregates 2 :memberships 3
+                                     :semantic-documents :complete}
+                :analysis-progress
+                {:result {:diagnostics
+                          [{:kind :aggregate-analysis-skipped
+                            :file "src/a.cljs"}
+                           {:kind :aggregate-analysis-skipped
+                            :file "src/a.cljs"}
+                           {:kind :invalid-utf8
+                            :file "src/b.cljs"}]}}}]
+    (with-redefs [service-client/request
+                  (fn [_ _] {:ok true :value status})]
+      (is (= 1 (get-in (#'cli/semantic-status context (config/defaults))
+                       [:aggregate-analysis :skipped-files]))))))
+
 (deftest advertised-service-timeout-does-not-fall-back-to-direct-query
   (let [root (Files/createTempDirectory
               "llm-context-service-timeout-query-"
@@ -249,7 +271,13 @@
   (let [status {:desired 100
                 :indexed 35
                 :runtime {:worker-progress
-                          {:documents-per-minute 120.0}}}]
+                          {:documents-per-minute 120.0}}
+                :aggregate-analysis {:aggregates 12
+                                     :memberships 24
+                                     :semantic-documents :partial
+                                     :skipped-files 1}}]
+    (is (= "65 of 100 documents pending, processing speed: 2.00 docs/s\nAggregate analysis: 12 aggregates, 24 memberships; semantic documents: partial; skipped files: 1\n"
+           (with-out-str (#'cli/print-semantic-summary! status))))
     (is (= "65 of 100 documents pending, processing speed: 2.00 docs/s"
            (#'cli/semantic-status-summary status)))
     (is (= "0 of 100 documents pending, processing speed: 0.00 docs/s"

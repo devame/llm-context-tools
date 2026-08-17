@@ -798,6 +798,10 @@
        :oldest-pending-ms (when oldest-pending-at
                             (max 0 (- now oldest-pending-at)))
        :dirty (:dirty counts)
+       :aggregate-analysis
+       (assoc (:aggregate-analysis counts)
+              :semantic-documents
+              (if complete? :complete :partial))
        :watermark (watermark graph provider)})))
 
   (record-watermark! [graph {:keys [provider state last-success-at

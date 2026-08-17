@@ -92,7 +92,10 @@
         baseline (or previous
                      {:indexed 0 :indexed-records 0 :desired 0
                       :pending 0 :leased 0 :accepted 0 :failed 0 :dirty 0
-                      :coverage-percent 0.0 :completeness :unknown})]
+                      :coverage-percent 0.0 :completeness :unknown
+                      :aggregate-analysis
+                      {:aggregates 0 :memberships 0
+                       :semantic-documents :unknown}})]
     (assoc baseline
            :graph-state :updating
            :availability
