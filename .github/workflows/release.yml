@@ -139,13 +139,8 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-      - name: Test and build
-        run: |
-          npm ci
-          clojure -M:test
-          clojure -T:build dist
-      - name: Verify packaged graph quality
-        run: scripts/verify-release-quality.sh dist/llm-context.jar
+      - name: Test, build, and verify release artifacts
+        run: scripts/build-release.sh
       - name: Verify tag and prepare checksums
         run: |
           APP_VERSION=$(java --enable-native-access=ALL-UNNAMED -jar dist/llm-context.jar version)

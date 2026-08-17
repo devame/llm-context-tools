@@ -246,6 +246,24 @@ scripts/verify-release-quality.sh dist/llm-context.jar
 npm pack --dry-run
 ```
 
+Maintainers can use the release scripts to keep version metadata, local gates,
+and the tag-triggered GitHub release workflow in sync:
+
+```bash
+scripts/bump-version.sh 0.12.3 /path/to/release-notes.md
+# Optional preflight; publish repeats the gates before pushing.
+scripts/release.sh check
+git add CHANGELOG.md README.md build.clj package.json package-lock.json \
+  src/llm_context/version.clj
+git commit -m "release: prepare v0.12.3"
+scripts/release.sh publish
+```
+
+`release.sh publish` requires a clean `main` branch, pushes the commit, creates
+the matching annotated `v<version>` tag, and waits for GitHub to publish the
+platform runtime assets. Use `--no-wait` when CI completion will be monitored
+separately.
+
 Additional benchmark and release workflows are in
 [Performance benchmarks](docs/benchmarks.md).
 

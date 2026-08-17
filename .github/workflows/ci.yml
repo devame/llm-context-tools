@@ -20,13 +20,8 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-      - run: npm ci
-      - run: clojure -M:test
-      - run: clojure -T:build dist
-      - name: Verify packaged graph quality
-        run: scripts/verify-release-quality.sh dist/llm-context.jar
-      - run: test/install-unix.sh
-      - run: npm pack --dry-run
+      - name: Build and verify release artifacts
+        run: scripts/build-release.sh
 
   installer-windows:
     runs-on: windows-latest
