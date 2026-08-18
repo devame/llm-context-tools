@@ -1,3 +1,10 @@
+## 0.12.5
+
+- feat: add operational health and self-healing
+
+
+
+
 ## 0.12.4
 
 - Add GPU and CUDA host preflight reporting for the CLI, installer, and
