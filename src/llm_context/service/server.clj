@@ -5,6 +5,7 @@
             [llm-context.config :as config]
             [llm-context.context :as context]
             [llm-context.export :as export]
+            [llm-context.health :as health]
             [llm-context.intent :as intent]
             [llm-context.intent.reranker :as candidate-reranker]
             [llm-context.intent.router :as intent-router]
@@ -14,6 +15,7 @@
             [llm-context.semantic.state :as semantic-state]
             [llm-context.semantic.worker :as semantic-worker]
             [llm-context.service.client :as client]
+            [llm-context.service.contract :as service-contract]
             [llm-context.service.lifecycle :as lifecycle]
             [llm-context.service.progress :as analysis-progress]
             [llm-context.service.transport :as transport]
@@ -62,9 +64,12 @@
 (defn- runtime-view [runtime-state]
   (let [selected-runtime (select-keys runtime-state
                                       [:status :reason :detail :endpoint :log-path
-                                       :inference :runtime-diagnostic
+                                       :inference :runtime-diagnostic :recovery
                                        :worker-status :worker-detail :worker-progress
+                                       :recovery-attempt :last-recovery-at
+                                       :watcher-status :watcher-detail
                                        :query-router-status :query-router-detail
+                                       :query-router-recovery
                                        :query-router-inference
                                        :candidate-reranker-status
                                        :candidate-reranker-detail])
@@ -80,17 +85,52 @@
       (nil? (:query-router-inference runtime))
       (dissoc :query-router-inference))))
 
+(defn- stall-window-ms [runtime-state]
+  (let [settings (:semantic-settings runtime-state)]
+    (max 30000
+         (+ (long (or (:update-timeout-ms settings) 0))
+            (long (or (:visibility-timeout-ms settings) 0))))))
+
+(defn- with-health [status runtime-state]
+  (let [snapshot (health/semantic-health status (System/currentTimeMillis)
+                                         (stall-window-ms runtime-state))
+        snapshot (if-let [project (:project runtime-state)]
+                   (health/persist! project snapshot)
+                   snapshot)
+        result (assoc status :health snapshot)]
+    result))
+
+(defn- persist-runtime-health! [runtime-state]
+  (when-let [project (:project runtime-state)]
+    (try
+      (let [baseline (or (:last-semantic-status runtime-state)
+                         {:indexed 0 :desired 0 :pending 0 :leased 0
+                          :failed 0 :dirty 0 :completeness :unknown})
+            status (assoc baseline
+                          :runtime (runtime-view runtime-state)
+                          :analysis-progress (:analysis-progress runtime-state))]
+        (health/persist!
+         project
+         (health/semantic-health status (System/currentTimeMillis)
+                                 (stall-window-ms runtime-state))))
+      (catch Throwable error
+        (binding [*out* *err*]
+          (println "Unable to persist project health:" (.getMessage error)))))))
+
 (defn- semantic-status [graph runtime-state]
   (let [runtime (runtime-view runtime-state)
         summary (semantic-state/semantic-summary
                  graph semantic-reconcile/provider
                  (System/currentTimeMillis))]
-    (assoc summary
-           :graph-state :ready
-           :availability
-           (if (= :ready (:status runtime)) :available :unavailable)
-           :analysis-progress (:analysis-progress runtime-state)
-           :runtime runtime)))
+    (with-health
+      (assoc summary
+             :graph-state :ready
+             :service-state :running
+             :availability
+             (if (= :ready (:status runtime)) :available :unavailable)
+             :analysis-progress (:analysis-progress runtime-state)
+             :runtime runtime)
+      runtime-state)))
 
 (defn- updating-semantic-status [runtime-state]
   (let [runtime (runtime-view runtime-state)
@@ -102,12 +142,15 @@
                       :aggregate-analysis
                       {:aggregates 0 :memberships 0
                        :semantic-documents :unknown}})]
-    (assoc baseline
-           :graph-state :updating
-           :availability
-           (if (= :ready (:status runtime)) :available :unavailable)
-           :analysis-progress (:analysis-progress runtime-state)
-           :runtime runtime)))
+    (with-health
+      (assoc baseline
+             :graph-state :updating
+             :service-state :running
+             :availability
+             (if (= :ready (:status runtime)) :available :unavailable)
+             :analysis-progress (:analysis-progress runtime-state)
+             :runtime runtime)
+      runtime-state)))
 
 (defn- current-semantic-status! [graph runtime-state]
   (let [status (semantic-status graph @runtime-state)]
@@ -250,6 +293,8 @@
   (let [runtime @runtime-state]
     (case (:op request)
     :ping :pong
+    :service-info (merge (service-contract/runtime-identity)
+                         {:pid (.pid (ProcessHandle/current))})
     :analyze (run-analysis! graph generation project settings (:full? request)
                             runtime-state)
     :query
@@ -460,6 +505,176 @@
 (defn- acquire-service-lock [project]
   (lifecycle/acquire! project))
 
+(defn- supervisor-delay-ms [settings attempt]
+  (min (long (:retry-max-ms settings))
+       (* (long (:retry-base-ms settings))
+          (bit-shift-left 1 (min 10 (max 0 attempt))))))
+
+(defn- sleep-while-running! [running delay-ms]
+  (let [deadline (+ (System/currentTimeMillis) delay-ms)]
+    (loop []
+      (when (and @running (< (System/currentTimeMillis) deadline))
+        (Thread/sleep (min 250 (- deadline (System/currentTimeMillis))))
+        (recur)))))
+
+(defn- semantic-worker-settings [settings runtime]
+  (assoc (get-in settings [:semantic :lateon-code])
+         :update-concurrency
+         (get-in runtime [:inference :update-concurrency])))
+
+(defn- retriable-supervisor-error? [error]
+  (let [data (ex-data error)]
+    (or (= true (:retriable? data))
+        (= :store/insufficient-space (:type data))
+        (instance? java.io.IOException error))))
+
+(defn- run-semantic-supervisor!
+  [graph project settings runtime-state worker-state running runtime-factory]
+  (let [lateon (get-in settings [:semantic :lateon-code])]
+    (loop [attempt 0 initial? true]
+      (when @running
+        (swap! runtime-state
+               (fn [current]
+                 (-> current
+                     (dissoc :client :process :endpoint :log-path :inference
+                             :runtime-diagnostic :recovery :reason :detail)
+                     (merge
+                      {:status (if initial? :starting :recovering)
+                       :worker-status (if initial? :starting :recovering)
+                       :recovery-attempt attempt
+                       :last-recovery-at (when-not initial?
+                                           (System/currentTimeMillis))}))))
+        (let [runtime-attempt
+              (try {:runtime (runtime-factory project settings)}
+                   (catch Throwable error {:error error}))]
+          (if-let [error (:error runtime-attempt)]
+            (let [retriable? (retriable-supervisor-error? error)]
+              (swap! runtime-state merge
+                     {:status (if retriable? :recovering :failed)
+                      :reason :startup-failed
+                      :detail (.getMessage error)
+                      :worker-status (if retriable? :recovering :failed)
+                      :worker-detail (.getMessage error)})
+              (semantic-state/record-watermark!
+               graph {:provider semantic-reconcile/provider
+                      :state (if retriable? :degraded :failed)
+                      :last-error-at (System/currentTimeMillis)
+                      :last-error (.getMessage error)})
+              (when retriable?
+                (sleep-while-running! running
+                                      (supervisor-delay-ms lateon attempt))
+                (recur (inc attempt) false)))
+            (let [runtime (:runtime runtime-attempt)]
+              (swap! runtime-state merge
+                     (assoc runtime :worker-status
+                            (if (= :ready (:status runtime))
+                              :starting :not-running)))
+              (if-not (= :ready (:status runtime))
+                (do
+                  (sleep-while-running! running
+                                        (supervisor-delay-ms lateon attempt))
+                  (recur (inc attempt) false))
+                (let [_ (locking (analysis-mutex graph)
+                          (semantic-reconcile/retry-recoverable-failed!
+                           graph project settings))
+                      worker (semantic-worker/create
+                              graph project settings (:client runtime)
+                              {:settings (semantic-worker-settings settings runtime)
+                               :progress-fn
+                               #(swap! runtime-state assoc :worker-progress %)})
+                      _ (reset! worker-state worker)
+                      _ (swap! runtime-state assoc
+                               :worker-status :running
+                               :worker-detail nil
+                               :worker-progress @(:progress worker)
+                               :recovery-attempt 0)
+                      worker-attempt
+                      (try {:result (semantic-worker/run! worker)}
+                           (catch Throwable error {:error error}))]
+                  (if (or (not @running) (nil? (:error worker-attempt)))
+                    (:result worker-attempt)
+                    (let [error (:error worker-attempt)
+                          retriable? (retriable-supervisor-error? error)]
+                      (try (semantic-runtime/stop! runtime)
+                           (catch Throwable _))
+                      (reset! worker-state nil)
+                      (swap! runtime-state merge
+                             {:status (if retriable? :recovering :failed)
+                              :detail (.getMessage error)
+                              :worker-status
+                              (if retriable? :recovering :failed)
+                              :worker-detail (.getMessage error)})
+                      (semantic-state/record-watermark!
+                       graph {:provider semantic-reconcile/provider
+                              :state (if retriable? :degraded :failed)
+                              :last-error-at (System/currentTimeMillis)
+                              :last-error (.getMessage error)})
+                      (when retriable?
+                        (sleep-while-running!
+                         running (supervisor-delay-ms lateon attempt))
+                        (recur (inc attempt) false)))))))))))))
+
+(defn- run-router-supervisor!
+  [project settings runtime-state running router-factory]
+  (let [router-enabled? (get-in settings [:context :query-router :enabled])
+        reranker-enabled? (get-in settings
+                                  [:context :candidate-reranker :enabled])
+        retry-settings (get-in settings [:semantic :lateon-code])]
+    (loop [attempt 0]
+      (when @running
+        (when (pos? attempt)
+          (swap! runtime-state assoc
+                 :query-router-status (if router-enabled? :recovering :disabled)
+                 :candidate-reranker-status
+                 (if reranker-enabled? :recovering :disabled)))
+        (let [outcome (try {:runtime (router-factory project settings)}
+                           (catch Throwable error {:error error}))
+              runtime (:runtime outcome)
+              error (:error outcome)]
+          (if (and runtime (= :ready (:status runtime)))
+            (do
+              (swap! runtime-state assoc
+                     :query-router-status
+                     (if router-enabled? :ready :disabled)
+                     :query-router-detail nil
+                     :query-router-recovery (:recovery runtime)
+                     :query-router (:client runtime)
+                     :candidate-reranker-status
+                     (if reranker-enabled? :ready :disabled)
+                     :candidate-reranker-detail nil
+                     :candidate-reranker (:reranker runtime)
+                     :query-router-inference (:inference runtime)
+                     :query-router-runtime runtime)
+              (while (and @running
+                          (or (nil? (:process runtime))
+                              (.isAlive ^Process (:process runtime))))
+                (Thread/sleep 1000))
+              (intent-router/stop! runtime)
+              (when @running
+                (recur (inc attempt))))
+            (do
+              (swap! runtime-state assoc
+                     :query-router-status
+                     (if router-enabled?
+                       (if error :recovering (:status runtime)) :disabled)
+                     :query-router-detail
+                     (or (some-> error .getMessage) (:detail runtime))
+                     :candidate-reranker-status
+                     (if reranker-enabled?
+                       (if error :recovering (:status runtime)) :disabled)
+                     :candidate-reranker-detail
+                     (or (some-> error .getMessage) (:detail runtime))
+                     :query-router
+                     (intent-router/unavailable
+                      :startup-failed (some-> error .getMessage))
+                     :candidate-reranker
+                     (candidate-reranker/unavailable
+                      :startup-failed (some-> error .getMessage)))
+              (sleep-while-running!
+               running (supervisor-delay-ms retry-settings attempt))
+              (when @running
+                (recur (inc attempt))))))))))
+
 (defn start!
   "Run a foreground loopback-only service for one project."
   ([project]
@@ -488,7 +703,8 @@
           graph-generation (atom 0)
           semantic-enabled? (semantic-reconcile/enabled? settings)
           progress-state (analysis-progress/create project)
-          runtime-state (atom {:status (if semantic-enabled?
+          runtime-state (atom {:project project
+                               :status (if semantic-enabled?
                                          :starting :disabled)
                                :worker-status (if semantic-enabled?
                                                 :starting :disabled)
@@ -502,6 +718,11 @@
                                             :enabled])
                                  :starting :disabled)
                                :progress-state progress-state
+                               :semantic-settings
+                               (get-in settings [:semantic :lateon-code])
+                               :watcher-status
+                               (if (get-in settings [:service :watch])
+                                 :starting :disabled)
                                :analysis-progress
                                (analysis-progress/snapshot progress-state)})
           worker-state (atom nil)]
@@ -510,6 +731,9 @@
         (store/recover-legacy-full-replacement! project settings)
         (with-open [graph (store/open project settings)
                     server (transport/open-listener project)]
+          (add-watch runtime-state ::durable-health
+                     (fn [_ _ _ current]
+                       (persist-runtime-health! current)))
           ;; Capture a last committed snapshot before any later analysis can
           ;; make the generation sentinel odd. Status can then report the
           ;; previous graph while a replacement is being committed.
@@ -528,102 +752,34 @@
            project
            (merge
             (transport/endpoint-descriptor server)
-            {:token token
+            (merge (service-contract/runtime-identity)
+                   {:started-at (System/currentTimeMillis)
+                    :token token
              :instance-id instance-id
              :pid (.pid (ProcessHandle/current))
-             :semantic-status (:status @runtime-state)}))
+                    :semantic-status (:status @runtime-state)})))
           (.addShutdownHook (Runtime/getRuntime) shutdown-hook)
           (reset! shutdown-hook-registered? true)
-          (let [runtime-future
+          (let [semantic-supervisor-future
                 (when semantic-enabled?
                   (future
-                    (try
-                      (let [runtime (runtime-factory project settings)]
-                        (swap! runtime-state
-                               merge
-                               (assoc runtime :worker-status
-                                      (if (= :ready (:status runtime))
-                                        :starting :not-running))))
-                      (catch Throwable error
-                        (swap! runtime-state
-                               merge
-                               {:status :failed
-                                :reason :startup-failed
-                                :detail (.getMessage error)
-                                :worker-status :not-running})))))
+                    (run-semantic-supervisor!
+                     graph project settings runtime-state worker-state running
+                     runtime-factory)))
                 router-future
                 (when (or (get-in settings [:context :query-router :enabled])
                           (get-in settings
                                   [:context :candidate-reranker :enabled]))
                   (future
-                    (try
-                      (let [router-runtime (router-factory project settings)]
-                        (swap! runtime-state assoc
-                               :query-router-status
-                               (if (get-in settings
-                                           [:context :query-router :enabled])
-                                 (:status router-runtime) :disabled)
-                               :query-router (:client router-runtime)
-                               :candidate-reranker-status
-                               (if (get-in settings
-                                           [:context :candidate-reranker
-                                            :enabled])
-                                 (:status router-runtime) :disabled)
-                               :candidate-reranker (:reranker router-runtime)
-                               :query-router-inference (:inference router-runtime)
-                               :query-router-runtime router-runtime))
-                      (catch Throwable error
-                        (swap! runtime-state assoc
-                               :query-router-status :failed
-                               :query-router-detail (.getMessage error)
-                               :candidate-reranker-status :failed
-                               :candidate-reranker-detail (.getMessage error)
-                               :query-router
-                               (intent-router/unavailable
-                                :startup-failed (.getMessage error))
-                               :candidate-reranker
-                               (candidate-reranker/unavailable
-                                :startup-failed (.getMessage error)))))))
-                worker-future
-                (when semantic-enabled?
-                  (future
-                    (when runtime-future
-                      @runtime-future)
-                    (when (= :ready (:status @runtime-state))
-                      (let [worker
-                            (semantic-worker/create
-                             graph project settings
-                             (:client @runtime-state)
-                             {:settings
-                              (assoc
-                               (get-in settings [:semantic :lateon-code])
-                               :update-concurrency
-                               (get-in @runtime-state
-                                       [:inference :update-concurrency]))
-                              :progress-fn
-                              #(swap! runtime-state assoc
-                                      :worker-progress %)})]
-                        (reset! worker-state worker)
-                        (swap! runtime-state assoc :worker-status :running)
-                        (try
-                          (semantic-worker/run! worker)
-                          (catch Throwable error
-                            (swap! runtime-state assoc
-                                   :worker-status :failed
-                                   :worker-detail (.getMessage error))
-                            (semantic-state/record-watermark!
-                             graph {:provider semantic-reconcile/provider
-                                    :state :failed
-                                    :last-error-at
-                                    (System/currentTimeMillis)
-                                    :last-error (.getMessage error)})
-                            :failed))))))
+                    (run-router-supervisor!
+                     project settings runtime-state running router-factory)))
                 project-watcher
                 (when (get-in settings [:service :watch])
                   (watcher/start!
-                   (watcher/create
-                    project settings
-                    (fn []
+                   (assoc
+                    (watcher/create
+                     project settings
+                     (fn []
                       (try
                         (let [result (run-analysis! graph graph-generation
                                                      project settings false
@@ -637,7 +793,12 @@
                         (catch Throwable error
                           (binding [*out* *err*]
                             (println "Watched analysis failed:"
-                                     (.getMessage error)))))))))
+                                     (.getMessage error)))))))
+                    :status-fn
+                    (fn [{:keys [status detail]}]
+                      (swap! runtime-state assoc
+                             :watcher-status status
+                             :watcher-detail detail)))))
                 requests (request-executor settings)]
             (println "llm-context service listening on"
                      (pr-str (transport/endpoint-descriptor server)))
@@ -675,14 +836,12 @@
                   (semantic-worker/stop! worker))
                 (when project-watcher
                   (watcher/stop! project-watcher))
-                (when worker-future
-                  (when (= :timeout (deref worker-future 10000 :timeout))
-                    (future-cancel worker-future)))
+                (when semantic-supervisor-future
+                  (when (= :timeout
+                           (deref semantic-supervisor-future 10000 :timeout))
+                    (future-cancel semantic-supervisor-future)))
                 ;; Wait for in-flight preparation/commit before closing graph.
                 (locking (analysis-mutex graph) nil)
-                (when (and runtime-future
-                           (not (future-done? runtime-future)))
-                  (future-cancel runtime-future))
                 (when (and router-future
                            (not (future-done? router-future)))
                   (future-cancel router-future))))))
@@ -691,6 +850,7 @@
             (try
               (.removeShutdownHook (Runtime/getRuntime) shutdown-hook)
               (catch IllegalStateException _)))
+          (remove-watch runtime-state ::durable-health)
           (lifecycle/delete-owned! project instance-id)
           (when-let [router-runtime (:query-router-runtime @runtime-state)]
             (intent-router/stop! router-runtime))

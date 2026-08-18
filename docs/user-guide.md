@@ -340,7 +340,8 @@ when the host is incomplete. The Windows package is currently CPU-only.
 - If a supported file is absent, check Git ignore rules and
   `:max-file-bytes`. Unsupported extensions are ignored by design.
 - If semantic indexing is partial, inspect `semantic failures` and
-  `semantic dirty`, then explicitly retry failed jobs.
+  `semantic dirty`. Provider-wide failures recover automatically; explicitly
+  retry only remaining deterministic failures after correcting their cause.
 - Runtime details are in `.llm-context/logs/`; all project state is disposable
   and excluded from normal source control.
 
@@ -370,10 +371,12 @@ made visible to the service. Explicit `:cuda` fails closed when any
 prerequisite is absent. Runtime checks also verify that the CUDA provider can
 actually discover a device; if it cannot, `semantic status` and `doctor` show
 the provider error and the corrective action. Explicit `:cuda` fails closed
-for that runtime failure instead of silently falling back to CPU. NextPlaid
+for that runtime failure instead of silently falling back to CPU. Under
+`:auto`, a failed internal CUDA execution probe is terminated and replaced by
+a verified CPU/INT8 process with CPU concurrency; status preserves the recovery
+reason and effective profile. NextPlaid
 does not support CUDA with the INT8 model. In verbose status, treat
-`:runtime-diagnostic` as authoritative: a bare `:accelerator :cuda` selection
-describes the launch mode, not proof that the CUDA provider initialized.
+`:recovery` and the effective `:inference` profile as authoritative.
 
 The query router/reranker has the same fields under
 `:context :query-router`. Its default remains CPU/INT8 because the 32M model is

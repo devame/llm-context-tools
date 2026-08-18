@@ -7,6 +7,8 @@
   (:import [java.lang ProcessBuilder$Redirect ProcessHandle]
            [java.nio.file Files Path Paths]))
 
+(declare stop!)
+
 (defn- windows? []
   (.startsWith (.toLowerCase (System/getProperty "os.name")) "windows"))
 
@@ -36,8 +38,16 @@
   database initialization exceeds the bounded confirmation window."
   [project]
   (when (client/available? project)
-    (throw (ex-info "A service is already running for this project"
-                    {:exit-code 2})))
+    (if (client/compatible? project)
+      (throw (ex-info "A service is already running for this project"
+                      {:exit-code 2}))
+      (let [response (stop! project)]
+        (when-not (:ok response)
+          (throw
+           (ex-info
+            (or (:error response)
+                "Unable to stop the incompatible project service")
+            {:exit-code 1 :type :service/version-mismatch}))))))
   (let [log-directory (.resolve ^Path (:state-dir project) "logs")
         log-path (.resolve log-directory "service.log")
         _ (Files/createDirectories
@@ -71,6 +81,14 @@
         (do
           (Thread/sleep 100)
           (recur))))))
+
+(defn ensure-compatible!
+  "Replace a reachable incompatible resident service with the current CLI.
+  Do nothing when no service exists or the current service is compatible."
+  [project]
+  (when (and (client/descriptor project)
+             (not (client/compatible? project)))
+    (start! project)))
 
 (defn- await-exit? [^ProcessHandle handle timeout-ms]
   (let [deadline (+ (System/currentTimeMillis) timeout-ms)]

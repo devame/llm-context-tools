@@ -1,5 +1,6 @@
 (ns llm-context.semantic.runtime-test
   (:require [clojure.test :refer [deftest is]]
+            [llm-context.accelerator :as accelerator]
             [llm-context.config :as config]
             [llm-context.project :as project]
             [llm-context.semantic.runtime :as runtime])
@@ -87,3 +88,66 @@
       (is (re-find #"fix NVIDIA/WSL CUDA device visibility"
                    (:action diagnostic))))
     (Files/deleteIfExists log-path)))
+
+(deftest auto-selected-cuda-execution-failure-self-heals-to-cpu
+  (let [project (temporary-project)
+        model (Files/createTempDirectory
+               "llm-context-runtime-model-"
+               (make-array java.nio.file.attribute.FileAttribute 0))
+        settings (-> (config/defaults)
+                     (assoc-in [:semantic :lateon-code :model-path] (str model))
+                     (assoc-in [:semantic :lateon-code :accelerator] :auto))
+        launches (atom [])]
+    (with-redefs-fn
+      {#'runtime/find-executable (constantly (.resolve model "next-plaid-api"))
+       #'accelerator/resolve-runtime
+       (fn [provider-settings _ _]
+         (let [accelerator (:accelerator provider-settings)]
+           {:accelerator (if (= :cpu accelerator) :cpu :cuda)
+            :requested-accelerator accelerator
+            :quantization (if (= :cpu accelerator) :int8 :fp32)
+            :requested-quantization (:quantization provider-settings)}))
+       #'runtime/launch!
+       (fn [_ _ _ _ _ _ selection]
+         (swap! launches conj (:accelerator selection))
+         (cond-> {:status :ready :process (Object.)
+                  :client :client :inference selection}
+           (= :cuda (:accelerator selection))
+           (assoc :runtime-diagnostic
+                  {:kind :cuda-device-unavailable
+                   :detail "CUDA device unavailable"
+                   :action "repair CUDA"})))
+       #'runtime/destroy-process! (fn [_] nil)}
+      (fn []
+        (let [result (runtime/start! project settings)]
+          (is (= [:cuda :cpu] @launches))
+          (is (= :cpu (get-in result [:inference :accelerator])))
+          (is (= :cuda-runtime-initialization-failed
+                 (get-in result [:recovery :kind]))))))))
+
+(deftest explicitly-requested-cuda-execution-failure-fails-closed
+  (let [project (temporary-project)
+        model (Files/createTempDirectory
+               "llm-context-explicit-cuda-model-"
+               (make-array java.nio.file.attribute.FileAttribute 0))
+        settings (-> (config/defaults)
+                     (assoc-in [:semantic :lateon-code :model-path] (str model))
+                     (assoc-in [:semantic :lateon-code :accelerator] :cuda))]
+    (with-redefs-fn
+      {#'runtime/find-executable (constantly (.resolve model "next-plaid-api"))
+       #'accelerator/resolve-runtime
+       (fn [& _] {:accelerator :cuda :requested-accelerator :cuda
+                  :quantization :fp32 :requested-quantization :fp32})
+       #'runtime/launch!
+       (fn [& _] {:status :ready :process (Object.) :client :client
+                  :inference {:accelerator :cuda}
+                  :runtime-diagnostic
+                  {:kind :cuda-device-unavailable
+                   :detail "CUDA device unavailable"
+                   :action "repair CUDA"}})
+       #'runtime/destroy-process! (fn [_] nil)}
+      (fn []
+        (let [error (try (runtime/start! project settings) nil
+                         (catch clojure.lang.ExceptionInfo error error))]
+          (is (= :accelerator/runtime-unavailable (:type (ex-data error))))
+          (is (false? (:retriable? (ex-data error)))))))))

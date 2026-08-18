@@ -392,21 +392,26 @@
 (deftest semantic-status-summary-is-concise-and-reports-throughput
   (let [status {:desired 100
                 :indexed 35
+                :pending 65
+                :leased 0
+                :failed 0
+                :dirty 0
                 :runtime {:worker-progress
                           {:documents-per-minute 120.0}}
                 :aggregate-analysis {:aggregates 12
                                      :memberships 24
                                      :semantic-documents :partial
                                      :skipped-files 1}}]
-    (is (= "65 of 100 documents pending, processing speed: 2.00 docs/s\nAggregate analysis: 12 aggregates, 24 memberships; semantic documents: partial; skipped files: 1\n"
+    (is (= "35/100 documents indexed; 65 pending, 0 leased, 0 failed, 0 dirty; processing speed: 2.00 docs/s\nAggregate analysis: 12 aggregates, 24 memberships; semantic documents: partial; skipped files: 1\n"
            (with-out-str (#'cli/print-semantic-summary! status))))
-    (is (= "65 of 100 documents pending, processing speed: 2.00 docs/s"
+    (is (= "35/100 documents indexed; 65 pending, 0 leased, 0 failed, 0 dirty; processing speed: 2.00 docs/s"
            (#'cli/semantic-status-summary status)))
-    (is (= "0 of 100 documents pending, processing speed: 0.00 docs/s"
-           (#'cli/semantic-status-summary (assoc status :indexed 100))))))
+    (is (= "100/100 documents indexed; 0 pending, 0 leased, 0 failed, 0 dirty; processing speed: 0.00 docs/s"
+           (#'cli/semantic-status-summary (assoc status :indexed 100
+                                                 :pending 0))))))
 
 (deftest semantic-status-summary-derives-speed-from-watch-samples
-  (is (= "86 of 100 documents pending, processing speed: 2.00 docs/s"
+  (is (= "14/100 documents indexed; 86 pending, 0 leased, 0 failed, 0 dirty; processing speed: 2.00 docs/s"
          (#'cli/semantic-status-summary
           {:desired 100 :indexed 14}
           {:desired 100 :indexed 10}

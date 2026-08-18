@@ -702,6 +702,12 @@
               file
               (filter #(= :entity.type/symbol (:entity/type %)) entities)
               (filter #(= :entity.type/reference (:entity/type %)) entities))
+             topic-diagnostic
+             (when-let [message (:diagnostic (meta framework-facts))]
+               {:level :info
+                :kind :topic-analysis-skipped
+                :file path
+                :message message})
              external-effects
              (->> entities
                   (filter #(and (= :entity.type/reference (:entity/type %))
@@ -725,7 +731,8 @@
           ;; clj-kondo can emit partial rows after reader failures. Those rows
           ;; must never be mistaken for a complete semantic snapshot.
           :entities (if malformed? [] entities)
-          :diagnostics file-diagnostics
+          :diagnostics (cond-> file-diagnostics
+                         topic-diagnostic (conj topic-diagnostic))
           :status (if malformed? :malformed :ok)
           :preserve? malformed?}))
      files)))

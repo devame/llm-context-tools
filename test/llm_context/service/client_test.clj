@@ -2,6 +2,7 @@
   (:require [clojure.test :refer [deftest is]]
             [llm-context.project :as project]
             [llm-context.service.client :as client]
+            [llm-context.service.contract :as contract]
             [llm-context.service.lifecycle :as lifecycle]
             [llm-context.service.transport :as transport])
   (:import [java.net StandardProtocolFamily UnixDomainSocketAddress]
@@ -86,3 +87,22 @@
     (is (nil? (client/request project {:op :ping})))
     (is (not (Files/exists (client/descriptor-path project)
                            (make-array LinkOption 0))))))
+
+(deftest incompatible-service-is-rejected-before-an-operational-request
+  (let [root (Files/createTempDirectory
+              "llm-context-versioned-service-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        project (project/context (str root))]
+    (Files/createDirectories
+     (:state-dir project)
+     (make-array java.nio.file.attribute.FileAttribute 0))
+    (Files/writeString
+     (client/descriptor-path project)
+     (pr-str {:transport :tcp :host "127.0.0.1" :port 1 :token "old"
+              :application-version "0.0.0"
+              :protocol-version contract/protocol-version})
+     (make-array OpenOption 0))
+    (let [response (client/request project {:op :semantic-status})]
+      (is (= false (:ok response)))
+      (is (= :service/version-mismatch (:type response)))
+      (is (re-find #"run llm-context analyze" (:error response))))))

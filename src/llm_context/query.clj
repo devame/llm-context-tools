@@ -90,6 +90,20 @@
                qualified-name]))
            vec))))
 
+(defn- invalid-fulltext-expression? [error]
+  (boolean
+   (re-find
+    #"(?i)(full.?text.*(parse|syntax)|parse.*(full.?text|query)|query.*syntax|lexical error|encountered .* at line)"
+    (or (.getMessage ^Throwable error) ""))))
+
+(defn- fulltext-or-literal [operation]
+  (try
+    (operation)
+    (catch Exception error
+      (if (invalid-fulltext-expression? error)
+        []
+        (throw error)))))
+
 (defn symbols
   "Find symbols by exact name, case-insensitive substring, or Datalevin
   full-text relevance over identifiers, signatures, and documentation."
@@ -112,13 +126,8 @@
                   :order-by [?score :desc ?id :asc]]
           true (conj :limit (long candidate-limit)))
         fulltext-rows
-        (try
-          (store/query graph fulltext-query [term])
-          (catch Exception _
-            ;; Full-text syntax is intentionally richer than identifier search.
-            ;; Invalid search expressions still retain the historical literal
-            ;; substring behavior instead of failing the command.
-            []))
+        (fulltext-or-literal
+         #(store/query graph fulltext-query [term]))
         fulltext-scores
         (reduce (fn [scores [id score]]
                   (update scores id (fnil max Double/NEGATIVE_INFINITY)
@@ -174,9 +183,8 @@
                    [?symbol :symbol/id ?symbol-id]
                    :order-by [?score :desc ?symbol-id :asc]]
            true (conj :limit (long limit)))
-         rows (try
-                (store/query graph query-form [term])
-                (catch Exception _ []))
+         rows (fulltext-or-literal
+               #(store/query graph query-form [term]))
          ids (->> rows (map first) distinct vec)
          symbols (graph-read/symbols-by-ids (store/database graph) ids)
          aggregates (graph-read/aggregates-for-symbols

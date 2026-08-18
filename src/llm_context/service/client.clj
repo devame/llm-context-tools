@@ -1,5 +1,6 @@
 (ns llm-context.service.client
   (:require [clojure.edn :as edn]
+            [llm-context.service.contract :as service-contract]
             [llm-context.service.lifecycle :as lifecycle]
             [llm-context.service.transport :as transport])
   (:import [java.io PushbackReader]
@@ -17,6 +18,12 @@
   (let [{:keys [exists? valid? value]}
         (lifecycle/descriptor-snapshot project)]
     (when (and exists? valid?) value)))
+
+(defn compatibility [project]
+  (service-contract/compatibility (descriptor project)))
+
+(defn compatible? [project]
+  (= :compatible (compatibility project)))
 
 (defn- unavailable-response [type message]
   {:ok false :error message :exit-code 1 :type type})
@@ -121,6 +128,15 @@
        (not exists?) nil
        (or (not valid?) (not (usable-descriptor? value)))
        (invalid-descriptor-response project snapshot)
+       (and (not (contains? #{:ping :stop :service-info} (:op payload)))
+            (not= :compatible (service-contract/compatibility value)))
+       (unavailable-response
+        :service/version-mismatch
+        (str "Project service is incompatible with this CLI (CLI "
+             (:application-version (service-contract/runtime-identity))
+             ", service " (or (:application-version value) "unknown")
+             ", protocol " (or (:protocol-version value) "unknown")
+             "); run llm-context analyze or service start to replace it"))
        :else
        (let [{:keys [transport] :as endpoint} value
              response

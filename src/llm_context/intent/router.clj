@@ -168,7 +168,7 @@
                       {:type :query-router/warmup-failed
                        :result-count (count results)})))))
 
-(defn start!
+(defn- start-once!
   "Start one small ONNX runtime shared by query-shape routing and learned
   candidate reranking. Missing optional artifacts degrade explicitly."
   [project config]
@@ -199,6 +199,12 @@
 
           :else
           (let [selection (accelerator/resolve-runtime settings executable model)
+                process-settings
+                (if (and (= :cuda (:accelerator selection))
+                         (get-in selection [:cuda-readiness :host :wsl?])
+                         (empty? (:cuda-library-paths settings)))
+                  (assoc settings :cuda-library-paths ["/usr/lib/wsl/lib"])
+                  settings)
                 port (free-port)
                 index-path (.normalize (.resolve ^Path (:root project)
                                                  (:index-path settings)))
@@ -221,13 +227,27 @@
                     (.put (.environment builder) "ORT_DYLIB_PATH"
                           (str onnx-runtime)))
                 _ (accelerator/configure-process-environment!
-                   builder settings executable)
+                   builder process-settings executable)
                 process (.start builder)
                 endpoint (str "http://127.0.0.1:" port)
                 client (next-plaid/create endpoint settings)
                 runtime {:process process :client client}]
             (try
-              (let [health (await-ready! runtime settings)]
+              (let [health (await-ready! runtime settings)
+                    diagnostic
+                    (when (= :cuda (:accelerator selection))
+                      (semantic-runtime/runtime-diagnostic
+                       {:log-path log-path}))
+                    _ (when diagnostic
+                        (throw
+                         (ex-info
+                          (str "Query-router CUDA runtime is unavailable: "
+                               (:detail diagnostic))
+                          {:type :query-router/accelerator-runtime-unavailable
+                           :diagnostic diagnostic
+                           :requested-accelerator
+                           (:requested-accelerator selection)
+                           :retriable? false})))]
                 (when router-enabled?
                   (ensure-route-documents! client settings)
                   (warm-router! client settings))
@@ -254,6 +274,36 @@
                 (when-not (.waitFor process 5 TimeUnit/SECONDS)
                   (.destroyForcibly process))
                 (throw error)))))))))
+
+(defn start!
+  "Start the advisory runtime and verify the effective execution provider.
+  Auto-selected CUDA failure is replaced by a new CPU/INT8 process; explicit
+  CUDA remains fail-closed."
+  [project config]
+  (try
+    (start-once! project config)
+    (catch clojure.lang.ExceptionInfo error
+      (let [{:keys [type requested-accelerator diagnostic]} (ex-data error)]
+        (if (and (= :query-router/accelerator-runtime-unavailable type)
+                 (= :auto requested-accelerator))
+          (let [recovered
+                (start-once!
+                 project
+                 (-> config
+                     (assoc-in [:context :query-router :accelerator] :cpu)
+                     (assoc-in [:context :query-router :quantization] :int8)))]
+            (-> recovered
+                (update :inference assoc
+                        :requested-accelerator :auto
+                        :fallback-reasons
+                        [:cuda-runtime-initialization-failed])
+                (assoc :recovery
+                       {:kind :cuda-runtime-initialization-failed
+                        :detail (:detail diagnostic)
+                        :action (:action diagnostic)
+                        :from :cuda :to :cpu
+                        :recovered-at (System/currentTimeMillis)})))
+          (throw error))))))
 
 (defn stop! [runtime]
   (when-let [owner (or (:owner runtime) (:client runtime))]

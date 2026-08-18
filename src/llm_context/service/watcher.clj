@@ -65,6 +65,7 @@
      :keys keys
      :excluded excluded
      :on-change on-change
+     :status-fn nil
      :stop? (atom false)
      :last-change (atom (when (get-in config [:service :watch-initial])
                           (System/currentTimeMillis)))}))
@@ -108,12 +109,64 @@
     (catch ClosedWatchServiceException _
       :stopped)))
 
-(defn start! [watcher]
-  (assoc watcher :future (future (run! watcher))))
+(defn- publish-status! [watcher status detail]
+  (when-let [status-fn (:status-fn watcher)]
+    (status-fn (cond-> {:status status}
+                 detail (assoc :detail detail)))))
+
+(defn- replacement [watcher]
+  (-> (create (:project watcher) (:config watcher) (:on-change watcher))
+      (assoc :stop? (:stop? watcher)
+             :status-fn (:status-fn watcher))))
+
+(defn- await-replacement [watcher initial-attempt]
+  (loop [attempt initial-attempt]
+    (when-not @(:stop? watcher)
+      (let [outcome (try {:watcher (replacement watcher)}
+                         (catch Throwable error {:error error}))]
+        (if-let [next-watcher (:watcher outcome)]
+          next-watcher
+          (do
+            (publish-status! watcher :recovering
+                             (.getMessage ^Throwable (:error outcome)))
+            (Thread/sleep
+             (min 60000 (* 1000 (bit-shift-left 1 (min 6 attempt)))))
+            (recur (inc attempt))))))))
+
+(defn start!
+  "Start a supervised watcher. Unexpected WatchService failure recreates all
+  recursive registrations and schedules the configured initial catch-up scan."
+  [watcher]
+  (let [active (atom watcher)
+        running
+        (future
+          (loop [current watcher attempt 0]
+            (reset! active current)
+            (publish-status! current :running
+                             (when (pos? attempt)
+                               (str "watcher recovered after " attempt
+                                    " attempt(s)")))
+            (let [outcome (try
+                            {:result (run! current)}
+                            (catch Throwable error {:error error}))]
+              (if (or @(:stop? watcher) (nil? (:error outcome)))
+                (publish-status! current :stopped nil)
+                (do
+                  (publish-status! current :recovering
+                                   (.getMessage ^Throwable (:error outcome)))
+                  (try (.close ^WatchService (:service current))
+                       (catch Throwable _))
+                  (Thread/sleep
+                   (min 60000 (* 1000 (bit-shift-left 1 (min 6 attempt)))))
+                  (when-let [next-watcher
+                             (await-replacement current (inc attempt))]
+                    (recur next-watcher (inc attempt))))))))]
+    (assoc watcher :active active :future running)))
 
 (defn stop! [watcher]
   (reset! (:stop? watcher) true)
-  (.close ^WatchService (:service watcher))
+  (when-let [current (if-let [active (:active watcher)] @active watcher)]
+    (.close ^WatchService (:service current)))
   (when-let [running (:future watcher)]
     (deref running 5000 :timeout))
   nil)

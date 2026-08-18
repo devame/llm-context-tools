@@ -43,3 +43,39 @@
       (is (= 1 @calls))
       (finally
         (watcher/stop! watched)))))
+
+(deftest watcher-failure-is-supervised-and-re-registered
+  (let [root (Files/createTempDirectory
+              "llm-context-watcher-recovery-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        project (project/context (str root))
+        settings (-> (config/defaults)
+                     (assoc-in [:analysis :include] ["."])
+                     (assoc-in [:service :watch-initial] true))
+        attempts (atom 0)
+        calls (atom 0)
+        statuses (atom [])]
+    (with-redefs-fn
+      {#'watcher/run!
+       (fn [current]
+         (if (= 1 (swap! attempts inc))
+           (throw (ex-info "watch service closed unexpectedly" {}))
+           (do
+             ((:on-change current))
+             (while (not @(:stop? current)) (Thread/sleep 10))
+             :stopped)))}
+      (fn []
+        (let [watched
+              (watcher/start!
+               (assoc (watcher/create project settings #(swap! calls inc))
+                      :status-fn #(swap! statuses conj %)))]
+          (try
+            (loop [remaining 200]
+              (when (and (zero? @calls) (pos? remaining))
+                (Thread/sleep 10)
+                (recur (dec remaining))))
+            (is (= 1 @calls))
+            (is (some #(= :recovering (:status %)) @statuses))
+            (is (= :running (:status (last @statuses))))
+            (finally
+              (watcher/stop! watched))))))))

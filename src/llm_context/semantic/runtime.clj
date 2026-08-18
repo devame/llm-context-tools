@@ -215,9 +215,65 @@
                    (ex-info "NextPlaid health is not ready"
                             {:health (dissoc (:health attempt) :raw)}))))))))))
 
+(defn- destroy-process! [^Process process]
+  (when process
+    (.destroy process)
+    (when-not (.waitFor process 5 TimeUnit/SECONDS)
+      (.destroyForcibly process)
+      (.waitFor process 5 TimeUnit/SECONDS))))
+
+(defn- effective-process-settings [settings selection]
+  (if (and (= :cuda (:accelerator selection))
+           (get-in selection [:cuda-readiness :host :wsl?])
+           (empty? (:cuda-library-paths settings)))
+    ;; Use the same WSL driver proxy that made the static device probe succeed.
+    ;; This is child-only and does not alter the caller's JVM environment.
+    (assoc settings :cuda-library-paths ["/usr/lib/wsl/lib"])
+    settings))
+
+(defn- launch!
+  [project config settings command executable model selection]
+  (let [port (free-port)
+        index-path (.normalize
+                    (.resolve ^Path (:root project) (:index-path settings)))
+        log-directory (.resolve ^Path (:state-dir project) "logs")
+        log-path (.resolve log-directory "next-plaid.log")
+        _ (Files/createDirectories
+           index-path (make-array java.nio.file.attribute.FileAttribute 0))
+        _ (Files/createDirectories
+           log-directory (make-array java.nio.file.attribute.FileAttribute 0))
+        _ (logs/rotate-before-start! log-path (:service config))
+        process-settings (effective-process-settings settings selection)
+        full-command (concat (process-command executable port index-path model
+                                                settings selection)
+                             (next command))
+        builder (doto (ProcessBuilder. ^java.util.List (vec full-command))
+                  (.redirectErrorStream true)
+                  (.redirectOutput
+                   (ProcessBuilder$Redirect/appendTo (.toFile log-path))))
+        _ (when-let [onnx-runtime (onnx-runtime-path executable)]
+            (.put (.environment builder) "ORT_DYLIB_PATH" (str onnx-runtime)))
+        _ (accelerator/configure-process-environment!
+           builder process-settings executable)
+        process (.start builder)
+        endpoint (str "http://127.0.0.1:" port)
+        client (next-plaid/create endpoint settings)
+        runtime {:status :starting :process process :client client
+                 :endpoint endpoint :log-path log-path
+                 :inference selection}]
+    (try
+      (let [health (await-ready! runtime settings)
+            diagnostic (runtime-diagnostic runtime)]
+        (cond-> (assoc runtime :status :ready :health health)
+          diagnostic (assoc :runtime-diagnostic diagnostic)))
+      (catch Throwable error
+        (destroy-process! process)
+        (throw error)))))
+
 (defn start!
-  "Start the configured pinned sidecar. Missing installation components return
-  a structured unavailable result so the graph service can still run."
+  "Start and execution-probe the pinned sidecar. Explicit CUDA fails closed;
+  auto-selected CUDA that cannot initialize is replaced by a verified CPU/INT8
+  process before a worker can observe the runtime."
   [project config]
   (let [settings (get-in config [:semantic :lateon-code])
         command (:next-plaid-command settings)
@@ -225,74 +281,52 @@
         model (model-path project settings)]
     (cond
       (nil? executable)
-      {:status :unavailable
-       :reason :executable-missing
-       :detail (first command)}
+      {:status :unavailable :reason :executable-missing :detail (first command)}
 
       (not (Files/isDirectory model (make-array LinkOption 0)))
-      {:status :unavailable
-       :reason :model-missing
-       :detail (str model)}
+      {:status :unavailable :reason :model-missing :detail (str model)}
 
       :else
       (let [selection (accelerator/resolve-runtime settings executable model)
-            port (free-port)
-            index-path (.normalize
-                        (.resolve ^Path (:root project)
-                                  (:index-path settings)))
-            log-directory (.resolve ^Path (:state-dir project) "logs")
-            log-path (.resolve log-directory "next-plaid.log")
-            _ (Files/createDirectories
-               index-path
-               (make-array java.nio.file.attribute.FileAttribute 0))
-            _ (Files/createDirectories
-               log-directory
-               (make-array java.nio.file.attribute.FileAttribute 0))
-            _ (logs/rotate-before-start! log-path (:service config))
-            full-command (concat (process-command executable port index-path
-                                                    model settings selection)
-                                 (next command))
-            builder (doto (ProcessBuilder. ^java.util.List (vec full-command))
-                      (.redirectErrorStream true)
-                      (.redirectOutput
-                       (ProcessBuilder$Redirect/appendTo (.toFile log-path))))
-            _ (when-let [onnx-runtime (onnx-runtime-path executable)]
-                (.put (.environment builder)
-                      "ORT_DYLIB_PATH" (str onnx-runtime)))
-            _ (accelerator/configure-process-environment!
-               builder settings executable)
-            process (.start builder)
-            endpoint (str "http://127.0.0.1:" port)
-            client (next-plaid/create endpoint settings)
-            runtime {:status :starting :process process :client client
-                     :endpoint endpoint :log-path log-path
-                     :inference selection}]
-        (try
-          (let [health (await-ready! runtime settings)
-                diagnostic (runtime-diagnostic runtime)]
-            (when (and diagnostic
-                       (= :cuda (:requested-accelerator selection)))
+            runtime (launch! project config settings command executable model
+                             selection)
+            diagnostic (:runtime-diagnostic runtime)]
+        (if-not (and diagnostic (= :cuda (:accelerator selection)))
+          runtime
+          (if (= :cuda (:requested-accelerator selection))
+            (do
+              (destroy-process! (:process runtime))
               (throw
                (ex-info
                 (str "NextPlaid CUDA runtime is unavailable: "
                      (:detail diagnostic) " Action: " (:action diagnostic))
                 {:type :accelerator/runtime-unavailable
-                 :diagnostic diagnostic
-                 :retriable? true})))
-            (cond-> (assoc runtime :status :ready :health health)
-              diagnostic (assoc :runtime-diagnostic diagnostic)))
-          (catch Throwable error
-            (.destroy process)
-            (when-not (.waitFor process 5 TimeUnit/SECONDS)
-              (.destroyForcibly process))
-            (throw error)))))))
+                 :diagnostic diagnostic :retriable? false})))
+            (let [_ (destroy-process! (:process runtime))
+                  cpu-settings (assoc settings :accelerator :cpu
+                                      :quantization :int8)
+                  cpu-selection
+                  (-> (accelerator/resolve-runtime cpu-settings executable model)
+                      (assoc :requested-accelerator
+                             (:requested-accelerator selection)
+                             :requested-quantization
+                             (:requested-quantization selection)
+                             :fallback-reasons
+                             [:cuda-runtime-initialization-failed]))
+                  recovered (launch! project config cpu-settings command
+                                     executable model cpu-selection)]
+              (-> recovered
+                  (dissoc :runtime-diagnostic)
+                  (assoc :recovery
+                         {:kind :cuda-runtime-initialization-failed
+                          :detail (:detail diagnostic)
+                          :action (:action diagnostic)
+                          :from :cuda :to :cpu
+                          :recovered-at (System/currentTimeMillis)})))))))))
 
 (defn stop! [runtime]
   (when-let [client (:client runtime)]
     (index/close-index! client))
   (when-let [process ^Process (:process runtime)]
-    (.destroy process)
-    (when-not (.waitFor process 5 TimeUnit/SECONDS)
-      (.destroyForcibly process)
-      (.waitFor process 5 TimeUnit/SECONDS)))
+    (destroy-process! process))
   nil)

@@ -108,8 +108,8 @@
             (if (= ::eof form)
               result
               (recur (index-form result form #{:clj :cljs})))))))
-    (catch Throwable _
-      {:calls {}})))
+    (catch Throwable error
+      {:calls {} :diagnostic (.getMessage error)})))
 
 (defn- call-form [index reference platform]
   (some-> (or (get-in index [:calls [platform
@@ -372,7 +372,10 @@
                  :atom-names atom-names
                  :handler-roots
                  (handler-db-roots forms symbols-by-id references)}]
-    (->> references
-         (mapcat #(facts-for-reference context %))
-         (remove nil?)
-         vec)))
+    (with-meta
+      (->> references
+           (mapcat #(facts-for-reference context %))
+           (remove nil?)
+           vec)
+      (when-let [diagnostic (:diagnostic forms)]
+        {:diagnostic diagnostic}))))

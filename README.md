@@ -197,6 +197,14 @@ Runtime and indexing logs are under `.llm-context/logs/`. Storage inspection
 and cleanup commands are documented in
 [Semantic indexing](docs/user-guide.md#semantic-indexing).
 
+## Troubleshooting
+
+If status appears contradictory, indexing stops progressing, acceleration falls
+back unexpectedly, or a service survives an upgrade, start with the
+[troubleshooting FAQ](docs/troubleshooting-faq.md). It covers analysis,
+services, semantic indexing, CPU/CUDA, search fallback, storage, upgrades, and
+the boundary between automatic and operator-required recovery.
+
 ## Configuration
 
 `llm-context.edn` is the project configuration file. The defaults scan the
