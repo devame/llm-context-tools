@@ -7,6 +7,7 @@
             [llm-context.config :as config]
             [llm-context.main :as main]
             [llm-context.project :as project]
+            [llm-context.runtime.setup :as runtime-setup]
             [llm-context.service.client :as service-client]
             [llm-context.service.daemon :as service-daemon]
             [llm-context.service.progress :as analysis-progress]
@@ -24,6 +25,17 @@
            (with-out-str (main/run ["version"])))))
   (testing "unknown commands are usage errors"
     (is (= 2 (main/run ["no-such-command"])))))
+
+(deftest setup-command-forwards-explicit-installation-confirmation
+  (let [options (atom nil)]
+    (with-redefs [runtime-setup/run!
+                  (fn [value]
+                    (reset! options value)
+                    0)]
+      (is (zero? (cli/execute (project/context ".")
+                              "setup"
+                              ["--install-cudnn" "--yes"]))))
+    (is (= {:install-cudnn? true :yes? true} @options))))
 
 (deftest global-argument-parsing
   (is (= {:project "/tmp/example"
@@ -54,6 +66,53 @@
     (is (re-find
          #"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] Graph quality: 1000 exact edges, 25 references"
          output))))
+
+(deftest semantic-status-surfaces-accelerator-fallback
+  (let [output
+        (with-out-str
+          (#'cli/print-semantic-summary!
+           {:desired 1
+            :indexed 0
+            :aggregate-analysis {:aggregates 0
+                                 :memberships 0
+                                 :semantic-documents :partial
+                                 :skipped-files 0}
+            :runtime {:inference {:accelerator :cpu
+                                  :quantization :int8
+                                  :fallback-reasons [:cudnn-missing]}}}))]
+    (is (str/includes? output "Warning: semantic inference is using cpu/int8"))
+    (is (str/includes? output "libcudnn.so.9"))
+    (is (str/includes? output "llm-context doctor"))))
+
+(deftest semantic-status-surfaces-runtime-provider-failure
+  (let [output
+        (with-out-str
+          (#'cli/print-semantic-summary!
+           {:desired 1
+            :indexed 0
+            :aggregate-analysis {:aggregates 0
+                                 :memberships 0
+                                 :semantic-documents :partial
+                                 :skipped-files 0}
+            :runtime {:runtime-diagnostic
+                      {:detail "CUDA was selected, but the runtime could not detect a CUDA-capable device."
+                       :action "fix NVIDIA/WSL CUDA device visibility, then restart the service"}}}))]
+    (is (str/includes? output "runtime could not detect a CUDA-capable device"))
+    (is (str/includes? output "fix NVIDIA/WSL CUDA device visibility"))))
+
+(deftest analyze-service-warning-surfaces-runtime-provider-failure
+  (with-redefs [service-client/request
+                (fn [_ _ _]
+                  {:ok true
+                   :value
+                   {:runtime
+                    {:status :ready
+                     :runtime-diagnostic
+                     {:detail "CUDA was selected, but the runtime could not detect a CUDA-capable device."
+                      :action "fix NVIDIA/WSL CUDA device visibility"}}}})]
+    (let [warning (#'cli/semantic-service-warning (project/context "."))]
+      (is (str/includes? warning "runtime could not detect a CUDA-capable device"))
+      (is (str/includes? warning "fix NVIDIA/WSL CUDA device visibility")))))
 
 (deftest validation-errors-identify-the-offending-fact
   (let [entity {:entity/type :entity.type/reference

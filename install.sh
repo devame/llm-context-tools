@@ -88,6 +88,134 @@ verify_hash() {
   [ -f "$1" ] && [ "$(file_hash "$1")" = "$2" ]
 }
 
+CUDA_MINIMUM_DRIVER="525.60.13"
+
+version_at_least() {
+  awk -F. -v actual="$1" -v minimum="$2" '
+    BEGIN {
+      split(actual, a, ".")
+      split(minimum, b, ".")
+      for (i = 1; i <= 3; i++) {
+        if ((a[i] + 0) > (b[i] + 0)) exit 0
+        if ((a[i] + 0) < (b[i] + 0)) exit 1
+      }
+      exit 0
+    }'
+}
+
+nvidia_smi_path() {
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    command -v nvidia-smi
+  elif [ -x /usr/lib/wsl/lib/nvidia-smi ]; then
+    printf '%s\n' /usr/lib/wsl/lib/nvidia-smi
+  fi
+}
+
+cuda_library_present() {
+  library=$1
+  for candidate in \
+    "/usr/lib/wsl/lib/$library" \
+    "/usr/local/cuda/lib64/$library" \
+    "/usr/lib/x86_64-linux-gnu/$library" \
+    "/usr/lib64/$library"; do
+    if [ -f "$candidate" ]; then
+      return 0
+    fi
+  done
+  if command -v ldconfig >/dev/null 2>&1 &&
+     ldconfig -p 2>/dev/null | grep -F "$library" >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
+cuda_host_preflight() {
+  CUDA_NVIDIA_SMI=$(nvidia_smi_path || true)
+  CUDA_GPU_NAME=""
+  CUDA_DRIVER_VERSION=""
+  CUDA_DRIVER_PRESENT=0
+  CUDA_DRIVER_COMPATIBLE=0
+  CUDA_DEVICE_VISIBLE=0
+  CUDA_LIBCUDA_PRESENT=0
+  CUDA_RUNTIME_PRESENT=0
+  CUDA_CUDNN_PRESENT=0
+
+  if [ -n "$CUDA_NVIDIA_SMI" ]; then
+    CUDA_GPU_INFO=$(
+      "$CUDA_NVIDIA_SMI" --query-gpu=name,driver_version \
+        --format=csv,noheader,nounits 2>/dev/null | sed -n '1p' || true
+    )
+    CUDA_GPU_NAME=$(printf '%s\n' "$CUDA_GPU_INFO" | sed 's/,[[:space:]].*//')
+    CUDA_DRIVER_VERSION=$(printf '%s\n' "$CUDA_GPU_INFO" |
+      sed -n 's/^[^,]*,[[:space:]]*//p')
+    if [ -n "$CUDA_GPU_NAME" ] && [ -n "$CUDA_DRIVER_VERSION" ]; then
+      CUDA_DRIVER_PRESENT=1
+      CUDA_DEVICE_VISIBLE=1
+      case "$CUDA_DRIVER_VERSION" in
+        *[!0-9.]*|'') ;;
+        *)
+          if version_at_least "$CUDA_DRIVER_VERSION" "$CUDA_MINIMUM_DRIVER"; then
+            CUDA_DRIVER_COMPATIBLE=1
+          fi
+          ;;
+      esac
+    fi
+  fi
+
+  if [ -e /dev/dxg ] || [ -e /dev/nvidia0 ]; then
+    CUDA_DEVICE_VISIBLE=1
+  fi
+  if cuda_library_present libcuda.so.1; then
+    CUDA_LIBCUDA_PRESENT=1
+  fi
+  if cuda_library_present libcudart.so.12; then
+    CUDA_RUNTIME_PRESENT=1
+  fi
+  if cuda_library_present libcudnn.so.9; then
+    CUDA_CUDNN_PRESENT=1
+  fi
+
+  if [ "$CUDA_DEVICE_VISIBLE" -eq 1 ] &&
+     [ "$CUDA_DRIVER_PRESENT" -eq 1 ] &&
+     [ "$CUDA_DRIVER_COMPATIBLE" -eq 1 ] &&
+     [ "$CUDA_LIBCUDA_PRESENT" -eq 1 ] &&
+     [ "$CUDA_RUNTIME_PRESENT" -eq 1 ] &&
+     [ "$CUDA_CUDNN_PRESENT" -eq 1 ]; then
+    CUDA_HOST_READY=1
+  else
+    CUDA_HOST_READY=0
+  fi
+}
+
+print_cuda_host_preflight() {
+  printf 'GPU preflight: GPU=%s; device=%s; driver=%s (minimum %s); libcuda=%s; CUDA 12 runtime=%s; cuDNN 9=%s\n' \
+    "${CUDA_GPU_NAME:-not detected}" \
+    "$(if [ "$CUDA_DEVICE_VISIBLE" -eq 1 ]; then printf visible; else printf missing; fi)" \
+    "${CUDA_DRIVER_VERSION:-not detected}" \
+    "$CUDA_MINIMUM_DRIVER" \
+    "$(if [ "$CUDA_LIBCUDA_PRESENT" -eq 1 ]; then printf present; else printf missing; fi)" \
+    "$(if [ "$CUDA_RUNTIME_PRESENT" -eq 1 ]; then printf present; else printf missing; fi)" \
+    "$(if [ "$CUDA_CUDNN_PRESENT" -eq 1 ]; then printf present; else printf missing; fi)"
+}
+
+print_cuda_host_actions() {
+  if [ "${CUDA_DRIVER_PRESENT}" -eq 0 ]; then
+    printf 'Action: install an NVIDIA driver; for WSL install the Windows CUDA-enabled driver, not a Linux driver inside WSL.\n'
+  elif [ "${CUDA_DRIVER_COMPATIBLE}" -eq 0 ]; then
+    printf 'Action: install/update the NVIDIA driver to %s or newer.\n' \
+      "$CUDA_MINIMUM_DRIVER"
+  fi
+  if [ "$CUDA_LIBCUDA_PRESENT" -eq 0 ]; then
+    printf 'Action: expose libcuda.so.1 from the NVIDIA driver to this process.\n'
+  fi
+  if [ "$CUDA_RUNTIME_PRESENT" -eq 0 ]; then
+    printf 'Action: install or expose the CUDA 12 runtime (libcudart.so.12).\n'
+  fi
+  if [ "$CUDA_CUDNN_PRESENT" -eq 0 ]; then
+    printf 'Action: install the CPU package first, then run llm-context setup --install-cudnn, or install cuDNN 9 for CUDA 12 using your distribution package manager.\n'
+  fi
+}
+
 TEMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/llm-context-install.XXXXXX")
 cleanup() { rm -rf -- "$TEMP_DIR"; }
 trap cleanup EXIT HUP INT TERM
@@ -114,12 +242,48 @@ case "${LLM_CONTEXT_SKIP_SEMANTIC:-0}" in
   1|true|TRUE|yes|YES) INSTALL_SEMANTIC=0 ;;
 esac
 
-RUNTIME_FLAVOR=${LLM_CONTEXT_ACCELERATOR_PACKAGE:-cpu}
-case "$RUNTIME_FLAVOR" in
-  cpu) RUNTIME_SUFFIX="" ;;
-  cuda) RUNTIME_SUFFIX="-cuda" ;;
-  *) fail "LLM_CONTEXT_ACCELERATOR_PACKAGE must be cpu or cuda" ;;
+RUNTIME_FLAVOR_REQUESTED=${LLM_CONTEXT_ACCELERATOR_PACKAGE:-auto}
+case "$RUNTIME_FLAVOR_REQUESTED" in
+  cpu|cuda|auto) ;;
+  *) fail "LLM_CONTEXT_ACCELERATOR_PACKAGE must be auto, cpu, or cuda" ;;
 esac
+
+RUNTIME_FLAVOR=cpu
+if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
+  case "$(uname -s):$(uname -m)" in
+    Linux:x86_64|Linux:amd64)
+      if [ "$RUNTIME_FLAVOR_REQUESTED" = "cuda" ]; then
+        cuda_host_preflight
+        print_cuda_host_preflight
+        [ "$CUDA_HOST_READY" -eq 1 ] || {
+          print_cuda_host_actions
+          fail "CUDA was requested but the host preflight is incomplete; fix the reported prerequisites or set LLM_CONTEXT_ACCELERATOR_PACKAGE=cpu"
+        }
+      elif [ "$RUNTIME_FLAVOR_REQUESTED" = "auto" ]; then
+        cuda_host_preflight
+        print_cuda_host_preflight
+        if [ "$CUDA_HOST_READY" -eq 1 ]; then
+          RUNTIME_FLAVOR=cuda
+          printf 'GPU preflight passed; installing the CUDA-enabled semantic runtime.\n'
+        else
+          printf 'GPU preflight did not pass; installing the CPU semantic runtime.\n'
+          print_cuda_host_actions
+        fi
+      fi
+      ;;
+    *)
+      if [ "$RUNTIME_FLAVOR_REQUESTED" = "cuda" ]; then
+        fail "the packaged CUDA runtime is currently available only for Linux x86_64"
+      fi
+      ;;
+  esac
+fi
+
+if [ "$RUNTIME_FLAVOR" = "cuda" ]; then
+  RUNTIME_SUFFIX="-cuda"
+else
+  RUNTIME_SUFFIX=""
+fi
 
 if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
   case "$(uname -s):$(uname -m)" in
@@ -131,10 +295,6 @@ if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
       fail "LateOn runtime is not packaged for $(uname -s) $(uname -m); rerun with LLM_CONTEXT_SKIP_SEMANTIC=1"
       ;;
   esac
-  if [ "$RUNTIME_FLAVOR" = "cuda" ] && [ "$(uname -s)" != "Linux" ]; then
-    fail "the packaged CUDA runtime is currently available only for Linux x86_64"
-  fi
-
   NEXT_PLAID_ARCHIVE="next-plaid-api-${NEXT_PLAID_VERSION}-${NEXT_PLAID_TARGET}${RUNTIME_SUFFIX}.tar.gz"
   printf 'Downloading NextPlaid API %s for %s...\n' \
     "$NEXT_PLAID_VERSION" "$NEXT_PLAID_TARGET"
@@ -370,6 +530,8 @@ if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
   printf 'Installed NextPlaid API %s, LateOn-Code at %s, and query router at %s\n' \
     "$NEXT_PLAID_VERSION" "$MODEL_DIR" "$ROUTER_MODEL_DIR"
 fi
+printf 'Run %s setup to inspect GPU/CUDA prerequisites, or %s doctor to check the complete installation.\n' \
+  "$INSTALL_DIR/llm-context" "$INSTALL_DIR/llm-context"
 
 case ":${PATH}:" in
   *":${INSTALL_DIR}:"*) ;;

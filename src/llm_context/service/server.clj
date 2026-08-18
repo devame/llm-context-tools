@@ -60,14 +60,20 @@
     (throw (ex-info (str "Unknown query: " subcommand) {:exit-code 2})))))
 
 (defn- runtime-view [runtime-state]
-  (let [runtime (select-keys runtime-state
-                             [:status :reason :detail :endpoint :log-path
-                              :inference
-                              :worker-status :worker-detail :worker-progress
-                              :query-router-status :query-router-detail
-                              :query-router-inference
-                              :candidate-reranker-status
-                              :candidate-reranker-detail])]
+  (let [selected-runtime (select-keys runtime-state
+                                      [:status :reason :detail :endpoint :log-path
+                                       :inference :runtime-diagnostic
+                                       :worker-status :worker-detail :worker-progress
+                                       :query-router-status :query-router-detail
+                                       :query-router-inference
+                                       :candidate-reranker-status
+                                       :candidate-reranker-detail])
+        runtime (if (:runtime-diagnostic selected-runtime)
+                  selected-runtime
+                  (if-let [diagnostic (semantic-runtime/runtime-diagnostic
+                                       selected-runtime)]
+                    (assoc selected-runtime :runtime-diagnostic diagnostic)
+                    selected-runtime))]
     (cond-> runtime
       (:log-path runtime) (update :log-path str)
       (nil? (:inference runtime)) (dissoc :inference)

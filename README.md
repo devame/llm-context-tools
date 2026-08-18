@@ -45,6 +45,22 @@ The installer verifies downloaded artifacts and installs the CLI and local
 semantic models for the current user. Open a new terminal if the installer
 updates your `PATH`.
 
+On Linux x86-64, the installer performs a GPU/driver/CUDA preflight. It uses
+the CUDA package only when the host has a visible NVIDIA GPU, a compatible
+driver, CUDA 12, and cuDNN 9; otherwise it installs the CPU package and prints
+the corrective action. Use `LLM_CONTEXT_ACCELERATOR_PACKAGE=auto`, `cpu`, or
+`cuda` to choose explicitly. Inspect or repair the host later with:
+
+```bash
+llm-context setup
+llm-context setup --install-cudnn       # interactive confirmation
+llm-context setup --install-cudnn --yes # explicit non-interactive install
+```
+
+The setup command can install the supported cuDNN package on Debian/Ubuntu,
+but it never installs a GPU driver automatically. In WSL, install or update
+the NVIDIA CUDA-enabled driver on Windows, not a Linux driver inside WSL.
+
 For graph analysis and lexical search without the semantic models:
 
 ```bash
@@ -63,6 +79,7 @@ Run these commands from the repository root:
 ```bash
 llm-context init
 llm-context doctor
+llm-context setup
 llm-context analyze
 ```
 

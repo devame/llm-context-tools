@@ -301,6 +301,37 @@ The one-script installer verifies the jar, NextPlaid, ONNX Runtime, and both
 FP32 and INT8 variants of the pinned retrieval and routing models. Set
 `LLM_CONTEXT_SKIP_SEMANTIC=1` when only exact graph and FTS features are wanted.
 
+After installation, inspect the machine and packaged runtime with:
+
+```bash
+llm-context setup
+llm-context doctor
+```
+
+`setup` reports the visible GPU, NVIDIA driver version, minimum supported
+driver (`525.60.13` for the CUDA 12 package), `libcuda.so.1`, CUDA 12, and
+cuDNN 9. These are static host checks; the first semantic service startup is
+still the authoritative runtime probe. If it finds a missing cuDNN package on
+Debian/Ubuntu, setup offers:
+
+```bash
+sudo apt-get update && sudo apt-get -y install cudnn9-cuda-12
+```
+
+Use `llm-context setup --install-cudnn --yes` only when that package and its
+repository are already configured; the package name follows the
+[NVIDIA cuDNN Linux installation guide](https://docs.nvidia.com/deeplearning/cudnn/installation/latest/linux.html).
+Setup does not install NVIDIA drivers. In WSL, install or update the
+[CUDA-enabled NVIDIA driver on Windows](https://docs.nvidia.com/cuda/pdf/CUDA_on_WSL_User_Guide.pdf);
+do not install a Linux NVIDIA driver inside WSL.
+
+On Linux x86-64, `install.sh` defaults to
+`LLM_CONTEXT_ACCELERATOR_PACKAGE=auto`: it selects the CUDA package only when
+the static preflight passes, otherwise it installs the CPU package and prints
+the missing prerequisites. Use `LLM_CONTEXT_ACCELERATOR_PACKAGE=cpu` to force
+CPU or `LLM_CONTEXT_ACCELERATOR_PACKAGE=cuda` to require CUDA and fail early
+when the host is incomplete. The Windows package is currently CPU-only.
+
 - If `doctor` reports Java failure, install JDK 23 or newer.
 - If graph format is incompatible, run `llm-context analyze`; it automatically
   performs the required full rebuild. Use `--full` to force the rebuild.
@@ -331,10 +362,18 @@ semantic retriever accepts these project settings:
 ```
 
 `:auto` selects CUDA/FP32 only when a GPU device, both ONNX Runtime CUDA
-provider libraries, and the verified `model.onnx` are present. Otherwise it
-uses CPU/INT8 and reports the exact fallback reasons through
-`llm-context semantic status`. Explicit `:cuda` fails closed when any
-prerequisite is absent. NextPlaid does not support CUDA with the INT8 model.
+provider libraries, cuDNN 9, and the verified `model.onnx` are present.
+Otherwise it uses CPU/INT8 and immediately reports the exact fallback reason
+and a corrective action during `analyze`, `semantic status`, and `doctor`.
+For example, `cudnn-missing` means that `libcudnn.so.9` must be installed and
+made visible to the service. Explicit `:cuda` fails closed when any
+prerequisite is absent. Runtime checks also verify that the CUDA provider can
+actually discover a device; if it cannot, `semantic status` and `doctor` show
+the provider error and the corrective action. Explicit `:cuda` fails closed
+for that runtime failure instead of silently falling back to CPU. NextPlaid
+does not support CUDA with the INT8 model. In verbose status, treat
+`:runtime-diagnostic` as authoritative: a bare `:accelerator :cuda` selection
+describes the launch mode, not proof that the CUDA provider initialized.
 
 The query router/reranker has the same fields under
 `:context :query-router`. Its default remains CPU/INT8 because the 32M model is
@@ -351,7 +390,9 @@ LLM_CONTEXT_ACCELERATOR_PACKAGE=cuda sh install.sh
 ```
 
 The host must provide CUDA 12 and cuDNN 9. Add non-standard dependency
-directories to `:cuda-library-paths`. The default installer flavor remains CPU.
+directories to `:cuda-library-paths`. The Linux installer defaults to the
+same `auto` preflight described above; use `LLM_CONTEXT_ACCELERATOR_PACKAGE=cpu`
+to keep a CPU-only installation.
 
 Agent guidance can be installed with
 `llm-context integrate codex|claude|generic`. Deterministic EDN, JSON, JSONL,

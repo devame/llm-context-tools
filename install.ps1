@@ -40,6 +40,30 @@ if ([int]$Matches[1] -lt 23) {
     throw "Java 23 or newer is required; found Java $($Matches[1])"
 }
 
+$RequestedAcceleratorPackage = if ($env:LLM_CONTEXT_ACCELERATOR_PACKAGE) {
+    $env:LLM_CONTEXT_ACCELERATOR_PACKAGE
+} else {
+    "auto"
+}
+if ($RequestedAcceleratorPackage -notin @("auto", "cpu", "cuda")) {
+    throw "LLM_CONTEXT_ACCELERATOR_PACKAGE must be auto, cpu, or cuda"
+}
+if ($RequestedAcceleratorPackage -eq "cuda") {
+    throw "The Windows installer currently ships the CPU semantic runtime; use Linux/WSL for the CUDA package or set LLM_CONTEXT_ACCELERATOR_PACKAGE=cpu"
+}
+$NvidiaSmi = Get-Command nvidia-smi.exe -ErrorAction SilentlyContinue
+if (-not $NvidiaSmi) {
+    $NvidiaSmi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+}
+if ($NvidiaSmi) {
+    $GpuInfo = @(& $NvidiaSmi.Source '--query-gpu=name,driver_version' '--format=csv,noheader,nounits' 2>$null |
+        Select-Object -First 1)
+    if ($GpuInfo) {
+        Write-Host "NVIDIA GPU detected ($GpuInfo). The Windows package is CPU-only; run 'llm-context setup' after installation for CUDA guidance."
+        Write-Host "For CUDA inference, use the Linux/WSL package with the NVIDIA Windows driver rather than installing a Linux driver inside WSL."
+    }
+}
+
 $TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("llm-context-install-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $TempDir | Out-Null
 
@@ -296,7 +320,7 @@ try {
         Write-Host "Installed NextPlaid API $NextPlaidVersion, LateOn-Code at $ModelDir, and query router at $RouterModelDir"
     }
 
-    Write-Host "New terminals can run: llm-context doctor"
+    Write-Host "Run 'llm-context setup' to inspect GPU/CUDA prerequisites, or 'llm-context doctor' to check the complete installation."
 } finally {
     if (Test-Path -LiteralPath $TempDir) {
         Remove-Item -Recurse -Force -LiteralPath $TempDir

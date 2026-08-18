@@ -162,6 +162,8 @@
                     {:error error})))]
           {:check :semantic-accelerator
            :required? false
+           :warning? (and selection
+                          (seq (:fallback-reasons selection)))
            :ok? (or (not lateon-enabled?)
                     (and selection (nil? (:error selection))))
            :detail
@@ -171,6 +173,21 @@
              (nil? model-path) "model path unavailable"
              (:error selection) (.getMessage ^Throwable (:error selection))
              :else (accelerator/describe selection))})
+        cuda-host-check
+        (let [cuda-requested? (contains? #{:auto :cuda}
+                                         (:accelerator lateon-settings))
+              host (when (and lateon-enabled? cuda-requested?)
+                     (accelerator/cuda-host-readiness lateon-settings
+                                                      executable))]
+          {:check :cuda-host
+           :required? false
+           :warning? (and host (not (:ready? host)))
+           :ok? true
+           :detail
+           (cond
+             (not lateon-enabled?) "provider disabled"
+             (not cuda-requested?) "CUDA not requested; configured for CPU"
+             :else (accelerator/describe-host host))})
         router-settings (get-in config [:context :query-router])
         router-enabled? (:enabled router-settings)
         router-model-path (when router-enabled?
@@ -203,9 +220,12 @@
           (service-client/request project {:op :semantic-status}))
         service-runtime (get-in service-response [:value :runtime])
         worker-failed? (= :failed (:worker-status service-runtime))
+        runtime-warning? (and (= :ready (:status service-runtime))
+                              (:runtime-diagnostic service-runtime))
         service-check
         {:check :project-service
          :required? false
+         :warning? (boolean runtime-warning?)
          :ok? (if lateon-enabled?
                 (and (= :ready (:status service-runtime))
                      (not worker-failed?))
@@ -220,20 +240,29 @@
            lateon-enabled?
            (str "running; LateOn "
                 (name (or (:status service-runtime) :unknown))
+                (when-let [reason (:reason service-runtime)]
+                  (str " (" (name reason) ")"))
+                (when-let [detail (:detail service-runtime)]
+                  (str ": " detail))
                 "; worker "
-                (name (or (:worker-status service-runtime) :unknown)))
+                (name (or (:worker-status service-runtime) :unknown))
+                (when-let [diagnostic (:runtime-diagnostic service-runtime)]
+                  (str "; warning: " (:detail diagnostic)
+                       "; action: " (:action diagnostic))))
            :else "running")}]
     [java-check writable-check clj-kondo-check janet-catalog-check
      janet-grammar-check datalevin-check graph-format-check runtime-check
-     onnx-check model-check accelerator-check router-model-check service-check]))
+     onnx-check model-check accelerator-check cuda-host-check
+     router-model-check service-check]))
 
 (defn healthy? [checks]
   (every? #(or (not (:required? %)) (:ok? %)) checks))
 
 (defn print-report [checks]
-  (doseq [{:keys [check required? ok? detail]} checks]
+  (doseq [{:keys [check required? ok? warning? detail]} checks]
     (println (format "%-5s %-20s %s%s"
-                     (if ok? "ok" "fail")
+                     (cond ok? (if warning? "warn" "ok")
+                           :else "fail")
                      (name check)
                      detail
                      (if required? "" " (optional)")))))

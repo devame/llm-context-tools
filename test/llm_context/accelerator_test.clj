@@ -17,6 +17,19 @@
 (defn- touch [^Path path]
   (Files/writeString path "artifact" (make-array java.nio.file.OpenOption 0)))
 
+(def complete-host
+  {:device-visible? true
+   :driver-present? true
+   :driver-compatible? true
+   :libcuda-present? true
+   :cuda-runtime-present? true
+   :cudnn-present? true
+   :ready? true
+   :wsl? false
+   :gpu-name "Test GPU"
+   :driver-version "591.86"
+   :minimum-driver accelerator/minimum-cuda-driver})
+
 (deftest auto-falls-back-to-cpu-int8-with-visible-reasons
   (let [{:keys [executable model]} (temp-layout)]
     (touch (.resolve model "model_int8.onnx"))
@@ -40,7 +53,14 @@
 (deftest explicit-cuda-fails-closed-when-runtime-is-incomplete
   (let [{:keys [executable model]} (temp-layout)]
     (touch (.resolve model "model.onnx"))
-    (with-redefs [accelerator/cuda-device-visible? (constantly true)]
+    (with-redefs [accelerator/cuda-device-visible? (constantly true)
+                  accelerator/cuda-readiness
+                  (constantly {:device-visible? true
+                               :cuda-provider-present? false
+                               :shared-provider-present? false
+                               :cudnn-present? false
+                               :fp32-model-present? true
+                               :ready? false})]
       (let [error (try
                     (accelerator/resolve-runtime
                      {:accelerator :cuda :quantization :fp32
@@ -63,7 +83,7 @@
                   (.resolve root "libonnxruntime_providers_shared.so")
                   (.resolve root "libcudnn.so.9")]]
       (touch path))
-    (with-redefs [accelerator/cuda-device-visible? (constantly true)]
+    (with-redefs [accelerator/cuda-host-readiness (constantly complete-host)]
       (let [selection (accelerator/resolve-runtime
                        {:accelerator :auto :quantization :auto
                         :encoding-sessions 4 :encoding-batch-size 1
@@ -78,6 +98,19 @@
         (is (= 8 (:encoding-batch-size selection)))
         (is (= 1 (:update-concurrency selection)))
         (is (nil? (:fallback-reasons selection)))))))
+
+(deftest host-description-surfaces-corrective-action
+  (let [description (accelerator/describe-host
+                     (assoc complete-host
+                            :driver-present? false
+                            :driver-compatible? false
+                            :cudnn-present? false
+                            :ready? false))]
+    (is (re-find #"GPU: Test GPU" description))
+    (is (re-find #"NVIDIA driver: 591[.]86" description))
+    (is (re-find #"cuDNN 9: missing" description))
+    (is (re-find #"install an NVIDIA driver" description))
+    (is (re-find #"install cuDNN 9" description))))
 
 (deftest selected-model-artifact-must-exist
   (let [{:keys [executable model]} (temp-layout)

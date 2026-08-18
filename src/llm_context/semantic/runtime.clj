@@ -106,18 +106,94 @@
     (when (Files/isRegularFile path (make-array LinkOption 0))
       path)))
 
+(def ^:private diagnostic-tail-bytes 131072)
+
+(defn- recent-log-lines [runtime]
+  (when-let [log-path (:log-path runtime)]
+    (try
+      (with-open [file (java.io.RandomAccessFile. (str log-path) "r")]
+        (let [size (.length file)
+              byte-count (int (min diagnostic-tail-bytes size))]
+          (when (pos? byte-count)
+            (.seek file (- size byte-count))
+            (let [bytes (byte-array byte-count)]
+              (.readFully file bytes)
+              (str/split-lines
+               (String. bytes java.nio.charset.StandardCharsets/UTF_8))))))
+      (catch Throwable _ nil))))
+
+(defn- latest-line [lines pattern]
+  (some (fn [line]
+          (when (re-find pattern line)
+            (str/trim line)))
+        (reverse lines)))
+
+(defn- cuda-diagnostic [line]
+  (cond
+    (re-find #"(?i)CUDA support not compiled" line)
+    {:kind :cuda-build-missing
+     :detail "The installed NextPlaid binary does not include CUDA support."
+     :action (str "install the CUDA-enabled package with "
+                  "LLM_CONTEXT_ACCELERATOR_PACKAGE=cuda sh install.sh, "
+                  "or set :accelerator :cpu")
+     :line line}
+
+    (re-find #"(?i)(no CUDA-capable device|CUDA_ERROR_NO_DEVICE|CUDA failure 100)"
+             line)
+    {:kind :cuda-device-unavailable
+     :detail "CUDA was selected, but the runtime could not detect a CUDA-capable device."
+     :action (str "fix NVIDIA/WSL CUDA device visibility, then restart the service, "
+                  "or set :accelerator :cpu to use CPU/INT8")
+     :line line}
+
+    (re-find #"(?i)(libcudnn[.]so[.]9|cudnn).*not found" line)
+    {:kind :cudnn-unavailable
+     :detail "CUDA could not load cuDNN 9 (libcudnn.so.9)."
+     :action "install cuDNN 9 and expose libcudnn.so.9 to the service"
+     :line line}
+
+    (re-find #"(?i)(CUDA initialization error|Falling back to CPU|No execution providers from session options registered successfully)"
+             line)
+    {:kind :cuda-provider-failed
+     :detail "NextPlaid failed to initialize its CUDA provider and is falling back to CPU."
+     :action "run llm-context doctor, fix the CUDA runtime, or set :accelerator :cpu"
+     :line line}))
+
+(defn runtime-diagnostic
+  "Return a live, actionable provider diagnostic from the current NextPlaid
+  log. This complements static prerequisite checks: a CUDA provider can exist
+  on disk while failing to discover a usable device at runtime."
+  [runtime]
+  (when-let [lines (recent-log-lines runtime)]
+    (when-let [line (or (latest-line lines
+                                     #"(?i)(no CUDA-capable device|CUDA_ERROR_NO_DEVICE|CUDA failure 100)")
+                        (latest-line lines #"(?i)CUDA support not compiled")
+                        (latest-line lines #"(?i)(libcudnn[.]so[.]9|cudnn).*not found")
+                        (latest-line lines
+                                     #"(?i)(CUDA initialization error|Falling back to CPU|No execution providers from session options registered successfully)"))]
+      (cuda-diagnostic line))))
+
+(defn- startup-diagnostic [runtime]
+  (when-let [lines (recent-log-lines runtime)]
+    (latest-line lines #"(?i)(error|failed|cuda|cudnn)")))
+
 (defn- await-ready! [runtime settings]
   (let [deadline (+ (System/currentTimeMillis)
                     (:startup-timeout-ms settings))]
     (loop [last-error nil]
       (cond
         (not (.isAlive ^Process (:process runtime)))
-        (throw
-         (ex-info "NextPlaid exited before becoming ready"
-                  {:type :semantic/runtime-exited
-                   :exit-code (.exitValue ^Process (:process runtime))
-                   :retriable? true}
-                  last-error))
+        (let [diagnostic (startup-diagnostic runtime)]
+          (throw
+           (ex-info
+            (str "NextPlaid exited before becoming ready"
+                 (when diagnostic (str ": " diagnostic)))
+            {:type :semantic/runtime-exited
+             :exit-code (.exitValue ^Process (:process runtime))
+             :log-path (some-> (:log-path runtime) str)
+             :startup-diagnostic diagnostic
+             :retriable? true}
+            last-error)))
 
         (>= (System/currentTimeMillis) deadline)
         (throw
@@ -192,8 +268,19 @@
                      :endpoint endpoint :log-path log-path
                      :inference selection}]
         (try
-          (let [health (await-ready! runtime settings)]
-            (assoc runtime :status :ready :health health))
+          (let [health (await-ready! runtime settings)
+                diagnostic (runtime-diagnostic runtime)]
+            (when (and diagnostic
+                       (= :cuda (:requested-accelerator selection)))
+              (throw
+               (ex-info
+                (str "NextPlaid CUDA runtime is unavailable: "
+                     (:detail diagnostic) " Action: " (:action diagnostic))
+                {:type :accelerator/runtime-unavailable
+                 :diagnostic diagnostic
+                 :retriable? true})))
+            (cond-> (assoc runtime :status :ready :health health)
+              diagnostic (assoc :runtime-diagnostic diagnostic)))
           (catch Throwable error
             (.destroy process)
             (when-not (.waitFor process 5 TimeUnit/SECONDS)

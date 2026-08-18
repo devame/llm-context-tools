@@ -1,9 +1,12 @@
 (ns llm-context.cli
   (:require [clojure.pprint :as pprint]
             [clojure.string :as str]
+            [llm-context.accelerator :as accelerator]
             [llm-context.config :as config]
             [llm-context.model-packages :as model-packages]
             [llm-context.project :as project]
+            [llm-context.runtime.setup :as runtime-setup]
+            [llm-context.semantic.runtime :as semantic-runtime]
             [llm-context.service.client :as service-client]
             [llm-context.service.progress :as analysis-progress]
             [llm-context.version :as version]))
@@ -64,6 +67,7 @@
        "  entry-points         Show inferred entry points\n"
        "  side-effects         Show classified side effects\n"
        "  doctor               Check runtime capabilities\n"
+       "  setup                Check GPU/CUDA prerequisites and offer safe fixes\n"
        "  version              Print the application version\n"))
 
 (defn parse-args
@@ -190,6 +194,14 @@
     ((resolve-fn 'llm-context.runtime.doctor/print-report) checks)
     (if ((resolve-fn 'llm-context.runtime.doctor/healthy?) checks) 0 1)))
 
+(defmethod execute "setup" [_ _ args]
+  (let [unknown (first (remove #{"--install-cudnn" "--yes"} args))]
+    (when unknown
+      (throw (ex-info (str "Unknown setup option: " unknown) {:exit-code 2})))
+    (runtime-setup/run!
+     {:install-cudnn? (boolean (some #{"--install-cudnn"} args))
+      :yes? (boolean (some #{"--yes"} args))})))
+
 (defn- analysis-progress-message
   [{:keys [stage files diagnostics completed total file entities
            exact-edges references external dynamic ambiguous unresolved
@@ -288,12 +300,56 @@
       (catch Exception error
         {:error error}))))
 
+(defn- semantic-acceleration-warning [context settings]
+  (let [lateon-settings (get-in settings [:semantic :lateon-code])
+        enabled? (and (true? (:enabled lateon-settings))
+                      (= :background (:mode lateon-settings))
+                      (contains? (set (get-in settings [:semantic :providers]))
+                                 :lateon-code))
+        executable (when enabled?
+                     (semantic-runtime/find-executable
+                      (first (:next-plaid-command lateon-settings))))
+        model-path (when (and enabled? executable)
+                     (semantic-runtime/model-path context lateon-settings))]
+    (when (and enabled? executable model-path)
+      (try
+        (let [selection (accelerator/resolve-runtime
+                         lateon-settings executable model-path)]
+          (when-let [reasons (seq (:fallback-reasons selection))]
+            (format
+             "Warning: semantic inference is using %s. GPU acceleration was not selected; %s. Run 'llm-context doctor' for details."
+             (accelerator/describe selection)
+             (accelerator/fallback-actions reasons))))
+        (catch clojure.lang.ExceptionInfo error
+          (format
+           "Warning: semantic GPU acceleration is unavailable: %s. Run 'llm-context doctor' for details."
+           (.getMessage error)))))))
+
 (defn- print-semantic-service-start! [service-result]
   (let [{:keys [status pid log-path]} service-result
         state (if (= :running status) "started" "starting")
         pid-text (if pid (format " (pid %d)" pid) "")]
     (println (format "Semantic indexing service %s%s; log: %s"
                      state pid-text log-path))))
+
+(defn- semantic-service-warning [context]
+  (try
+    (let [response (service-client/request
+                    context {:op :semantic-status}
+                    {:request-timeout 1000})
+          runtime (get-in response [:value :runtime])]
+      (cond
+        (:runtime-diagnostic runtime)
+        (let [{:keys [detail action]} (:runtime-diagnostic runtime)]
+          (str "Warning: semantic inference is degraded: " detail
+               " Action: " action
+               ". Run 'llm-context doctor' for details."))
+
+        (= :failed (:status runtime))
+        (str "Warning: semantic inference failed to start: "
+             (or (:detail runtime) "unknown runtime error")
+             ". Run 'llm-context doctor' for details.")))
+    (catch Throwable _ nil)))
 
 (defmethod execute "analyze" [context _ args]
   (when-let [unknown (first (remove #{"--full" "--check" "--no-service"} args))]
@@ -365,8 +421,13 @@
             (get-in result [:semantic :deferred] 0))))
         (doseq [diagnostic (:diagnostics result)]
           (println "  " (diagnostic-message diagnostic)))
+        (when-not check?
+          (when-let [warning (semantic-acceleration-warning context settings)]
+            (println warning)))
         (when-let [started (:result service-start)]
-          (print-semantic-service-start! started)))
+          (print-semantic-service-start! started)
+          (when-let [warning (semantic-service-warning context)]
+            (println warning))))
       (if-let [error (:error service-start)]
         (do
           (binding [*out* *err*]
@@ -570,6 +631,22 @@
   ([status previous-status elapsed-ms]
    (println (semantic-status-summary status previous-status elapsed-ms))
    (println (aggregate-analysis-summary status))
+   (when-let [diagnostic (get-in status [:runtime :runtime-diagnostic])]
+     (when (not= diagnostic
+                 (get-in previous-status [:runtime :runtime-diagnostic]))
+       (println
+        (str "Warning: semantic inference is degraded: "
+             (:detail diagnostic) " Action: " (:action diagnostic)
+             ". Run 'llm-context doctor' for details."))))
+   (when-let [inference (get-in status [:runtime :inference])]
+     (when (and (seq (:fallback-reasons inference))
+                (not= (:fallback-reasons inference)
+                      (get-in previous-status [:runtime :inference
+                                               :fallback-reasons])))
+       (println
+        (str "Warning: semantic inference is using "
+             (accelerator/describe inference)
+             ". Run 'llm-context doctor' for details."))))
    (flush)))
 
 (defmethod execute "semantic" [context _ args]

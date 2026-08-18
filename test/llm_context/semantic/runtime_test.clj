@@ -57,3 +57,33 @@
     (is (not (Files/exists
               (:state-dir project)
               (make-array LinkOption 0))))))
+
+(deftest startup-diagnostic-extracts-provider-failure
+  (let [log-path (Files/createTempFile
+                  "llm-context-next-plaid-startup-" ".log"
+                  (make-array java.nio.file.attribute.FileAttribute 0))]
+    (Files/writeString
+     log-path
+     "INFO starting\nERROR next_plaid_api: CUDA support not compiled. Enable the 'cuda' feature.\n"
+     (make-array java.nio.file.OpenOption 0))
+    (is (= "ERROR next_plaid_api: CUDA support not compiled. Enable the 'cuda' feature."
+           ((deref (get (ns-interns 'llm-context.semantic.runtime)
+                        'startup-diagnostic))
+            {:log-path log-path})))
+    (Files/deleteIfExists log-path)))
+
+(deftest runtime-diagnostic-explains-a-cuda-device-fallback
+  (let [log-path (Files/createTempFile
+                  "llm-context-next-plaid-runtime-" ".log"
+                  (make-array java.nio.file.attribute.FileAttribute 0))]
+    (Files/writeString
+     log-path
+     "ERROR ort::logging: CUDA failure 100: no CUDA-capable device is detected\n"
+     (make-array java.nio.file.OpenOption 0))
+    (let [diagnostic (runtime/runtime-diagnostic {:log-path log-path})]
+      (is (= :cuda-device-unavailable (:kind diagnostic)))
+      (is (= "CUDA was selected, but the runtime could not detect a CUDA-capable device."
+             (:detail diagnostic)))
+      (is (re-find #"fix NVIDIA/WSL CUDA device visibility"
+                   (:action diagnostic))))
+    (Files/deleteIfExists log-path)))
