@@ -7,6 +7,7 @@
             [llm-context.intent.router :as intent-router]
             [llm-context.query :as query]
             [llm-context.semantic.fake-index :as fake]
+            [llm-context.semantic.index :as semantic-index]
             [llm-context.semantic.worker :as semantic-worker]
             [llm-context.project :as project]
             [llm-context.service.client :as client]
@@ -64,10 +65,14 @@
             :reason :model-missing
             :detail "/missing/model"
             :worker-status :not-running
+            :watcher-status :running
             :query-router-status :disabled
             :candidate-reranker-status :disabled}
-           (get-in (client/request project {:op :semantic-status})
-                   [:value :runtime])))
+           (select-keys
+            (get-in (client/request project {:op :semantic-status})
+                    [:value :runtime])
+            [:status :reason :detail :worker-status :watcher-status
+             :query-router-status :candidate-reranker-status])))
     (is (= 0 (get-in (client/request project
                                      {:op :query :subcommand "stats" :args []})
                      [:value :entities])))
@@ -119,6 +124,50 @@
            (client/request project {:op :stop})))
     (is (not= ::timeout (deref running 5000 ::timeout)))
     (is (:closed? (fake/snapshot semantic-index)))))
+
+(deftest unhealthy-semantic-provider-opens-circuit-and-recovers
+  (let [root (Files/createTempDirectory
+              "llm-context-provider-recovery-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        project (project/context (str root))
+        calls (atom 0)
+        unhealthy
+        (reify semantic-index/SemanticIndex
+          (index-health [_] {:ready? false})
+          (ensure-index! [_] nil)
+          (add-documents! [_ _] nil)
+          (delete-symbols! [_ _] nil)
+          (indexed-documents [_ _] [])
+          (indexed-chunk-count [_ _ _] 0)
+          (search-text [_ _ _] [])
+          (close-index! [_] nil))
+        recovered (fake/create)
+        runtime-factory
+        (fn [_ _]
+          {:status :ready
+           :endpoint "http://127.0.0.1:12345"
+           :client (if (= 1 (swap! calls inc)) unhealthy recovered)})
+        running
+        (future
+          (with-out-str
+            (server/start! project {:runtime-factory runtime-factory
+                                    :router-factory router-factory})))]
+    (try
+      (is (await-service project))
+      (loop [remaining 300]
+        (when (and (< @calls 2) (pos? remaining))
+          (Thread/sleep 20)
+          (recur (dec remaining))))
+      (is (= 2 @calls))
+      (is (= :ready
+             (get-in (client/request project {:op :semantic-status})
+                     [:value :runtime :status])))
+      (is (= :running
+             (get-in (client/request project {:op :semantic-status})
+                     [:value :runtime :worker-status])))
+      (finally
+        (client/request project {:op :stop})
+        (is (not= ::timeout (deref running 5000 ::timeout)))))))
 
 (deftest semantic-status-remains-readable-while-worker-processes-a-batch
   (let [root (Files/createTempDirectory
@@ -232,7 +281,7 @@
             (if (or (= :failed (:worker-status runtime))
                     (>= attempt 100))
               (do
-                (is (= :ready (:status runtime)))
+                (is (= :failed (:status runtime)))
                 (is (= :failed (:worker-status runtime)))
                 (is (= "fixture decoding failed" (:worker-detail runtime))))
               (do (Thread/sleep 20) (recur (inc attempt))))))

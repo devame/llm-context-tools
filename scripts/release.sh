@@ -14,8 +14,15 @@ WAIT_FOR_RELEASE=1
 usage() {
   cat >&2 <<'EOF'
 Usage:
+  scripts/release.sh CURRENT_VERSION [--version-bump minor|major] [--no-wait]
   scripts/release.sh check
   scripts/release.sh publish [--no-wait]
+
+The version form verifies CURRENT_VERSION against the repository, increments
+the patch version by default, writes the current HEAD commit message to a
+temporary notes.md, creates the release version/changelog commit, and then
+publishes it. Use --version-bump minor or --version-bump major for a non-patch
+release.
 
 The publish command reads the version from src/llm_context/version.clj,
 requires a clean main branch, runs scripts/build-release.sh, pushes main,
@@ -24,6 +31,105 @@ workflow unless --no-wait is supplied.
 
 Environment overrides: REPOSITORY, REMOTE, BRANCH.
 EOF
+}
+
+prepare_and_publish() {
+  local base_version=$1
+  shift
+  local bump_kind=patch
+  local wait_args=()
+  local current_version
+  local new_version
+  local major
+  local minor
+  local patch
+  local notes_directory
+  local notes_file
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --version-bump)
+        [[ $# -ge 2 ]] || { usage; exit 2; }
+        bump_kind=$2
+        shift 2
+        ;;
+      --no-wait)
+        wait_args+=(--no-wait)
+        shift
+        ;;
+      *)
+        usage
+        exit 2
+        ;;
+    esac
+  done
+
+  [[ "$base_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+    echo "invalid current version: $base_version" >&2
+    exit 2
+  }
+  [[ "$bump_kind" == minor || "$bump_kind" == major || "$bump_kind" == patch ]] || {
+    echo "--version-bump must be minor or major" >&2
+    exit 2
+  }
+
+  cd "$ROOT_DIR"
+  current_version=$(version)
+  [[ "$current_version" == "$base_version" ]] || {
+    echo "requested current version $base_version does not match repository version $current_version" >&2
+    exit 1
+  }
+  [[ "$(git branch --show-current)" == "$BRANCH" ]] || {
+    echo "release must run from $BRANCH" >&2
+    exit 1
+  }
+  [[ -z "$(git status --porcelain)" ]] || {
+    echo "working tree must be clean before preparing a release" >&2
+    exit 1
+  }
+
+  IFS=. read -r major minor patch <<<"$base_version"
+  major=$((10#$major))
+  minor=$((10#$minor))
+  patch=$((10#$patch))
+  case "$bump_kind" in
+    patch) patch=$((patch + 1)) ;;
+    minor) minor=$((minor + 1)); patch=0 ;;
+    major) major=$((major + 1)); minor=0; patch=0 ;;
+  esac
+  new_version="$major.$minor.$patch"
+
+  echo "==> Checking remote branch state"
+  git fetch --quiet "$REMOTE" "$BRANCH"
+  local remote_head
+  remote_head=$(git rev-parse "$REMOTE/$BRANCH")
+  git merge-base --is-ancestor "$remote_head" HEAD || {
+    echo "$REMOTE/$BRANCH contains commits not present locally; refusing to prepare a release" >&2
+    exit 1
+  }
+  if git rev-parse "v$new_version^{commit}" >/dev/null 2>&1 || \
+    git ls-remote --exit-code --tags "$REMOTE" "refs/tags/v$new_version" >/dev/null 2>&1; then
+    echo "tag already exists: v$new_version" >&2
+    exit 1
+  fi
+
+  notes_directory=$(mktemp -d)
+  notes_file="$notes_directory/notes.md"
+  trap 'rm -rf "$notes_directory"' EXIT
+  git log -1 --pretty=format:'- %s%n%n%b%n' >"$notes_file"
+  [[ -s "$notes_file" ]] || {
+    echo "could not create release notes from the current commit" >&2
+    exit 1
+  }
+
+  echo "==> Preparing release $new_version from $base_version"
+  "$ROOT_DIR/scripts/bump-version.sh" "$new_version" "$notes_file"
+  git add CHANGELOG.md README.md build.clj package.json package-lock.json \
+    src/llm_context/version.clj
+  git commit -m "chore: prepare release $new_version"
+  trap - EXIT
+  rm -rf "$notes_directory"
+  exec "$0" publish "${wait_args[@]}"
 }
 
 require_command() {
@@ -75,6 +181,9 @@ COMMAND=$1
 shift
 
 case "$COMMAND" in
+  [0-9]*.[0-9]*.[0-9]*)
+    prepare_and_publish "$COMMAND" "$@"
+    ;;
   check)
     [[ $# -eq 0 ]] || { usage; exit 2; }
     exec "$ROOT_DIR/scripts/build-release.sh"

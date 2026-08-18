@@ -197,6 +197,14 @@ Runtime and indexing logs are under `.llm-context/logs/`. Storage inspection
 and cleanup commands are documented in
 [Semantic indexing](docs/user-guide.md#semantic-indexing).
 
+## Troubleshooting
+
+If status appears contradictory, indexing stops progressing, acceleration falls
+back unexpectedly, or a service survives an upgrade, start with the
+[troubleshooting FAQ](docs/troubleshooting-faq.md). It covers analysis,
+services, semantic indexing, CPU/CUDA, search fallback, storage, upgrades, and
+the boundary between automatic and operator-required recovery.
+
 ## Configuration
 
 `llm-context.edn` is the project configuration file. The defaults scan the
@@ -264,23 +272,27 @@ scripts/verify-release-quality.sh dist/llm-context.jar
 npm pack --dry-run
 ```
 
-Maintainers can use the release scripts to keep version metadata, local gates,
-and the tag-triggered GitHub release workflow in sync:
+Maintainers can publish the next patch release with one command. The command
+checks the current version, derives release notes from the latest commit,
+creates the version/changelog commit, runs the release gates, pushes `main`,
+creates the annotated tag, and waits for GitHub to publish the assets:
 
 ```bash
-scripts/bump-version.sh 0.12.3 /path/to/release-notes.md
-# Optional preflight; publish repeats the gates before pushing.
-scripts/release.sh check
-git add CHANGELOG.md README.md build.clj package.json package-lock.json \
-  src/llm_context/version.clj
-git commit -m "release: prepare v0.12.3"
-scripts/release.sh publish
+scripts/release.sh 0.12.4
 ```
 
-`release.sh publish` requires a clean `main` branch, pushes the commit, creates
-the matching annotated `v<version>` tag, and waits for GitHub to publish the
-platform runtime assets. Use `--no-wait` when CI completion will be monitored
-separately.
+The argument is the current repository version; the default result is the next
+patch version (`0.12.4` becomes `0.12.5`). For a minor or major release, use
+`--version-bump`:
+
+```bash
+scripts/release.sh 0.12.4 --version-bump minor
+scripts/release.sh 0.12.4 --version-bump major
+```
+
+Use `--no-wait` when CI completion will be monitored separately. The existing
+`scripts/release.sh check` and `scripts/release.sh publish` subcommands remain
+available for explicit, already-prepared releases.
 
 Additional benchmark and release workflows are in
 [Performance benchmarks](docs/benchmarks.md).

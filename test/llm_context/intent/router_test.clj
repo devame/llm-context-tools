@@ -28,3 +28,29 @@
     (is (= {:flow 8.4 :set 8.1 :lookup 7.9} (:scores result)))
     (is (< 0.29 (:margin result) 0.31))
     (is (= :available (:status result)))))
+
+(deftest auto-selected-cuda-failure-restarts-advisory-runtime-on-cpu
+  (let [calls (atom [])
+        config {:context {:query-router {:accelerator :auto
+                                         :quantization :auto}}}]
+    (with-redefs-fn
+      {(get (ns-interns 'llm-context.intent.router) 'start-once!)
+       (fn [_ settings]
+         (let [accelerator (get-in settings [:context :query-router
+                                             :accelerator])]
+           (swap! calls conj accelerator)
+           (if (= :cpu accelerator)
+             {:status :ready :inference {:accelerator :cpu
+                                         :quantization :int8}}
+             (throw
+              (ex-info "CUDA unavailable"
+                       {:type :query-router/accelerator-runtime-unavailable
+                        :requested-accelerator :auto
+                        :diagnostic {:detail "no CUDA device"
+                                     :action "repair CUDA"}}))))) }
+      (fn []
+        (let [result (router/start! :project config)]
+          (is (= [:auto :cpu] @calls))
+          (is (= :cpu (get-in result [:inference :accelerator])))
+          (is (= :cuda-runtime-initialization-failed
+                 (get-in result [:recovery :kind]))))))))

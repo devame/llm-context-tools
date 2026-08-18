@@ -31,9 +31,7 @@
                                         (make-array java.nio.file.attribute.FileAttribute 0))
         checks (doctor/check (project/context (str root)) (config/defaults))]
     (is (:ok? (first (filter #(= :datalevin (:check %)) checks))))
-    (is (= #{:next-plaid-api :onnx-runtime :lateon-model :semantic-accelerator
-             :cuda-host
-             :query-router-model :project-service}
+    (is (= #{:cuda-host :project-service}
            (->> checks
                 (remove :required?)
                 (map :check)
@@ -59,9 +57,8 @@
             (first (filter #(= :project-service (:check %))
                            (doctor/check project (config/defaults))))]
         (is (false? (:ok? service-check)))
-        (is (= (str "running; LateOn ready; worker failed: "
-                    "fixture decoding failed")
-               (:detail service-check)))))))
+        (is (re-find #"runtime ready; worker failed: fixture decoding failed"
+                     (:detail service-check)))))))
 
 (deftest failed-semantic-runtime-includes-provider-diagnostic
   (let [root (Files/createTempDirectory

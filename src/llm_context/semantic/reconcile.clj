@@ -285,23 +285,46 @@
         :graph-revision graph-revision
         :diagnostics (vec (mapcat :diagnostics results))}))))
 
+(defn- retry-failures!
+  [graph project config now failures]
+  (let [db (store/database graph)
+        hashes (graph-read/file-hashes db)
+         eligible (filter #(contains? hashes (:file-id %)) failures)
+         stale (remove #(contains? hashes (:file-id %)) failures)]
+    (doseq [{:keys [symbol-id file-id]} eligible]
+      (state/cancel-job! graph provider symbol-id)
+      (state/mark-dirty!
+       graph (dirty-marker file-id (get hashes file-id) :upsert now)))
+    (doseq [{:keys [symbol-id]} stale]
+      (state/cancel-job! graph provider symbol-id))
+    (assoc (reconcile! graph project config now)
+           :retried (count eligible)
+           :discarded-stale (count stale))))
+
 (defn retry-failed!
   "Cancel terminal jobs only when their source file still exists, mark those
   files dirty, and reconcile fresh desired documents."
   ([graph project config]
    (retry-failed! graph project config (System/currentTimeMillis)))
   ([graph project config now]
-   (let [db (store/database graph)
-         hashes (graph-read/file-hashes db)
-         failures (state/failure-records graph provider)
-         eligible (filter #(contains? hashes (:file-id %)) failures)
-         stale (remove #(contains? hashes (:file-id %)) failures)]
-     (doseq [{:keys [symbol-id file-id]} eligible]
-       (state/cancel-job! graph provider symbol-id)
-       (state/mark-dirty!
-        graph (dirty-marker file-id (get hashes file-id) :upsert now)))
-     (doseq [{:keys [symbol-id]} stale]
-       (state/cancel-job! graph provider symbol-id))
-     (assoc (reconcile! graph project config now)
-            :retried (count eligible)
-            :discarded-stale (count stale)))))
+   (retry-failures! graph project config now
+                    (state/failure-records graph provider))))
+
+(def ^:private recoverable-infrastructure-error
+  #"(?i)(NextPlaid request timed out|NextPlaid service is unavailable|provider became unavailable|CUDA_ERROR_NO_DEVICE|CUDA initialization error|connection refused)")
+
+(defn retry-recoverable-failed!
+  "Retry only legacy terminal jobs whose bounded error text identifies a known
+  provider-wide infrastructure failure. Deterministic and unknown failures stay
+  terminal for operator inspection."
+  ([graph project config]
+   (retry-recoverable-failed! graph project config (System/currentTimeMillis)))
+  ([graph project config now]
+   (let [failures (filter #(re-find recoverable-infrastructure-error
+                                    (or (:last-error %) ""))
+                          (state/failure-records graph provider))]
+     (if (seq failures)
+       (assoc (retry-failures! graph project config now failures)
+              :automatic? true)
+       {:enabled? (enabled? config) :retried 0 :discarded-stale 0
+        :automatic? true}))))

@@ -146,6 +146,22 @@
                       (bit-shift-left 1 shift))]
     (min (:retry-max-ms settings) calculated)))
 
+(defn provider-failure?
+  "True when an error describes provider/runtime availability rather than one
+  poison document. These failures open the supervisor circuit and must not
+  exhaust per-document retry budgets."
+  [error]
+  (let [{:keys [type status]} (ex-data error)]
+    (or (contains? #{:next-plaid/transport-error
+                     :semantic/not-ready
+                     :semantic/visibility-timeout
+                     :semantic/runtime-exited
+                     :semantic/runtime-timeout
+                     :accelerator/runtime-unavailable}
+                   type)
+        (and (= :next-plaid/api-error type)
+             (or (= 429 status) (<= 500 (long (or status 0)) 599))))))
+
 (defn- renew-leases! [worker jobs]
   (let [settings (:settings worker)
         time (now worker)
@@ -284,7 +300,11 @@
         attempts (:semantic.job/attempts job)
         failed-at (now worker)
         retriable? (not= false (:retriable? (ex-data error)))
-        max-attempts (if retriable? (:max-attempts settings) 1)
+        provider-failure? (provider-failure? error)
+        max-attempts (cond
+                       provider-failure? Long/MAX_VALUE
+                       retriable? (:max-attempts settings)
+                       :else 1)
         available-at (+ failed-at (retry-delay settings attempts))
         result
         (with-graph-lock
@@ -309,6 +329,7 @@
            :error (.getMessage ^Throwable error)}))))
     {:status (or (:status result) :superseded)
      :operation (:semantic.job/operation job)
+     :provider-failure? provider-failure?
      :error error}))
 
 (defn- safely [worker job f]
@@ -585,6 +606,14 @@
                                        :operation
                                        (:semantic.job/operation job)})))
                           invalid)))
+              provider-failure (some #(when (:provider-failure? %) (:error %))
+                                     results)
+              _ (when provider-failure
+                  (throw
+                   (ex-info "Semantic provider became unavailable; jobs were returned to pending"
+                            {:type :semantic/provider-unavailable
+                             :retriable? true}
+                            provider-failure)))
               frequencies (frequencies (map :status results))
               summary (merge
                        {:leased (count jobs)
@@ -636,7 +665,8 @@
                        (update :upload-batches + (:upload-batches result 0))
                        (update :delete-ms + (:delete-ms result 0))
                        (update :upload-ms + (:upload-ms result 0))
-                       (update :visibility-ms + (:visibility-ms result 0)))))
+                       (update :visibility-ms + (:visibility-ms result 0))
+                       (assoc :last-progress-at (now worker)))))
           elapsed-ms (max 1 (- (now worker) (:started-at snapshot)))
           event (cond->
                  (assoc snapshot
@@ -648,11 +678,26 @@
       (when-let [progress-fn (:progress-fn worker)]
         (progress-fn event)))))
 
+(defn- assert-provider-health! [worker]
+  (let [time (now worker)
+        interval (max 1000 (long (or (get-in worker [:settings :health-timeout-ms])
+                                     2000)))]
+    (when (>= (- time @(:last-health-at worker)) interval)
+      (let [health (index/index-health (:client worker))]
+        (reset! (:last-health-at worker) time)
+        (when-not (:ready? health)
+          (throw
+           (ex-info "NextPlaid became unhealthy"
+                    {:type :semantic/provider-unavailable
+                     :retriable? true
+                     :health (dissoc health :raw)})))))))
+
 (defn run!
   "Prepare and consume jobs until stop! is requested."
   [worker]
   (prepare! worker)
   (while (not @(:stop? worker))
+    (assert-provider-health! worker)
     (let [result (process-once! worker)]
       (report-progress! worker result)
       (when (zero? (:leased result))
@@ -678,11 +723,13 @@
     :now-fn now-fn
     :sleep-fn (or sleep-fn #(Thread/sleep %))
     :progress-fn progress-fn
+    :last-health-at (atom 0)
     :storage-guard
     (when (and project config)
       (storage/operation-guard project config :semantic-indexing
                                #{:semantic-index}))
     :progress (atom {:started-at (now-fn)
+                     :last-progress-at (now-fn)
                      :leased 0 :completed 0 :retried 0 :failed 0
                      :submitted-documents 0 :accepted-documents 0
                      :reused-documents 0

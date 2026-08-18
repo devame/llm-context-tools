@@ -196,6 +196,8 @@
     "install cuDNN 9 and expose libcudnn.so.9"
     :fp32-model-missing
     "install the FP32 model.onnx artifact"
+    :cuda-runtime-initialization-failed
+    "inspect the CUDA provider diagnostic; auto mode restarted with CPU/INT8"
     (str "resolve " (name reason))))
 
 (defn fallback-actions [reasons]

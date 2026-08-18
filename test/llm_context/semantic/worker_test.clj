@@ -296,8 +296,11 @@
              {:owner "timeout-worker"
               :now-fn #(swap! clock + 10)
               :sleep-fn (fn [_])})
-            result (worker/process-once! worker)]
-        (is (= 2 (:retried result)))
+            error (try
+                    (worker/process-once! worker)
+                    nil
+                    (catch clojure.lang.ExceptionInfo error error))]
+        (is (= :semantic/provider-unavailable (:type (ex-data error))))
         (is (= :pending
                (:semantic.job/status
                 (first (state/job-records graph reconcile/provider)))))))))

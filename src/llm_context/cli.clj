@@ -3,6 +3,7 @@
             [clojure.string :as str]
             [llm-context.accelerator :as accelerator]
             [llm-context.config :as config]
+            [llm-context.health :as health]
             [llm-context.model-packages :as model-packages]
             [llm-context.project :as project]
             [llm-context.runtime.setup :as runtime-setup]
@@ -33,7 +34,8 @@
   (if response
     (if (:ok response)
       (:value response)
-      (throw (ex-info (:error response) {:exit-code (:exit-code response)})))
+      (throw (ex-info (:error response) {:exit-code (:exit-code response)
+                                         :type (:type response)})))
     unavailable))
 
 (defn- remote-value
@@ -337,8 +339,18 @@
     (let [response (service-client/request
                     context {:op :semantic-status}
                     {:request-timeout 1000})
-          runtime (get-in response [:value :runtime])]
+          runtime (get-in response [:value :runtime])
+          first-alert (first (get-in response [:value :health :alerts]))]
       (cond
+        (and response (not (:ok response)))
+        (str "Warning: project service health is unavailable: "
+             (:error response) ". Run 'llm-context doctor' for details.")
+
+        first-alert
+        (str "Warning: " (:detail first-alert)
+             (when-let [action (:action first-alert)]
+               (str " Action: " action ".")))
+
         (:runtime-diagnostic runtime)
         (let [{:keys [detail action]} (:runtime-diagnostic runtime)]
           (str "Warning: semantic inference is degraded: " detail
@@ -349,7 +361,9 @@
         (str "Warning: semantic inference failed to start: "
              (or (:detail runtime) "unknown runtime error")
              ". Run 'llm-context doctor' for details.")))
-    (catch Throwable _ nil)))
+    (catch Throwable error
+      (str "Warning: unable to read project service health: "
+           (.getMessage error) ". Run 'llm-context doctor' for details."))))
 
 (defmethod execute "analyze" [context _ args]
   (when-let [unknown (first (remove #{"--full" "--check" "--no-service"} args))]
@@ -360,6 +374,9 @@
   (let [settings (config/load-config context)
         check? (boolean (some #{"--check"} args))
         no-service? (boolean (some #{"--no-service"} args))
+        _ (when (and (not check?) (not no-service?))
+            ((resolve-fn 'llm-context.service.daemon/ensure-compatible!)
+             context))
         force-full? (boolean (some #{"--full"} args))
         graph-state (when-not check?
                       (with-graph
@@ -425,7 +442,8 @@
           (when-let [warning (semantic-acceleration-warning context settings)]
             (println warning)))
         (when-let [started (:result service-start)]
-          (print-semantic-service-start! started)
+          (print-semantic-service-start! started))
+        (when (and (not check?) (not no-service?))
           (when-let [warning (semantic-service-warning context)]
             (println warning))))
       (if-let [error (:error service-start)]
@@ -518,8 +536,33 @@
     (let [status
           (if (= unavailable remote)
             (assoc (local-semantic-status context settings)
-                   :runtime {:status :not-running})
+                   :service-state :not-running
+                   :runtime {:status (if (get-in settings
+                                                 [:semantic :lateon-code
+                                                  :enabled])
+                                       :not-running :disabled)
+                             :worker-status
+                             (if (get-in settings
+                                         [:semantic :lateon-code :enabled])
+                               :not-running :disabled)
+                             :watcher-status
+                             (if (get-in settings [:service :watch])
+                               :not-running :disabled)
+                             :query-router-status
+                             (if (get-in settings [:context :query-router
+                                                   :enabled])
+                               :not-running :disabled)
+                             :candidate-reranker-status
+                             (if (get-in settings
+                                         [:context :candidate-reranker
+                                          :enabled])
+                               :not-running :disabled)})
             remote)
+          status (if (:health status)
+                   status
+                   (assoc status :health
+                          (health/semantic-health
+                           status (System/currentTimeMillis))))
           diagnostics (get-in status [:analysis-progress :result :diagnostics])
           skipped-diagnostics
           (filter #(= :aggregate-analysis-skipped (:kind %)) diagnostics)
@@ -580,8 +623,11 @@
   (flush))
 
 (defn- pending-document-count [status]
-  (when (and (number? (:desired status)) (number? (:indexed status)))
-    (max 0 (- (long (:desired status)) (long (:indexed status))))))
+  (cond
+    (number? (:pending status)) (long (:pending status))
+    (and (number? (:desired status)) (number? (:indexed status)))
+    (max 0 (- (long (:desired status)) (long (:indexed status))))
+    :else nil))
 
 (defn- semantic-processing-speed
   "Return documents per second. Prefer the worker's cumulative measured rate,
@@ -589,10 +635,12 @@
   between CLI polling samples when worker telemetry is unavailable."
   [status previous-status elapsed-ms]
   (let [pending (pending-document-count status)
+        health-state (get-in status [:health :state])
         documents-per-minute
         (get-in status [:runtime :worker-progress :documents-per-minute])]
     (cond
       (zero? (or pending 0)) 0.0
+      (contains? #{:stalled :failed :recovering} health-state) 0.0
       (number? documents-per-minute)
       (/ (double documents-per-minute) 60.0)
       (and previous-status (pos? (long (or elapsed-ms 0)))
@@ -608,8 +656,11 @@
   ([status] (semantic-status-summary status nil nil))
   ([status previous-status elapsed-ms]
    (if-let [pending (pending-document-count status)]
-     (format "%d of %d documents pending, processing speed: %.2f docs/s"
-             pending (long (:desired status))
+     (format (str "%d/%d documents indexed; %d pending, %d leased, "
+                  "%d failed, %d dirty; processing speed: %.2f docs/s")
+             (long (or (:indexed status) 0)) (long (or (:desired status) 0))
+             pending (long (or (:leased status) 0))
+             (long (or (:failed status) 0)) (long (or (:dirty status) 0))
              (semantic-processing-speed status previous-status elapsed-ms))
      (str "semantic status unavailable"
           (when-let [error (:error status)] (str ": " error))))))
@@ -631,6 +682,12 @@
   ([status previous-status elapsed-ms]
    (println (semantic-status-summary status previous-status elapsed-ms))
    (println (aggregate-analysis-summary status))
+   (doseq [{:keys [id severity detail action] :as alert}
+           (get-in status [:health :alerts])
+           :when (not (some #(= id (:id %))
+                            (get-in previous-status [:health :alerts])))]
+     (println (str (str/capitalize (name severity)) ": " detail
+                   (when (seq action) (str " Action: " action ".")))))
    (when-let [diagnostic (get-in status [:runtime :runtime-diagnostic])]
      (when (not= diagnostic
                  (get-in previous-status [:runtime :runtime-diagnostic]))
@@ -1119,12 +1176,16 @@
     "foreground"
     ((resolve-fn 'llm-context.service.server/start!) cli-context)
     "status"
-    (do
-      (if (service-client/available? cli-context)
-        (pprint/pprint
-         (remote-value cli-context {:op :semantic-status}))
-        (println "not running"))
-      0)
+    (let [response (service-client/request cli-context
+                                           {:op :semantic-status})]
+      (cond
+        (nil? response) (do (println "not running") 0)
+        (:ok response) (do (pprint/pprint (:value response)) 0)
+        :else (do
+                (binding [*out* *err*]
+                  (println (str (name (or (:type response) :service/error))
+                                ": " (:error response))))
+                1)))
     "stop" (let [response ((resolve-fn 'llm-context.service.daemon/stop!)
                             cli-context)]
              (cond
@@ -1154,12 +1215,27 @@
                         :value (:val problem)
                         :predicate (str (:pred problem))})))))
 
+(defn- print-durable-health-banner! [context command]
+  (when (and (:state-dir context)
+             (not (get-in context [:options :quiet?]))
+             (not (contains? #{"analyze" "doctor" "semantic" "service"}
+                             command)))
+    (when-let [snapshot (health/read-snapshot context)]
+      (when-let [alerts (seq (:alerts snapshot))]
+        (let [{:keys [detail action]} (first alerts)]
+          (binding [*out* *err*]
+            (println
+             (str "warning: unresolved project health: " detail
+                  (when (seq action) (str "; " action))))))))))
+
 (defn run [args]
   (try
     (let [{:keys [project command args] :as options} (parse-args args)
           needs-project? (not (#{"help" "version" "models"} command))
-          context (when needs-project? (project/context project))]
-      (execute (assoc context :options options) command args))
+          context (when needs-project? (project/context project))
+          context (assoc context :options options)]
+      (print-durable-health-banner! context command)
+      (execute context command args))
     (catch clojure.lang.ExceptionInfo error
       (binding [*out* *err*]
         (print-error! error))

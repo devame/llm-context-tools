@@ -536,7 +536,9 @@
                    :source/start-line 1 :source/start-column 1
                    :source/end-line 1 :source/end-column 36}
         facts (clojure-topics/extract file [owner] [reference])]
-    (is (empty? (:calls (#'clojure-topics/form-index unsafe))))
+    (let [indexed (#'clojure-topics/form-index unsafe)]
+      (is (empty? (:calls indexed)))
+      (is (string? (:diagnostic indexed))))
     (is (false? @executed?))
     (is (empty? (filter #(= :entity.type/topic (:entity/type %)) facts)))
     (is (= :dynamic (:reference/classification (first facts))))))
