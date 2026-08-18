@@ -1,3 +1,14 @@
+## 0.12.4
+
+- Add GPU and CUDA host preflight reporting for the CLI, installer, and
+  runtime doctor, including NVIDIA driver, device, CUDA, and cuDNN checks.
+- Add interactive `llm-context setup` guidance with an explicitly confirmed
+  Debian/Ubuntu cuDNN installation path and WSL-specific driver instructions.
+- Make the Linux installer select the CUDA or CPU semantic runtime in `auto`
+  mode, fail early for incomplete explicit CUDA requests, and surface runtime
+  provider failures instead of hiding them behind CPU fallback.
+
+
 # Changelog
 
 ## 0.12.3
