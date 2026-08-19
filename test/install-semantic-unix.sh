@@ -70,4 +70,7 @@ if [ "$DOCTOR_STATUS" -ne 0 ]; then
   printf '%s\n' "$DOCTOR_OUTPUT" |
     grep -E '^ok +semantic-queue +2 indexed, 0 pending, 0 leased, 0 failed, 0 dirty' \
       >/dev/null
+  printf '%s\n' "$DOCTOR_OUTPUT" |
+    grep -E '^fail +runtime-health +degraded: project is usable with reduced capability' \
+      >/dev/null
 fi
