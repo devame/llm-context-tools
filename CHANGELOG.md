@@ -1,3 +1,10 @@
+## 0.12.12
+
+- fix: bound semantic provider waves to avoid CUDA OOM
+
+
+
+
 ## 0.12.11
 
 - fix: wait through semantic runtime recovery
