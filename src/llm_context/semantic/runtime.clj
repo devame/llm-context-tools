@@ -113,9 +113,11 @@
     (try
       (with-open [file (java.io.RandomAccessFile. (str log-path) "r")]
         (let [size (.length file)
-              byte-count (int (min diagnostic-tail-bytes size))]
+              start (min size (long (or (:log-offset runtime) 0)))
+              read-start (max start (- size diagnostic-tail-bytes))
+              byte-count (int (- size read-start))]
           (when (pos? byte-count)
-            (.seek file (- size byte-count))
+            (.seek file read-start)
             (let [bytes (byte-array byte-count)]
               (.readFully file bytes)
               (str/split-lines
@@ -243,6 +245,10 @@
         _ (Files/createDirectories
            log-directory (make-array java.nio.file.attribute.FileAttribute 0))
         _ (logs/rotate-before-start! log-path (:service config))
+        log-offset (if (Files/isRegularFile log-path
+                                            (make-array LinkOption 0))
+                     (Files/size log-path)
+                     0)
         process-settings (effective-process-settings settings selection)
         full-command (concat (process-command executable port index-path model
                                                 settings selection)
@@ -260,6 +266,7 @@
         client (next-plaid/create endpoint settings)
         runtime {:status :starting :process process :client client
                  :endpoint endpoint :log-path log-path
+                 :log-offset log-offset
                  :inference selection}]
     (try
       (let [health (await-ready! runtime settings)

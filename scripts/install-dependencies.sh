@@ -671,6 +671,9 @@ cuda_library_present() {
   for candidate in \
     "/usr/lib/wsl/lib/$library" \
     "/usr/local/cuda/lib64/$library" \
+    "/usr/local/cuda/targets/x86_64-linux/lib/$library" \
+    "/usr/local/cuda-12.9/lib64/$library" \
+    "/usr/local/cuda-12.9/targets/x86_64-linux/lib/$library" \
     "/usr/lib/x86_64-linux-gnu/$library" \
     "/usr/lib64/$library"; do
     [[ -f "$candidate" ]] && return 0
@@ -688,9 +691,11 @@ cuda_host_preflight() {
   CUDA_DRIVER_PRESENT=0
   CUDA_DRIVER_COMPATIBLE=0
   CUDA_RUNTIME_PRESENT=0
+  CUDA_LIBRARIES_PRESENT=0
   CUDA_CUDNN_PRESENT=0
   CUDA_MINIMUM_DRIVER=$(cuda_manifest_value ':minimum-driver')
   CUDA_RUNTIME_PACKAGE=$(cuda_manifest_value ':runtime-debian-package')
+  CUDA_LIBRARIES_PACKAGE=$(cuda_manifest_value ':libraries-debian-package')
   CUDA_CUDNN_PACKAGE=$(cuda_manifest_value ':debian-package')
 
   if [[ -n "$CUDA_NVIDIA_SMI" ]]; then
@@ -711,11 +716,15 @@ cuda_host_preflight() {
     CUDA_DEVICE_VISIBLE=1
   fi
   cuda_library_present libcudart.so.12 && CUDA_RUNTIME_PRESENT=1 || true
+  if cuda_library_present libcublasLt.so.12 &&
+     cuda_library_present libcurand.so.10; then
+    CUDA_LIBRARIES_PRESENT=1
+  fi
   cuda_library_present libcudnn.so.9 && CUDA_CUDNN_PRESENT=1 || true
 }
 
 cuda_host_report() {
-  printf 'GPU: %s; device: %s; NVIDIA driver: %s (%s, minimum %s); CUDA 12 runtime: %s; cuDNN 9: %s\n' \
+  printf 'GPU: %s; device: %s; NVIDIA driver: %s (%s, minimum %s); CUDA 12 runtime: %s; CUDA libraries: %s; cuDNN 9: %s\n' \
     "${CUDA_GPU_NAME:-not detected}" \
     "$([[ "$CUDA_DEVICE_VISIBLE" -eq 1 ]] && printf visible || printf missing)" \
     "${CUDA_DRIVER_VERSION:-not detected}" \
@@ -723,6 +732,7 @@ cuda_host_report() {
        ([[ "$CUDA_DRIVER_COMPATIBLE" -eq 1 ]] && printf compatible || printf too-old))" \
     "$CUDA_MINIMUM_DRIVER" \
     "$([[ "$CUDA_RUNTIME_PRESENT" -eq 1 ]] && printf present || printf missing)" \
+    "$([[ "$CUDA_LIBRARIES_PRESENT" -eq 1 ]] && printf present || printf missing)" \
     "$([[ "$CUDA_CUDNN_PRESENT" -eq 1 ]] && printf present || printf missing)"
 }
 
@@ -906,12 +916,17 @@ cuda_configure_apt_repositories() {
       "$CUDA_RUNTIME_PACKAGE" >&2
     return 1
   }
+  cuda_apt_package_available "$CUDA_LIBRARIES_PACKAGE" || {
+    printf 'ERROR: NVIDIA CUDA repository still has no candidate for %s.\n' \
+      "$CUDA_LIBRARIES_PACKAGE" >&2
+    return 1
+  }
   cuda_apt_package_available "$CUDA_CUDNN_PACKAGE" || {
     printf 'ERROR: NVIDIA CUDA repository still has no candidate for %s.\n' \
       "$CUDA_CUDNN_PACKAGE" >&2
     return 1
   }
-  notify "NVIDIA CUDA repositories configured; both package candidates are available."
+  notify "NVIDIA CUDA repositories configured; all required package candidates are available."
 }
 
 cuda_host_step() {
@@ -928,8 +943,10 @@ cuda_host_step() {
     notify "CUDA host installation not offered: a visible GPU and compatible NVIDIA driver are required."
     return 0
   fi
-  if [[ "$CUDA_RUNTIME_PRESENT" -eq 1 && "$CUDA_CUDNN_PRESENT" -eq 1 ]]; then
-    notify "CUDA 12 runtime and cuDNN 9 host libraries verified."
+  if [[ "$CUDA_RUNTIME_PRESENT" -eq 1 &&
+        "$CUDA_LIBRARIES_PRESENT" -eq 1 &&
+        "$CUDA_CUDNN_PRESENT" -eq 1 ]]; then
+    notify "CUDA 12 runtime, CUDA math libraries, and cuDNN 9 host libraries verified."
     return 0
   fi
   if [[ "$ACTION" != install ]]; then
@@ -939,6 +956,7 @@ cuda_host_step() {
 
   cuda_install_packages=()
   [[ "$CUDA_RUNTIME_PRESENT" -eq 1 ]] || cuda_install_packages+=("$CUDA_RUNTIME_PACKAGE")
+  [[ "$CUDA_LIBRARIES_PRESENT" -eq 1 ]] || cuda_install_packages+=("$CUDA_LIBRARIES_PACKAGE")
   [[ "$CUDA_CUDNN_PRESENT" -eq 1 ]] || cuda_install_packages+=("$CUDA_CUDNN_PACKAGE")
   printf 'CUDA action: install missing host packages: %s\n' \
     "${cuda_install_packages[*]}"
@@ -984,11 +1002,13 @@ cuda_host_step() {
     retry "Install CUDA host packages" 2 5 sudo apt-get -y install "${cuda_install_packages[@]}"
   fi
   cuda_host_preflight
-  [[ "$CUDA_RUNTIME_PRESENT" -eq 1 && "$CUDA_CUDNN_PRESENT" -eq 1 ]] || {
-    printf 'ERROR: CUDA host package command completed but libcudart.so.12/cuDNN 9 verification failed.\n' >&2
+  [[ "$CUDA_RUNTIME_PRESENT" -eq 1 &&
+     "$CUDA_LIBRARIES_PRESENT" -eq 1 &&
+     "$CUDA_CUDNN_PRESENT" -eq 1 ]] || {
+    printf 'ERROR: CUDA host package command completed but libcudart.so.12, CUDA math libraries, or cuDNN 9 verification failed.\n' >&2
     return 1
   }
-  notify "Verified libcudart.so.12 and libcudnn.so.9 after installation."
+  notify "Verified libcudart.so.12, CUDA math libraries, and libcudnn.so.9 after installation."
 }
 
 local_native_platform() {

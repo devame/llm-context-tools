@@ -1,3 +1,21 @@
+## 0.12.9
+
+- Preserve the NextPlaid log offset in resident-service health views so stale
+  CUDA diagnostics cannot trigger CPU fallback after service startup.
+
+## 0.12.8
+
+- Fix CUDA provider diagnostics so stale errors from a previous NextPlaid
+  process cannot force a healthy CUDA runtime onto CPU fallback.
+
+## 0.12.7
+
+- Fix explicit CUDA installer selection and require the CUDA math libraries
+  used by the ONNX Runtime provider.
+- Add version-aware CUDA library path detection and prevent stale provider log
+  diagnostics from forcing a false CPU fallback.
+
+
 ## 0.12.6
 
 - feat: harden dependencies and release workflows

@@ -47,10 +47,11 @@ updates your `PATH`.
 
 On Linux x86-64, the installer performs a GPU/driver/CUDA preflight. When a
 compatible visible NVIDIA GPU is present, it offers to install whichever CUDA
-12 runtime (`cuda-cudart-12-9`) and cuDNN 9 (`cudnn9-cuda-12`) libraries are
-missing; otherwise it installs the CPU package and prints the corrective
-action. Use `LLM_CONTEXT_ACCELERATOR_PACKAGE=auto`, `cpu`, or `cuda` to choose
-explicitly. Inspect or repair the host later with:
+12 runtime (`cuda-cudart-12-9`), CUDA math libraries (`cuda-libraries-12-9`,
+including cuBLAS/cuRAND), and cuDNN 9 (`cudnn9-cuda-12`) libraries are missing;
+otherwise it installs the CPU package and prints the corrective action. Use
+`LLM_CONTEXT_ACCELERATOR_PACKAGE=auto`, `cpu`, or `cuda` to choose explicitly.
+Inspect or repair the host later with:
 
 ```bash
 llm-context setup
@@ -74,7 +75,7 @@ curl -fsSL https://raw.githubusercontent.com/devame/llm-context-tools/main/insta
   | LLM_CONTEXT_SKIP_SEMANTIC=1 sh
 ```
 
-Set `LLM_CONTEXT_VERSION=0.12.6` to pin the current release. See the
+Set `LLM_CONTEXT_VERSION=0.12.9` to pin the current release. See the
 [installation and troubleshooting guide](docs/user-guide.md#installation-and-troubleshooting)
 for custom locations, CUDA, and verified model packages.
 
@@ -261,7 +262,7 @@ around the same JAR:
 
 ```bash
 npm pack
-npm install --global ./llm-context-0.12.6.tgz
+npm install --global ./llm-context-0.12.9.tgz
 llm-context doctor
 ```
 

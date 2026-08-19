@@ -89,6 +89,24 @@
                    (:action diagnostic))))
     (Files/deleteIfExists log-path)))
 
+(deftest runtime-diagnostic-ignores-provider-failures-before-process-start
+  (let [log-path (Files/createTempFile
+                  "llm-context-next-plaid-offset-" ".log"
+                  (make-array java.nio.file.attribute.FileAttribute 0))]
+    (Files/writeString
+     log-path
+     "ERROR ort::ep: No execution providers from session options registered successfully\n"
+     (make-array java.nio.file.OpenOption 0))
+    (let [offset (Files/size log-path)]
+      (Files/writeString
+       log-path
+       "WARN ort::logging: CUDAExecutionProvider initialized\n"
+       (into-array java.nio.file.OpenOption
+                   [java.nio.file.StandardOpenOption/APPEND]))
+      (is (nil? (runtime/runtime-diagnostic
+                 {:log-path log-path :log-offset offset}))))
+    (Files/deleteIfExists log-path)))
+
 (deftest auto-selected-cuda-execution-failure-self-heals-to-cpu
   (let [project (temporary-project)
         model (Files/createTempDirectory

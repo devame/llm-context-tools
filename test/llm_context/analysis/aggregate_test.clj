@@ -81,6 +81,35 @@
     (is (clojure.string/includes? (:aggregate/search-text aggregate) ":rail"))
     (is (clojure.string/includes? (:aggregate/search-text aggregate) ":river"))))
 
+(deftest namespace-alias-keywords-produce-aggregate-facts
+  (let [source (str "(ns neutral.catalog\n"
+                    "  (:require [neutral.email :as email]\n"
+                    "            [neutral.memoize :as-alias memoize]))\n"
+                    "(def transports {::email/error \"failed\"\n"
+                    "                 ::memoize/args-fn \"args\"\n"
+                    "                 ::local \"local\"})\n")
+        output (fixture source "transports")
+        aggregate (some #(when (= :entity.type/aggregate (:entity/type %)) %)
+                        (:entities output))
+        members (filter #(= :entity.type/membership (:entity/type %))
+                        (:entities output))]
+    (is (empty? (:diagnostics output)))
+    (is (= :complete-static (:aggregate/completeness aggregate)))
+    (is (= #{":neutral.email/error"
+             ":neutral.memoize/args-fn"
+             ":neutral.catalog/local"}
+           (set (map :membership/key members))))))
+
+(deftest unknown-namespace-alias-remains-a-contained-diagnostic
+  (let [source (str "(ns neutral.catalog)\n"
+                    "(def transports {::missing/error \"failed\"})\n")
+        output (fixture source "transports")]
+    (is (= :aggregate-analysis-skipped
+           (:kind (first (:diagnostics output)))))
+    (is (clojure.string/includes?
+         (:message (first (:diagnostics output)))
+         "Invalid keyword: ::missing/error"))))
+
 (deftest clojurescript-js-literals-produce-aggregate-facts
   (let [source (str "(ns neutral.catalog)\n"
                     "(def request-options #js {:method \"GET\"\n"

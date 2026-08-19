@@ -35,6 +35,13 @@
             [(discovered "src/a.clj") (discovered "src/b.janet")]
             [(output "src/b.janet") (output "src/a.clj")]))))))
 
+(deftest provider-diagnostics-retain-only-stage-scoped-messages
+  (let [stage-warning {:kind :clj-kondo-hook-not-found :count 25}
+        file-warning {:kind :clj-kondo :file "src/a.clj"}]
+    (is (= [stage-warning]
+           (#'project-analyzer/provider-diagnostics
+            {:diagnostics [file-warning stage-warning]})))))
+
 (deftest semantic-fingerprint-ignores-order-and-derived-search-text
   (let [symbol-a {:entity/type :entity.type/symbol
                   :symbol/id "symbol:a" :symbol/name "a"

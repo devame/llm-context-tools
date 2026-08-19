@@ -67,6 +67,18 @@
          #"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] Graph quality: 1000 exact edges, 25 references"
          output))))
 
+(deftest counted-analysis-diagnostics-print-once-with-occurrence-total
+  (let [diagnostic {:level :warning
+                    :kind :clj-kondo-hook-not-found
+                    :message "hook files not found: hooks/example/missing"
+                    :count 125}]
+    (is (= (str "warning clj-kondo-hook-not-found: "
+                "hook files not found: hooks/example/missing "
+                "(125 occurrences)")
+           (#'cli/diagnostic-message diagnostic)))
+    (is (= 126 (#'cli/diagnostic-count
+                [diagnostic {:kind :binary-file}])))))
+
 (deftest semantic-status-surfaces-accelerator-fallback
   (let [output
         (with-out-str

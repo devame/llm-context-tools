@@ -83,6 +83,9 @@
                      (str/split (or (System/getenv "PATH") "") #";"))
                 (map #(Paths/get ^String % (make-array String 0))
                       ["/usr/lib/wsl/lib" "/usr/local/cuda/lib64"
+                       "/usr/local/cuda/targets/x86_64-linux/lib"
+                       "/usr/local/cuda-12.9/lib64"
+                       "/usr/local/cuda-12.9/targets/x86_64-linux/lib"
                        "/usr/lib/x86_64-linux-gnu" "/usr/lib64"])))))))
 
 (defn- version-components [version]
@@ -127,6 +130,10 @@
                 :cuda-runtime-present? (if (windows?)
                                          true
                                          (library-present? directories "libcudart.so.12"))
+                :cuda-libraries-present? (if (windows?)
+                                          true
+                                          (and (library-present? directories "libcublasLt.so.12")
+                                               (library-present? directories "libcurand.so.10")))
                 :cudnn-present? (if (windows?)
                                   (library-present? directories "cudnn64_9.dll")
                                   (library-present? directories "libcudnn.so.9"))}]
@@ -153,6 +160,7 @@
                                         :driver-compatible?
                                         :libcuda-present?
                                         :cuda-runtime-present?
+                                        :cuda-libraries-present?
                                         :cudnn-present?])
                       {:cuda-provider-present? (regular-file? cuda)
                        :shared-provider-present? (regular-file? shared)
@@ -175,6 +183,8 @@
          (not (:libcuda-present? readiness))) (conj :cuda-driver-library-missing)
     (and (contains? readiness :cuda-runtime-present?)
          (not (:cuda-runtime-present? readiness))) (conj :cuda-runtime-missing)
+    (and (contains? readiness :cuda-libraries-present?)
+         (not (:cuda-libraries-present? readiness))) (conj :cuda-libraries-missing)
     (not (:cuda-provider-present? readiness)) (conj :cuda-provider-missing)
     (not (:shared-provider-present? readiness)) (conj :shared-provider-missing)
     (not (:cudnn-present? readiness)) (conj :cudnn-missing)
@@ -192,6 +202,8 @@
     "expose libcuda.so.1 from the NVIDIA driver to this process"
     :cuda-runtime-missing
     "install or expose the CUDA 12 runtime (libcudart.so.12)"
+    :cuda-libraries-missing
+    "install or expose CUDA 12 math libraries (libcublasLt.so.12 and libcurand.so.10)"
     :cuda-provider-missing
     "install a CUDA-enabled ONNX Runtime provider"
     :shared-provider-missing
@@ -218,6 +230,7 @@
        (:driver-present? host)
        (:driver-compatible? host)
        (or (not (:cuda-runtime-present? host))
+           (not (:cuda-libraries-present? host))
            (not (:cudnn-present? host)))))
 
 (defn cudnn-installation-eligible?
@@ -241,6 +254,11 @@
                   (and (:device-visible? host)
                        (:driver-present? host)
                        (:driver-compatible? host)
+                       (not (:cuda-libraries-present? host)))
+                  (conj :cuda-libraries-missing)
+                  (and (:device-visible? host)
+                       (:driver-present? host)
+                       (:driver-compatible? host)
                        (not (:cudnn-present? host)))
                   (conj :cudnn-missing))]
     (mapv fallback-action reasons)))
@@ -260,6 +278,8 @@
          "; libcuda.so.1: " (if (:libcuda-present? host) "present" "missing")
          "; WSL: " (if (:wsl? host) "yes" "no")
          "; cuDNN 9: " (if (:cudnn-present? host) "present" "missing")
+         "; CUDA math libraries: "
+         (if (:cuda-libraries-present? host) "present" "missing")
          "; CUDA 12 runtime: "
          (if (:cuda-runtime-present? host) "present" "missing")
          (when (seq actions)

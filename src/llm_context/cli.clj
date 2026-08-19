@@ -176,19 +176,25 @@
   0)
 
 (defn- diagnostic-message
-  [{:keys [level kind file path language message size row column]}]
-  (str (name (or level :info)) " " (name kind) ": "
-       (case kind
-         :missing-include (str "configured path does not exist: " path)
-         :grammar-unavailable (str file " (" (some-> language name) ")")
-         :file-too-large (str file " (" size " bytes)")
-         :binary-file file
-         :clj-kondo (str file
-                         (when (and row column)
-                           (str ":" row ":" column))
-                         ": " message)
-         :semantic-provider-failed (or message "semantic provider failed")
-         (or file path message (pr-str kind)))))
+  [{:keys [level kind file path language message size row column count]}]
+  (let [count (long (or count 1))]
+    (str (name (or level :info)) " " (name kind) ": "
+         (case kind
+           :missing-include (str "configured path does not exist: " path)
+           :grammar-unavailable (str file " (" (some-> language name) ")")
+           :file-too-large (str file " (" size " bytes)")
+           :binary-file file
+           :clj-kondo (str file
+                           (when (and row column)
+                             (str ":" row ":" column))
+                           ": " message)
+           :semantic-provider-failed (or message "semantic provider failed")
+           (or file path message (pr-str kind)))
+         (when (> count 1)
+           (format " (%d occurrences)" count)))))
+
+(defn- diagnostic-count [diagnostics]
+  (reduce + 0 (map #(long (or (:count %) 1)) diagnostics)))
 
 (defmethod execute "doctor" [context _ _]
   (let [checks ((resolve-fn 'llm-context.runtime.doctor/check)
@@ -421,14 +427,14 @@
                         "(%d diagnostics)")
                    (:files result) (:entities result) (:symbols result)
                    (:exact-edges result) (:references result)
-                   (count (:diagnostics result)))
+                   (diagnostic-count (:diagnostics result)))
            :incremental
            (format "Analyzed %d files: %d changed, %d deleted (%d diagnostics)"
                    (:files result) (:changed result) (:deleted result)
-                   (count (:diagnostics result)))
+                   (diagnostic-count (:diagnostics result)))
            (format "Analyzed %d files into %d entities (%d diagnostics)"
                    (:files result) (:entities result)
-                   (count (:diagnostics result)))))
+                   (diagnostic-count (:diagnostics result)))))
         (when (get-in result [:semantic :enabled?])
           (println
            (format

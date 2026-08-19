@@ -39,6 +39,60 @@
    :read-cond :allow
    :features (if (= :language/clojurescript language) #{:cljs} #{:clj})})
 
+(def ^:private require-clause-heads
+  #{:require :require-macros})
+
+(def ^:private alias-options
+  #{:as :as-alias})
+
+(defn- qualified-lib-symbol [prefix lib]
+  (when (symbol? lib)
+    (if prefix
+      (symbol (str prefix "." lib))
+      lib)))
+
+(defn- libspec-aliases
+  ([spec]
+   (libspec-aliases nil spec))
+  ([prefix spec]
+   (cond
+     (vector? spec)
+     (let [lib (qualified-lib-symbol prefix (first spec))
+           alias (some (fn [[option value]]
+                         (when (contains? alias-options option) value))
+                       (partition 2 (rest spec)))]
+       (if (and lib (symbol? alias)) [[alias lib]] []))
+
+     (seq? spec)
+     (let [prefix (qualified-lib-symbol prefix (first spec))]
+       (if prefix
+         (mapcat #(libspec-aliases prefix %) (rest spec))
+         []))
+
+     :else [])))
+
+(defn- namespace-form? [form]
+  (and (seq? form)
+       (symbol? (first form))
+       (= "ns" (name (first form)))
+       (symbol? (second form))))
+
+(defn- namespace-aliases [form]
+  (->> (drop 2 form)
+       (filter #(and (seq? %)
+                     (contains? require-clause-heads (first %))))
+       (mapcat rest)
+       (mapcat libspec-aliases)
+       (into {})))
+
+(defn- reader-context [form context]
+  (if (namespace-form? form)
+    (let [namespace-symbol (second form)]
+      {:namespace (or (find-ns namespace-symbol)
+                      (create-ns namespace-symbol))
+       :aliases (namespace-aliases form)})
+    context))
+
 (defn- top-level-forms [content language]
   (let [input (reader-types/indexing-push-back-reader content)
         options (read-options language)]
@@ -47,11 +101,15 @@
               (assoc reader/*data-readers* 'js #'read-js-literal)
               reader/*default-data-reader-fn*
               (fn [tag value] (tagged-literal tag value))]
-      (loop [result []]
-        (let [form (reader/read options input)]
+      (loop [result []
+             context {:namespace *ns* :aliases {}}]
+        (let [{:keys [namespace aliases]} context
+              form (binding [*ns* namespace
+                             reader/*alias-map* aliases]
+                     (reader/read options input))]
           (if (identical? eof form)
             result
-            (recur (conj result form))))))))
+            (recur (conj result form) (reader-context form context))))))))
 
 (defn- definition-form? [form]
   (and (seq? form)

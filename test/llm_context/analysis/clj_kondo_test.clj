@@ -1,8 +1,10 @@
 (ns llm-context.analysis.clj-kondo-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clj-kondo.core :as kondo]
+            [clojure.test :refer [deftest is]]
             [llm-context.analysis.clj-kondo :as clj-kondo]
             [llm-context.project :as project])
-  (:import [java.nio.file Files]))
+  (:import [java.io StringWriter Writer]
+           [java.nio.file Files]))
 
 (defn- file-input [path language content]
   {:path path
@@ -85,3 +87,44 @@
       (is (every? #(contains? clj-kondo/source-integrity-finding-types
                               (:type %))
                   diagnostics)))))
+
+(deftest runtime-warnings-are-counted-and-returned-once
+  (let [root (Files/createTempDirectory
+              "llm-context-kondo-warning-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        path (.resolve root "sample.clj")
+        source "(ns sample)\n(def value 1)\n"
+        external-error (StringWriter.)]
+    (spit (str path) source)
+    (with-redefs
+      [kondo/run!
+       (fn [_]
+         (binding [*out* *err*]
+           (println
+            "WARNING: file hooks/example/missing not found while loading hook")
+           (println
+            "WARNING: file hooks/example/missing not found while loading hook")
+           (println
+            "WARNING: file hooks/other/missing not found while loading hook")
+           (println "WARNING: configuration fallback")
+           (.write ^Writer *err* "WARNING: configuration fallback\n")
+           (.write ^Writer *err* "WARNING: configuration fallback"))
+         {:analysis {} :findings [] :summary {}})]
+      (let [snapshot
+            (binding [*err* external-error]
+              (clj-kondo/analyze!
+               (project/context (str root))
+               [(file-input path :language/clojure source)]))]
+        (is (= "" (str external-error)))
+        (is (= [{:level :warning
+                 :kind :clj-kondo-hook-not-found
+                 :count 3
+                 :paths ["hooks/example/missing" "hooks/other/missing"]
+                 :message
+                 (str "hook files not found: hooks/example/missing, "
+                      "hooks/other/missing")}
+                {:level :warning
+                 :kind :clj-kondo-runtime-message
+                 :message "configuration fallback"
+                 :count 3}]
+               (:diagnostics snapshot)))))))

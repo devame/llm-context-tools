@@ -36,6 +36,27 @@
 (defn- router-factory [_ _]
   {:status :disabled :client (intent-router/unavailable :test)})
 
+(deftest runtime-view-preserves-next-plaid-log-offset
+  (let [log-path (Files/createTempFile
+                  "llm-context-service-runtime-offset-" ".log"
+                  (make-array java.nio.file.attribute.FileAttribute 0))]
+    (Files/writeString
+     log-path
+     "ERROR ort::ep: No execution providers from session options registered successfully\n"
+     (make-array java.nio.file.OpenOption 0))
+    (let [offset (Files/size log-path)]
+      (Files/writeString
+       log-path
+       "WARN ort::logging: CUDAExecutionProvider initialized\n"
+       (into-array java.nio.file.OpenOption
+                   [java.nio.file.StandardOpenOption/APPEND]))
+      (let [view ((deref (get (ns-interns 'llm-context.service.server)
+                             'runtime-view))
+                  {:status :ready :log-path log-path :log-offset offset})]
+        (is (= offset (:log-offset view)))
+        (is (nil? (:runtime-diagnostic view)))))
+    (Files/deleteIfExists log-path)))
+
 (deftest authenticated-loopback-service-round-trip
   (let [root (Files/createTempDirectory "llm-context-service-"
                                         (make-array java.nio.file.attribute.FileAttribute 0))
