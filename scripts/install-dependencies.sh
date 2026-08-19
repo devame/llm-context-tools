@@ -18,7 +18,7 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 
 CURRENT_STEP=startup
 STEP_NUMBER=0
-TOTAL_STEPS=5
+TOTAL_STEPS=6
 BOOTSTRAP_STARTED_AT=$(date +%s)
 
 on_error() {
@@ -78,6 +78,10 @@ SHA-256 verification. Logs are retained at .llm-context/dependency-install.log.
 Set LLM_CONTEXT_NODE_BIN and LLM_CONTEXT_NPM_BIN to explicitly reuse a shared
 installation outside the standard PATH/version-manager locations. Set
 LLM_CONTEXT_ZIG_BIN to reuse a shared Zig binary.
+When a compatible visible NVIDIA GPU is detected, install also checks for and
+offers the CUDA 12 runtime and cuDNN 9 host packages. Set
+LLM_CONTEXT_CUDA_INSTALL=yes or no to control that step; the older
+LLM_CONTEXT_CUDNN_INSTALL variable remains an alias.
 USAGE
       exit 0
       ;;
@@ -634,6 +638,185 @@ run_online_verification() {
   fi
 }
 
+cuda_manifest_value() {
+  manifest_value "$1"
+}
+
+cuda_nvidia_smi_path() {
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    command -v nvidia-smi
+  elif [[ -x /usr/lib/wsl/lib/nvidia-smi ]]; then
+    printf '%s\n' /usr/lib/wsl/lib/nvidia-smi
+  fi
+}
+
+cuda_version_at_least() {
+  local actual=$1 minimum=$2
+  [[ "$(printf '%s\n' "$minimum" "$actual" | sort -V | head -n 1)" == "$minimum" ]]
+}
+
+cuda_library_present() {
+  local library=$1 directory candidate
+  if [[ -n "${LLM_CONTEXT_CUDA_LIBRARY_PATHS:-}" ]]; then
+    local old_ifs=$IFS
+    IFS=:
+    for directory in $LLM_CONTEXT_CUDA_LIBRARY_PATHS; do
+      if [[ -n "$directory" && -f "$directory/$library" ]]; then
+        IFS=$old_ifs
+        return 0
+      fi
+    done
+    IFS=$old_ifs
+  fi
+  for candidate in \
+    "/usr/lib/wsl/lib/$library" \
+    "/usr/local/cuda/lib64/$library" \
+    "/usr/lib/x86_64-linux-gnu/$library" \
+    "/usr/lib64/$library"; do
+    [[ -f "$candidate" ]] && return 0
+  done
+  command -v ldconfig >/dev/null 2>&1 &&
+    ldconfig -p 2>/dev/null | grep -F "$library" >/dev/null 2>&1
+}
+
+cuda_host_preflight() {
+  local smi gpu_info
+  CUDA_NVIDIA_SMI=$(cuda_nvidia_smi_path || true)
+  CUDA_GPU_NAME=
+  CUDA_DRIVER_VERSION=
+  CUDA_DEVICE_VISIBLE=0
+  CUDA_DRIVER_PRESENT=0
+  CUDA_DRIVER_COMPATIBLE=0
+  CUDA_RUNTIME_PRESENT=0
+  CUDA_CUDNN_PRESENT=0
+  CUDA_MINIMUM_DRIVER=$(cuda_manifest_value ':minimum-driver')
+  CUDA_RUNTIME_PACKAGE=$(cuda_manifest_value ':runtime-debian-package')
+  CUDA_CUDNN_PACKAGE=$(cuda_manifest_value ':debian-package')
+
+  if [[ -n "$CUDA_NVIDIA_SMI" ]]; then
+    gpu_info=$("$CUDA_NVIDIA_SMI" --query-gpu=name,driver_version \
+      --format=csv,noheader,nounits 2>/dev/null | sed -n '1p' || true)
+    CUDA_GPU_NAME=$(printf '%s\n' "$gpu_info" | sed 's/,[[:space:]].*//')
+    CUDA_DRIVER_VERSION=$(printf '%s\n' "$gpu_info" |
+      sed -n 's/^[^,]*,[[:space:]]*//p')
+    if [[ -n "$CUDA_GPU_NAME" && -n "$CUDA_DRIVER_VERSION" ]]; then
+      CUDA_DEVICE_VISIBLE=1
+      CUDA_DRIVER_PRESENT=1
+      if cuda_version_at_least "$CUDA_DRIVER_VERSION" "$CUDA_MINIMUM_DRIVER"; then
+        CUDA_DRIVER_COMPATIBLE=1
+      fi
+    fi
+  fi
+  if [[ -e /dev/dxg || -e /dev/nvidia0 ]]; then
+    CUDA_DEVICE_VISIBLE=1
+  fi
+  cuda_library_present libcudart.so.12 && CUDA_RUNTIME_PRESENT=1 || true
+  cuda_library_present libcudnn.so.9 && CUDA_CUDNN_PRESENT=1 || true
+}
+
+cuda_host_report() {
+  printf 'GPU: %s; device: %s; NVIDIA driver: %s (%s, minimum %s); CUDA 12 runtime: %s; cuDNN 9: %s\n' \
+    "${CUDA_GPU_NAME:-not detected}" \
+    "$([[ "$CUDA_DEVICE_VISIBLE" -eq 1 ]] && printf visible || printf missing)" \
+    "${CUDA_DRIVER_VERSION:-not detected}" \
+    "$([[ "$CUDA_DRIVER_PRESENT" -eq 0 ]] && printf missing || \
+       ([[ "$CUDA_DRIVER_COMPATIBLE" -eq 1 ]] && printf compatible || printf too-old))" \
+    "$CUDA_MINIMUM_DRIVER" \
+    "$([[ "$CUDA_RUNTIME_PRESENT" -eq 1 ]] && printf present || printf missing)" \
+    "$([[ "$CUDA_CUDNN_PRESENT" -eq 1 ]] && printf present || printf missing)"
+}
+
+cuda_install_packages=()
+
+cuda_sudo_preflight() {
+  if (( $(id -u) == 0 )); then
+    return 0
+  fi
+  command -v sudo >/dev/null 2>&1 || {
+    printf 'ERROR: sudo is required to install CUDA host packages as a non-root user.\n' >&2
+    return 1
+  }
+  printf '\nSudo authentication is required for CUDA 12/cuDNN 9 installation.\n' >&2
+  printf 'Enter your WSL sudo password when prompted.\n' >&2
+  sudo -v
+}
+
+cuda_host_step() {
+  cuda_host_preflight
+  if [[ "$(uname -s):$(uname -m)" != Linux:x86_64 &&
+        "$(uname -s):$(uname -m)" != Linux:amd64 ]]; then
+    notify "CUDA host packages are not applicable on $(uname -s) $(uname -m)."
+    return 0
+  fi
+  cuda_host_report
+
+  if [[ "$CUDA_DEVICE_VISIBLE" -ne 1 || "$CUDA_DRIVER_PRESENT" -ne 1 ||
+        "$CUDA_DRIVER_COMPATIBLE" -ne 1 ]]; then
+    notify "CUDA host installation not offered: a visible GPU and compatible NVIDIA driver are required."
+    return 0
+  fi
+  if [[ "$CUDA_RUNTIME_PRESENT" -eq 1 && "$CUDA_CUDNN_PRESENT" -eq 1 ]]; then
+    notify "CUDA 12 runtime and cuDNN 9 host libraries verified."
+    return 0
+  fi
+  if [[ "$ACTION" != install ]]; then
+    notify "Missing CUDA host libraries reported; no files changed ($ACTION only)."
+    return 0
+  fi
+
+  cuda_install_packages=()
+  [[ "$CUDA_RUNTIME_PRESENT" -eq 1 ]] || cuda_install_packages+=("$CUDA_RUNTIME_PACKAGE")
+  [[ "$CUDA_CUDNN_PRESENT" -eq 1 ]] || cuda_install_packages+=("$CUDA_CUDNN_PACKAGE")
+  printf 'CUDA action: install missing host packages: %s\n' \
+    "${cuda_install_packages[*]}"
+
+  if ! command -v apt-get >/dev/null 2>&1; then
+    printf 'WARN: apt-get is unavailable; install the listed CUDA packages manually and rerun verify.\n' >&2
+    return 0
+  fi
+  if ((YES)); then
+    cuda_choice=yes
+  else
+    cuda_choice=${LLM_CONTEXT_CUDA_INSTALL:-${LLM_CONTEXT_CUDNN_INSTALL:-prompt}}
+  fi
+  case "$cuda_choice" in
+    yes|true|1|YES|TRUE) ;;
+    no|false|0|NO|FALSE)
+      notify "Skipping CUDA host package installation by request."
+      return 0
+      ;;
+    prompt)
+      if [[ -n "${CI:-}" ]]; then
+        notify "CI detected; skipping interactive CUDA host package installation. Set LLM_CONTEXT_CUDA_INSTALL=yes to opt in."
+        return 0
+      fi
+      confirm "Install the missing CUDA 12/cuDNN 9 host packages (${cuda_install_packages[*]}) now?" || {
+        notify "Skipping CUDA host package installation; set LLM_CONTEXT_CUDA_INSTALL=yes to opt in."
+        return 0
+      }
+      ;;
+    *)
+      printf 'ERROR: LLM_CONTEXT_CUDA_INSTALL and LLM_CONTEXT_CUDNN_INSTALL must be yes, no, or prompt.\n' >&2
+      return 1
+      ;;
+  esac
+
+  cuda_sudo_preflight
+  if (( $(id -u) == 0 )); then
+    retry "Refresh CUDA package metadata" 2 3 apt-get update
+    retry "Install CUDA host packages" 2 5 apt-get -y install "${cuda_install_packages[@]}"
+  else
+    retry "Refresh CUDA package metadata" 2 3 sudo apt-get update
+    retry "Install CUDA host packages" 2 5 sudo apt-get -y install "${cuda_install_packages[@]}"
+  fi
+  cuda_host_preflight
+  [[ "$CUDA_RUNTIME_PRESENT" -eq 1 && "$CUDA_CUDNN_PRESENT" -eq 1 ]] || {
+    printf 'ERROR: CUDA host package command completed but libcudart.so.12/cuDNN 9 verification failed.\n' >&2
+    return 1
+  }
+  notify "Verified libcudart.so.12 and libcudnn.so.9 after installation."
+}
+
 local_native_platform() {
   case "$(uname -m)" in
     x86_64|amd64) printf 'linux-x86_64\n' ;;
@@ -731,6 +914,7 @@ main() {
   }
 
   run_step "Checking host tools" host_step
+  run_step "Checking CUDA host dependencies" cuda_host_step
   run_step "Checking pinned repository contract" contract_step
   run_step "Checking current upstream releases" upstream_step
   run_step "Installing and verifying project dependencies" project_step
