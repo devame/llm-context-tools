@@ -1,15 +1,19 @@
 (ns llm-context.semantic.worker
   "Single-writer background consumer for durable LateOn jobs."
   (:refer-clojure :exclude [run!])
-  (:require [llm-context.semantic.document :as document]
+  (:require [llm-context.graph.read :as graph-read]
+            [llm-context.semantic.document :as document]
+            [llm-context.semantic.ingestion-plan :as ingestion-plan]
             [llm-context.semantic.index :as index]
+            [llm-context.semantic.progress :as semantic-progress]
             [llm-context.semantic.reconcile :as reconcile]
             [llm-context.semantic.state :as state]
             [llm-context.storage :as storage]
             [llm-context.store :as store])
-  (:import [java.util UUID]
-           [java.util.concurrent Callable ExecutionException Executors
-            TimeUnit]))
+  (:import [java.nio.charset StandardCharsets]
+           [java.util UUID]
+           [java.util.concurrent Callable ExecutionException
+            ExecutorCompletionService Executors TimeUnit]))
 
 (defn- now [worker]
   ((:now-fn worker)))
@@ -162,6 +166,83 @@
         (and (= :next-plaid/api-error type)
              (or (= 429 status) (<= 500 (long (or status 0)) 599))))))
 
+(defn provider-backpressure?
+  "True for provider responses classified as bounded queue saturation."
+  [error]
+  (let [{:keys [type status]} (ex-data error)]
+    (and (= :next-plaid/api-error type)
+         (contains? #{429 503} status))))
+
+(defn- record-provider-backpressure! [worker error]
+  (let [time (now worker)
+        cooldown (long (get-in worker [:settings :backpressure-cooldown-ms]))]
+    (swap! (:backpressure worker)
+           (fn [current]
+             (-> current
+                 (assoc :limited? true
+                        :cooldown-until (+ time cooldown)
+                        :successful-groups 0
+                        :last-reduction-at time
+                        :last-reduction-reason
+                        (or (:code (ex-data error))
+                            (:status (ex-data error))
+                            :provider-backpressure))
+                 (update :count (fnil inc 0)))))))
+
+(defn- record-provider-success! [worker]
+  (let [time (now worker)
+        required
+        (long (get-in worker [:settings :backpressure-recovery-successes]))]
+    (swap! (:backpressure worker)
+           (fn [{:keys [limited? cooldown-until successful-groups] :as current}]
+             (if (and limited? (>= time (long cooldown-until)))
+               (let [successes (inc (long successful-groups))]
+                 (if (>= successes required)
+                   (assoc current :limited? false :successful-groups successes)
+                   (assoc current :successful-groups successes)))
+               current)))))
+
+(defn- effective-request-concurrency [worker configured]
+  (if (:limited? @(:backpressure worker))
+    1
+    configured))
+
+(defn- pending-operation-mix [worker]
+  (with-graph-lock
+    worker
+    #(graph-read/semantic-pending-operation-counts
+      (store/database (:graph worker)) reconcile/provider)))
+
+(defn- ingestion-plan [worker]
+  (let [settings (:settings worker)
+        operation-mix (pending-operation-mix worker)
+        pending (reduce + 0 (vals operation-mix))
+        selected
+        (ingestion-plan/plan
+         {:pending-symbol-jobs pending
+          ;; Until documents are rendered, one document per symbol is the
+          ;; deterministic lower-bound estimate. Runtime submission still
+          ;; enforces the exact rendered document bound.
+          :pending-provider-documents-estimate pending
+          :operation-mix operation-mix
+          :accelerator (:accelerator settings)
+          :provider-version (:next-plaid-version settings)
+          :configured-request-batch (:update-batch-size settings)
+          :configured-request-concurrency (:update-concurrency settings)
+          :configured-max-inflight-documents
+          (* (:update-batch-size settings) (:update-concurrency settings))
+          :profile (:ingestion-profile settings)
+          :previous-profile @(:active-profile worker)
+          :cold-ingestion (:cold-ingestion settings)})
+        effective
+        (effective-request-concurrency
+         worker (:request-concurrency-limit selected))
+        selected (assoc selected
+                        :request-concurrency-effective effective
+                        :backpressure @(:backpressure worker))]
+    (reset! (:active-profile worker) (:profile selected))
+    selected))
+
 (defn- renew-leases! [worker jobs]
   (let [settings (:settings worker)
         time (now worker)
@@ -301,6 +382,7 @@
         failed-at (now worker)
         retriable? (not= false (:retriable? (ex-data error)))
         provider-failure? (provider-failure? error)
+        backpressure? (provider-backpressure? error)
         max-attempts (cond
                        provider-failure? Long/MAX_VALUE
                        retriable? (:max-attempts settings)
@@ -316,7 +398,8 @@
              :failed-at failed-at
              :available-at available-at
              :error (.getMessage ^Throwable error)
-             :max-attempts max-attempts}))]
+             :max-attempts max-attempts
+             :consume-attempt? (not provider-failure?)}))]
     (when (= :failed (:status result))
       (binding [*out* *err*]
         (println
@@ -330,6 +413,7 @@
     {:status (or (:status result) :superseded)
      :operation (:semantic.job/operation job)
      :provider-failure? provider-failure?
+     :provider-backpressure? backpressure?
      :error error}))
 
 (defn- safely [worker job f]
@@ -398,25 +482,44 @@
             (recur)))))))
 
 (defn- submit-update-batches!
-  [worker jobs batches]
-  (let [threads (min (count batches)
-                     (:update-concurrency (:settings worker)))
-        executor (Executors/newFixedThreadPool threads)]
+  [worker jobs batches concurrency max-inflight]
+  (let [threads (min (count batches) concurrency)
+        executor (Executors/newFixedThreadPool threads)
+        completions (ExecutorCompletionService. executor)
+        submit! (fn [batch]
+                  (.submit completions
+                           ^Callable
+                           (fn []
+                             (index/add-documents! (:client worker) batch))))]
     (try
       (renew-leases! worker jobs)
-      (let [futures
-            (mapv
-             (fn [batch]
-               (.submit executor
-                        ^Callable
-                        (fn []
-                          (index/add-documents! (:client worker) batch))))
-             batches)]
-        (doseq [future futures]
-          (try
-            (.get future)
-            (catch ExecutionException error
-              (throw (.getCause error))))))
+      ;; Keep only active requests in the executor. As each request completes,
+      ;; submit the next stable batch immediately instead of retaining the full
+      ;; cold-ingestion lease in an unbounded executor queue.
+      (let [largest-batch (reduce max 0 (map count batches))]
+        (when (> (* threads largest-batch) max-inflight)
+          (throw
+           (ex-info "Semantic provider requests exceed their in-flight bound"
+                    {:type :semantic/inflight-bound-exceeded
+                     :request-concurrency threads
+                     :largest-provider-request largest-batch
+                     :max-inflight-provider-documents max-inflight}))))
+      (let [[initial remaining] (split-at threads batches)]
+        (doseq [batch initial]
+          (submit! batch))
+        (loop [remaining remaining
+               in-flight (count initial)]
+          (when (pos? in-flight)
+            (let [future (.take completions)]
+              (try
+                (.get future)
+                (catch ExecutionException error
+                  (throw (.getCause error))))
+              (if-let [batch (first remaining)]
+                (do
+                  (submit! batch)
+                  (recur (rest remaining) in-flight))
+                (recur remaining (dec in-flight)))))))
       (let [job-ids (mapv :semantic.job/id jobs)
             accepted-at (now worker)
             accepted
@@ -437,20 +540,41 @@
         (.shutdown executor)
         (.awaitTermination executor 5 TimeUnit/SECONDS)))))
 
-(defn- process-upsert-batch! [worker jobs]
-  (let [prepared-results
+(defn- utf8-size [value]
+  (alength (.getBytes ^String value StandardCharsets/UTF_8)))
+
+(defn- process-upsert-batch! [worker jobs plan]
+  (let [prepare-start (System/nanoTime)
+        prepared-results
         (mapcat #(prepare-upsert-group worker %)
                 (partition-by
                  :semantic.job/file-id
                  (sort-by (juxt :semantic.job/file-id :semantic.job/id) jobs)))
         prepared (filterv :desired prepared-results)
-        immediate (filterv :status prepared-results)]
+        immediate (filterv :status prepared-results)
+        prepared-chunks (vec (mapcat (comp :chunks :desired) prepared))
+        prepared-bytes (reduce + 0 (map (comp utf8-size :text)
+                                         prepared-chunks))
+        prepare-ms (long (/ (- (System/nanoTime) prepare-start) 1000000))
+        base-metrics
+        {:prepared-symbol-jobs (count prepared)
+         :prepared-provider-documents (count prepared-chunks)
+         :prepared-text-bytes prepared-bytes
+         :request-concurrency-effective
+         (:request-concurrency-effective plan)}]
     (if (empty? prepared)
       {:results immediate
-       :metrics {:submitted-documents 0 :submitted-chunks 0
-                 :reused-documents 0
-                 :upload-batches 0 :delete-ms 0
-                 :upload-ms 0 :visibility-ms 0}}
+       :metrics (merge base-metrics
+                       {:submitted-documents 0 :submitted-chunks 0
+                        :accepted-documents 0 :reused-documents 0
+                        :upload-batches 0 :delete-ms 0 :upload-ms 0
+                        :prepare-ms prepare-ms :submit-ms 0
+                        :visibility-ms 0 :completion-ms 0
+                        :request-count 0 :request-provider-documents 0
+                        :request-text-bytes 0 :accepted-symbol-jobs 0
+                        :visible-symbol-jobs 0 :reused-symbol-jobs 0
+                        :provider-backpressure-count 0
+                        :provider-retry-count 0})}
       (try
         (let [jobs (mapv :job prepared)
               _ (renew-leases! worker jobs)
@@ -470,13 +594,16 @@
                                     "batched replacement deletion"))
               delete-ms (long (/ (- (System/nanoTime) delete-start) 1000000))
               chunks (vec (mapcat (comp :chunks :desired) replacements))
+              request-bytes (reduce + 0 (map (comp utf8-size :text) chunks))
               batches (mapv vec
                             (partition-all
-                             (:update-batch-size (:settings worker)) chunks))
+                             (:request-provider-document-limit plan) chunks))
               upload-start (System/nanoTime)
               accepted-documents (if (seq batches)
                                    (submit-update-batches!
-                                    worker replacement-jobs batches)
+                                    worker replacement-jobs batches
+                                    (:request-concurrency-effective plan)
+                                    (:max-inflight-provider-documents plan))
                                    0)
               upload-ms (long (/ (- (System/nanoTime) upload-start) 1000000))
               visibility-start (System/nanoTime)
@@ -489,26 +616,51 @@
                    "batched upsert visibility"))
               visibility-ms
               (long (/ (- (System/nanoTime) visibility-start) 1000000))
-              results
-              (into immediate (complete-prepared! worker prepared))]
+              completion-start (System/nanoTime)
+              results (into immediate (complete-prepared! worker prepared))
+              completion-ms
+              (long (/ (- (System/nanoTime) completion-start) 1000000))]
           {:results results
-           :metrics {:submitted-documents (count replacements)
-                     :accepted-documents accepted-documents
-                     :reused-documents (count reusable)
-                     :submitted-chunks (count chunks)
-                     :upload-batches (count batches)
-                     :delete-ms delete-ms
-                     :upload-ms upload-ms
-                     :visibility-ms visibility-ms}})
+           :metrics
+           (merge base-metrics
+                  {:submitted-documents (count replacements)
+                   :accepted-documents accepted-documents
+                   :reused-documents (count reusable)
+                   :submitted-chunks (count chunks)
+                   :upload-batches (count batches)
+                   :delete-ms delete-ms
+                   :upload-ms upload-ms
+                   :prepare-ms prepare-ms
+                   :submit-ms upload-ms
+                   :visibility-ms visibility-ms
+                   :completion-ms completion-ms
+                   :request-count (count batches)
+                   :request-provider-documents (count chunks)
+                   :request-text-bytes request-bytes
+                   :accepted-symbol-jobs accepted-documents
+                   :visible-symbol-jobs (count prepared)
+                   :reused-symbol-jobs (count reusable)
+                   :provider-backpressure-count 0
+                   :provider-retry-count 0})})
         (catch Throwable error
-          {:results
-           (into immediate
-                 (mapv #(retry-job! worker (:job %) error) prepared))
-           :metrics {:submitted-documents 0 :submitted-chunks 0
-                     :accepted-documents 0
-                     :reused-documents 0
-                     :upload-batches 0 :delete-ms 0
-                     :upload-ms 0 :visibility-ms 0}})))))
+          (let [provider-failure? (provider-failure? error)
+                backpressure? (provider-backpressure? error)]
+            {:results
+             (into immediate
+                   (mapv #(retry-job! worker (:job %) error) prepared))
+             :metrics
+             (merge base-metrics
+                    {:submitted-documents 0 :submitted-chunks 0
+                     :accepted-documents 0 :reused-documents 0
+                     :upload-batches 0 :delete-ms 0 :upload-ms 0
+                     :prepare-ms prepare-ms :submit-ms 0
+                     :visibility-ms 0 :completion-ms 0
+                     :request-count 0 :request-provider-documents 0
+                     :request-text-bytes 0 :accepted-symbol-jobs 0
+                     :visible-symbol-jobs 0 :reused-symbol-jobs 0
+                     :provider-backpressure-count (if backpressure? 1 0)
+                     :provider-retry-count
+                     (if provider-failure? (count prepared) 0)})}))))))
 
 (defn prepare!
   "Recover state, reconcile graph changes, verify the exact model, and declare
@@ -556,7 +708,9 @@
         (if-let [guard (:storage-guard worker)]
           (storage/assert-operation-safe! guard)
           (storage/assert-headroom! (:project worker) (:config worker)
-                                    :semantic-index-batch))
+                                    :semantic-index-batch
+                                    (get-in worker
+                                            [:settings :index-path])))
         time (now worker)
         settings (:settings worker)
         dirty? (seq (with-graph-lock
@@ -570,15 +724,19 @@
             worker
             #(state/recover-expired-leases!
               (:graph worker) reconcile/provider time))
+        plan (ingestion-plan worker)
         jobs (with-graph-lock
                worker
                #(state/lease-jobs!
                  (:graph worker) reconcile/provider (:owner worker)
                  time (:lease-ms settings)
-                 (* (:update-batch-size settings)
-                    (:update-concurrency settings))))]
+                 (:lease-symbol-limit plan)))]
     (if (empty? jobs)
-      {:leased 0 :completed 0 :retried 0 :failed 0 :superseded 0}
+      {:leased 0 :completed 0 :retried 0 :failed 0 :superseded 0
+       :leased-symbol-jobs 0
+       :request-concurrency-effective
+       (:request-concurrency-effective plan)
+       :ingestion-plan plan}
       (do
         (with-graph-lock
           worker
@@ -589,7 +747,7 @@
               deletes (filterv #(= :delete (:semantic.job/operation %)) jobs)
               invalid (remove #(#{:upsert :delete}
                                  (:semantic.job/operation %)) jobs)
-              upsert-result (process-upsert-batch! worker upserts)
+              upsert-result (process-upsert-batch! worker upserts plan)
               results
               (into (:results upsert-result)
                     (concat
@@ -606,8 +764,19 @@
                                        :operation
                                        (:semantic.job/operation job)})))
                           invalid)))
-              provider-failure (some #(when (:provider-failure? %) (:error %))
-                                     results)
+              backpressure-error
+              (some #(when (:provider-backpressure? %) (:error %)) results)
+              _ (when backpressure-error
+                  (record-provider-backpressure! worker backpressure-error))
+              _ (when (and (nil? backpressure-error)
+                           (pos? (get-in upsert-result
+                                         [:metrics :request-count] 0)))
+                  (record-provider-success! worker))
+              provider-failure
+              (some #(when (and (:provider-failure? %)
+                                (not (:provider-backpressure? %)))
+                       (:error %))
+                    results)
               _ (when provider-failure
                   (throw
                    (ex-info "Semantic provider became unavailable; jobs were returned to pending"
@@ -615,18 +784,37 @@
                              :retriable? true}
                             provider-failure)))
               frequencies (frequencies (map :status results))
-              summary (merge
-                       {:leased (count jobs)
-                        :completed (get frequencies :completed 0)
-                        :retried (get frequencies :pending 0)
-                        :failed (get frequencies :failed 0)
-                        :superseded (get frequencies :superseded 0)}
-                       (:metrics upsert-result))]
+              effective-plan
+              (cond-> (assoc plan :backpressure @(:backpressure worker))
+                backpressure-error
+                (assoc :request-concurrency-effective 1))
+              summary (-> (merge
+                           {:leased (count jobs)
+                            :leased-symbol-jobs (count jobs)
+                            :completed (get frequencies :completed 0)
+                            :retried (get frequencies :pending 0)
+                            :failed (get frequencies :failed 0)
+                            :superseded (get frequencies :superseded 0)}
+                           (:metrics upsert-result))
+                          (assoc
+                           :ingestion-plan effective-plan
+                           :request-concurrency-effective
+                           (:request-concurrency-effective effective-plan)))]
           (with-graph-lock
             worker
             #(state/record-watermark!
               (:graph worker)
-              (if (pos? (:failed summary))
+              (cond
+                backpressure-error
+                {:provider reconcile/provider
+                 :state :degraded
+                 :last-error-at (now worker)
+                 :last-error "NextPlaid ingestion queue is applying backpressure"
+                 :graph-revision
+                 (document/graph-revision
+                  (store/database (:graph worker)))}
+
+                (pos? (:failed summary))
                 {:provider reconcile/provider
                  :state :degraded
                  :last-error-at (now worker)
@@ -634,6 +822,7 @@
                  :graph-revision
                  (document/graph-revision
                   (store/database (:graph worker)))}
+                :else
                 {:provider reconcile/provider
                  :state :ready
                  :last-success-at (now worker)
@@ -645,38 +834,18 @@
             (assoc :storage storage-snapshot)))))))
 
 (defn- report-progress! [worker result]
-  (when (pos? (:leased result))
-    (let [snapshot
-          (swap! (:progress worker)
-                 (fn [current]
-                   (-> current
-                       (update :leased + (:leased result 0))
-                       (update :completed + (:completed result 0))
-                       (update :retried + (:retried result 0))
-                       (update :failed + (:failed result 0))
-                       (update :submitted-documents +
-                               (:submitted-documents result 0))
-                       (update :accepted-documents +
-                               (:accepted-documents result 0))
-                       (update :reused-documents +
-                               (:reused-documents result 0))
-                       (update :submitted-chunks +
-                               (:submitted-chunks result 0))
-                       (update :upload-batches + (:upload-batches result 0))
-                       (update :delete-ms + (:delete-ms result 0))
-                       (update :upload-ms + (:upload-ms result 0))
-                       (update :visibility-ms + (:visibility-ms result 0))
-                       (assoc :last-progress-at (now worker)))))
-          elapsed-ms (max 1 (- (now worker) (:started-at snapshot)))
-          event (cond->
-                 (assoc snapshot
-                        :phase :semantic-indexing
-                        :elapsed-ms elapsed-ms
-                        :documents-per-minute
-                        (* 60000.0 (/ (:completed snapshot) elapsed-ms)))
-                  (:storage result) (assoc :storage (:storage result)))]
-      (when-let [progress-fn (:progress-fn worker)]
-        (progress-fn event)))))
+  (let [time (now worker)
+        before @(:progress worker)
+        snapshot (swap! (:progress worker)
+                        semantic-progress/record result time)
+        event (cond-> (assoc snapshot :phase :semantic-indexing)
+                (:storage result) (assoc :storage (:storage result)))
+        rate-changed?
+        (not= (:recent-completed-symbols-per-second before)
+              (:recent-completed-symbols-per-second snapshot))]
+    (when (and (:progress-fn worker)
+               (or (pos? (:leased result)) rate-changed?))
+      ((:progress-fn worker) event))))
 
 (defn- assert-provider-health! [worker]
   (let [time (now worker)
@@ -728,12 +897,13 @@
     (when (and project config)
       (storage/operation-guard project config :semantic-indexing
                                #{:semantic-index}))
-    :progress (atom {:started-at (now-fn)
-                     :last-progress-at (now-fn)
-                     :leased 0 :completed 0 :retried 0 :failed 0
-                     :submitted-documents 0 :accepted-documents 0
-                     :reused-documents 0
-                     :submitted-chunks 0
-                     :upload-batches 0 :delete-ms 0
-                     :upload-ms 0 :visibility-ms 0})
+    :active-profile (atom :steady)
+    :backpressure
+    (atom {:limited? false
+           :cooldown-until 0
+           :successful-groups 0
+           :count 0
+           :last-reduction-at nil
+           :last-reduction-reason nil})
+    :progress (atom (semantic-progress/initial (now-fn)))
     :stop? (atom false)})))

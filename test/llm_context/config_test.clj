@@ -28,6 +28,10 @@
            (get-in loaded [:semantic :lateon-code :model-document-length])))
     (is (= 4
            (get-in loaded [:semantic :lateon-code :update-concurrency])))
+    (is (= :steady
+           (get-in loaded [:semantic :lateon-code :ingestion-profile])))
+    (is (false?
+         (get-in loaded [:semantic :lateon-code :cold-ingestion :enabled])))
     (is (= 120000
            (get-in loaded [:semantic :lateon-code :startup-timeout-ms])))
     (is (= 4 (get-in loaded [:context :trace-depth])))
@@ -156,6 +160,31 @@
       (is (some #(re-find #":startup-timeout-ms" %) errors))
       (is (some #(re-find #":query-timeout-ms" %) errors))
       (is (some #(re-find #":centroid-score-threshold" %) errors)))))
+
+(deftest queue-aware-ingestion-settings-are-validated
+  (let [context (temp-project)]
+    (spit (str (:config-file context))
+          (pr-str
+           {:semantic
+            {:lateon-code
+             {:ingestion-profile :fast
+              :cold-ingestion
+              {:enabled true
+               :backlog-threshold 100
+               :exit-threshold 101
+               :update-batch-size 512
+               :update-concurrency 2
+               :max-inflight-provider-documents 128}
+              :visibility-finalizer {:enabled true}}}}))
+    (let [errors (:errors
+                  (ex-data
+                   (try (config/load-config context)
+                        nil
+                        (catch clojure.lang.ExceptionInfo error error))))]
+      (is (some #(re-find #"ingestion-profile" %) errors))
+      (is (some #(re-find #"exit-threshold" %) errors))
+      (is (some #(re-find #"hold at least one request" %) errors))
+      (is (some #(re-find #"pipeline qualification gate" %) errors)))))
 
 (deftest accelerator-and-quantization-settings-are-validated
   (let [context (temp-project)]

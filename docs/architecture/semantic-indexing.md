@@ -1,5 +1,9 @@
 # Asynchronous semantic indexing
 
+Queue-aware request batching, telemetry, recovery invariants, and the gated
+visibility-finalizer design are specified in the
+[queue-aware semantic ingestion decision](../decisions/2026-08-19_queue-aware-semantic-ingestion.md).
+
 ## Status
 
 This document defines the implementation contract for LateOn-Code retrieval.

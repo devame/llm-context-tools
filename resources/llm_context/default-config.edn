@@ -50,9 +50,25 @@
    :cuda-encoding-sessions 1
    :cuda-encoding-batch-size 1
    :model-document-length 2048
+   :ingestion-profile :steady
    :update-batch-size 32
    :update-concurrency 4
    :cuda-update-concurrency 1
+   :cold-ingestion
+   {:enabled false
+    :backlog-threshold 2048
+    :exit-threshold 1024
+    :update-batch-size 512
+    :update-concurrency 2
+    :max-inflight-provider-documents 1024}
+   :visibility-finalizer
+   {:enabled false
+    :max-accepted-symbols 1024
+    :max-accepted-provider-documents 2048
+    :initial-poll-ms 250
+    :max-poll-ms 2000}
+   :backpressure-cooldown-ms 2000
+   :backpressure-recovery-successes 3
    :startup-timeout-ms 120000
    :health-timeout-ms 2000
    :update-timeout-ms 120000

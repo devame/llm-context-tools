@@ -1,5 +1,30 @@
 # Performance benchmarks
 
+The isolated request-batch and concurrency qualification protocol is defined
+by the
+[queue-aware semantic ingestion decision](decisions/2026-08-19_queue-aware-semantic-ingestion.md).
+
+Run its source-redacted, disposable matrix with the resident project service
+stopped:
+
+```bash
+clojure -M:qualify-semantic-ingestion /path/to/project \
+  --sample-size 256 --output semantic-ingestion-report.edn
+```
+
+The command acquires exclusive project ownership, reads the committed graph,
+selects a deterministic sample stratified by language, source role, rendered
+byte bucket, and chunk count, and renders it with the production document
+builder. It runs request sizes 32, 128, 300, and 512 at concurrency 1 and 2.
+Every case uses a fresh marked index beside the active index, waits for exact
+metadata visibility, and removes only its own marked directory after success.
+A failed directory is retained and printed for diagnosis; absolute paths,
+symbol IDs, and source text are omitted from the saved report.
+
+The command refuses to run while the project service owns the graph. This is
+the conservative resource-safety mode: qualification never competes with the
+live model or mutates the active provider index.
+
 Run the repeatable in-process workload with:
 
 ```bash

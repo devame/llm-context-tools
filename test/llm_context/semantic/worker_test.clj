@@ -50,12 +50,27 @@
     (store/with-store [graph project settings]
       (let [worker (test-worker graph project client)]
         (worker/prepare! worker)
-        (is (= {:leased 2 :completed 2 :retried 0
-                :failed 0 :superseded 0 :accepted-documents 2}
-               (select-keys
-                (worker/process-once! worker)
-                [:leased :completed :retried :failed :superseded
-                 :accepted-documents])))
+        (let [result (worker/process-once! worker)]
+          (is (= {:leased 2 :completed 2 :retried 0
+                  :failed 0 :superseded 0 :accepted-documents 2}
+                 (select-keys
+                  result
+                  [:leased :completed :retried :failed :superseded
+                   :accepted-documents])))
+          (is (= {:prepared-symbol-jobs 2
+                  :prepared-provider-documents 2
+                  :request-count 1
+                  :request-provider-documents 2
+                  :accepted-symbol-jobs 2
+                  :visible-symbol-jobs 2}
+                 (select-keys
+                  result
+                  [:prepared-symbol-jobs :prepared-provider-documents
+                   :request-count :request-provider-documents
+                   :accepted-symbol-jobs :visible-symbol-jobs])))
+          (#'worker/report-progress! worker result)
+          (is (= 2 (:leased-symbol-jobs @(:progress worker))))
+          (is (= 2 (:request-provider-documents @(:progress worker)))))
         (is (empty? (state/job-records graph reconcile/provider)))
         (let [indexed (first (state/indexed-records
                               graph reconcile/provider))]
@@ -206,6 +221,35 @@
           (is (= 4 (:upload-batches result)))
           (is (<= 2 @maximum 4)))))))
 
+(deftest opt-in-cold-profile-routes-leasing-and-requests-through-the-planner
+  (let [definitions (apply str (for [index (range 30)]
+                                 (format "(def value-%d %d)\n" index index)))
+        {:keys [project]} (fixture (str "(ns sample.app)\n" definitions))
+        client (fake/create)
+        cold-settings
+        (-> settings
+            (assoc-in [:semantic :lateon-code :update-batch-size] 2)
+            (assoc-in [:semantic :lateon-code :update-concurrency] 1)
+            (assoc-in [:semantic :lateon-code :ingestion-profile] :cold)
+            (assoc-in [:semantic :lateon-code :cold-ingestion]
+                      {:enabled true
+                       :backlog-threshold 1
+                       :exit-threshold 1
+                       :update-batch-size 10
+                       :update-concurrency 2
+                       :max-inflight-provider-documents 20}))]
+    (store/with-store [graph project cold-settings]
+      (let [semantic-worker
+            (worker/create graph project cold-settings client
+                           {:owner "cold-profile-worker"})
+            result (worker/process-once! semantic-worker)]
+        (is (= :cold (get-in result [:ingestion-plan :profile])))
+        (is (= :configured-cold (get-in result [:ingestion-plan :reason])))
+        (is (= 20 (:leased result)))
+        (is (= 2 (:request-count result)))
+        (is (= 2 (:request-concurrency-effective result)))
+        (is (= 20 (:request-provider-documents result)))))))
+
 (deftest worker-recovers-leases-that-expire-after-startup
   (let [{:keys [project]} (fixture)
         client (fake/create)
@@ -304,6 +348,43 @@
         (is (= :pending
                (:semantic.job/status
                 (first (state/job-records graph reconcile/provider)))))))))
+
+(deftest provider-backpressure-reduces-concurrency-without-consuming-attempts
+  (let [{:keys [project]} (fixture)
+        base (fake/create)
+        saturated
+        (reify index/SemanticIndex
+          (index-health [_] (index/index-health base))
+          (ensure-index! [_] (index/ensure-index! base))
+          (add-documents! [_ _]
+            (throw (ex-info "provider queue full"
+                            {:type :next-plaid/api-error
+                             :status 429
+                             :code "QUEUE_FULL"
+                             :retriable? true})))
+          (delete-symbols! [_ symbols]
+            (index/delete-symbols! base symbols))
+          (indexed-documents [_ symbols]
+            (index/indexed-documents base symbols))
+          (indexed-chunk-count [_ symbol hash]
+            (index/indexed-chunk-count base symbol hash))
+          (search-text [_ query options]
+            (index/search-text base query options))
+          (close-index! [_] nil))]
+    (store/with-store [graph project settings]
+      (let [semantic-worker (test-worker graph project saturated)
+            result (worker/process-once! semantic-worker)
+            jobs (state/job-records graph reconcile/provider)]
+        (is (= 2 (:retried result)))
+        (is (= 1 (:provider-backpressure-count result)))
+        (is (= 2 (:provider-retry-count result)))
+        (is (= 1 (:request-concurrency-effective result)))
+        (is (every? zero? (map :semantic.job/attempts jobs)))
+        (is (every? #(= :pending (:semantic.job/status %)) jobs))
+        (is (= :degraded
+               (get-in (state/semantic-summary
+                        graph reconcile/provider (System/currentTimeMillis))
+                       [:watermark :semantic.watermark/state])))))))
 
 (deftest non-retriable-failure-is-isolated-as-failed
   (let [{:keys [project]} (fixture)

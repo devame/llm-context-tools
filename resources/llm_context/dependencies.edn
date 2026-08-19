@@ -63,7 +63,13 @@
  {:next-plaid
   {:version "1.7.0"
    :source-repository "lightonai/next-plaid"
-   :source-revision "00e26aae0006b322727db277672211d9a0e3ccec"}
+   :source-tag "v1.7.0"
+   :source-revision "00e26aae0006b322727db277672211d9a0e3ccec"
+   :queue-contract
+   {:encoding {:maximum-texts 64 :collection-window-ms 10}
+    :index-update {:maximum-provider-documents 300
+                   :collection-window-ms 100}
+    :accepted-response-is-visible false}}
   :onnx-runtime
   {:version "1.29.0"
    :release-url "https://github.com/microsoft/onnxruntime/releases/download/v1.29.0"

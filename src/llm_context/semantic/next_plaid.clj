@@ -1,5 +1,5 @@
 (ns llm-context.semantic.next-plaid
-  "NextPlaid v1.6 REST client. The rest of llm-context depends only on the
+  "NextPlaid v1.7 REST client. The rest of llm-context depends only on the
   SemanticIndex protocol and never on endpoint shapes or SQL metadata names."
   (:require [clojure.data.json :as json]
             [clojure.string :as str]

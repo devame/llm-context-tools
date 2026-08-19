@@ -578,6 +578,22 @@
      {:aggregates (get entity-counts :entity.type/aggregate 0)
       :memberships (get entity-counts :entity.type/membership 0)}}))
 
+(defn semantic-pending-operation-counts
+  "Return pending semantic jobs grouped by operation without materializing
+  individual job records. Missing operation kinds are reported as zero."
+  [db provider]
+  (let [counts
+        (into {}
+              (d/q '[:find ?operation (count ?job)
+                     :in $ ?provider
+                     :where
+                     [?job :semantic.job/provider ?provider]
+                     [?job :semantic.job/status :pending]
+                     [?job :semantic.job/operation ?operation]]
+                   db provider))]
+    {:upserts (long (get counts :upsert 0))
+     :deletes (long (get counts :delete 0))}))
+
 (defn semantic-indexed-for-file [db provider file-id]
   (let [eids (d/q '[:find [?record ...]
                     :in $ ?provider ?file-id

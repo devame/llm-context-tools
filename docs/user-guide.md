@@ -204,7 +204,10 @@ facts are embedded in the owning symbol documents rather than indexed as a
 separate document type.
 
 Status defaults to one line: remaining documents, total desired documents, and
-measured documents per second. Add `--verbose` for runtime availability,
+measured documents per second. The worker prefers a bounded recent completion
+window and resets the displayed rate after an idle interval. Add `--verbose`
+for explicit symbol-job, provider-document, request, byte, stage-time,
+effective-profile, and backpressure telemetry, plus runtime availability,
 desired/indexed coverage, leased and provider-accepted work, provider details,
 and analysis progress. During a
 graph replacement verbose status remains readable and reports the last
@@ -392,8 +395,26 @@ semantic retriever accepts these project settings:
    :cuda-library-paths []   ; absolute directories for cuDNN/CUDA libraries
    :cuda-encoding-sessions 1
    :cuda-encoding-batch-size 1
-   :cuda-update-concurrency 1}}}
+   :cuda-update-concurrency 1
+   :ingestion-profile :steady
+   :cold-ingestion
+   {:enabled false
+    :backlog-threshold 2048
+    :exit-threshold 1024
+    :update-batch-size 512
+    :update-concurrency 2
+    :max-inflight-provider-documents 1024}}}}
 ```
+
+`:steady` preserves the existing request and latency behavior. Cold bounds are
+validated but inert while `:cold-ingestion :enabled` is false. After running
+the disposable qualification matrix on the pinned provider and local
+hardware, a project may explicitly enable `:cold` or `:auto`; auto enters cold
+mode only for an upsert-dominated backlog and returns to steady mode with the
+configured hysteresis. HTTP 429/503 saturation reduces effective request
+concurrency to one during a bounded cooldown without consuming document retry
+attempts. The visibility finalizer remains disabled until its separate
+performance and fault-recovery gate is satisfied.
 
 `:auto` selects CUDA/FP32 only when a GPU device, both ONNX Runtime CUDA
 provider libraries, cuDNN 9, and the verified `model.onnx` are present.

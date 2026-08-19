@@ -19,47 +19,67 @@
   (loop [candidate (.normalize (.toAbsolutePath path))]
     (cond
       (nil? candidate) nil
-      (Files/exists candidate (make-array LinkOption 0)) candidate
+      (Files/exists candidate (make-array LinkOption 0))
+      (.toRealPath candidate (make-array LinkOption 0))
       :else (recur (.getParent candidate)))))
 
 (defn probe-path
   "Resolve the filesystem whose usable capacity protects generated writes.
-  An explicit path wins. On WSL, /mnt/c is the conservative default because
-  the ext4 filesystem reports its thin-provisioned VHDX ceiling rather than
-  host capacity. Users whose distro VHDX lives elsewhere must override it."
-  [{:keys [^Path root]} config]
-  (let [configured (get-in config [:store :free-space-probe-path])
-        configured-path
-        (when configured
-          (let [candidate (Paths/get configured (make-array String 0))]
-            (if (.isAbsolute candidate)
-              candidate
-              (.resolve root candidate))))
-        db-path (.resolve root (get-in config [:store :path]))
-        automatic (if (and (wsl?)
-                           (Files/exists (Paths/get "/mnt/c"
-                                                    (make-array String 0))
-                                         (make-array LinkOption 0)))
-                    (Paths/get "/mnt/c" (make-array String 0))
-                    db-path)]
-    (or (existing-ancestor (or configured-path automatic))
-        (throw (ex-info "No existing filesystem path is available for the storage safety check"
-                        {:exit-code 2
-                         :type :store/space-probe-missing
-                         :configured-path configured})))))
+  An explicit path wins. A supplied generated-artifact path selects that
+  artifact's actual filesystem, following symbolic links only for filesystem
+  attribution. Without a target, the historical WSL host-capacity fallback is
+  retained for general project status."
+  ([project config]
+   (probe-path project config nil))
+  ([{:keys [^Path root]} config target]
+   (let [configured (get-in config [:store :free-space-probe-path])
+         configured-path
+         (when configured
+           (let [candidate (Paths/get configured (make-array String 0))]
+             (if (.isAbsolute candidate)
+               candidate
+               (.resolve root candidate))))
+         target-path
+         (when target
+           (let [candidate (if (instance? Path target)
+                             target
+                             (Paths/get (str target) (make-array String 0)))]
+             (if (.isAbsolute ^Path candidate)
+               candidate
+               (.resolve root ^Path candidate))))
+         db-path (.resolve root (get-in config [:store :path]))
+         automatic (if target-path
+                     target-path
+                     (if (and (wsl?)
+                              (Files/exists
+                               (Paths/get "/mnt/c" (make-array String 0))
+                               (make-array LinkOption 0)))
+                       (Paths/get "/mnt/c" (make-array String 0))
+                       db-path))]
+     (or (existing-ancestor (or configured-path automatic))
+         (throw
+          (ex-info
+           "No existing filesystem path is available for the storage safety check"
+           {:exit-code 2
+            :type :store/space-probe-missing
+            :configured-path configured
+            :target-path (some-> target-path str)}))))))
 
 (defn status
   "Return usable bytes and configured reserve for generated writes."
-  [project config]
-  (let [path (probe-path project config)
-        store (Files/getFileStore path)
-        usable (.getUsableSpace store)
-        minimum (get-in config [:store :minimum-free-space-bytes])]
-    {:probe-path (str path)
-     :filesystem (str (.name store))
-     :usable-bytes usable
-     :minimum-free-space-bytes minimum
-     :safe? (>= usable minimum)}))
+  ([project config]
+   (status project config nil))
+  ([project config target]
+   (let [path (probe-path project config target)
+         store (Files/getFileStore path)
+         usable (.getUsableSpace store)
+         minimum (get-in config [:store :minimum-free-space-bytes])]
+     {:probe-path (str path)
+      :probe-target (some-> target str)
+      :filesystem (str (.name store))
+      :usable-bytes usable
+      :minimum-free-space-bytes minimum
+      :safe? (>= usable minimum)})))
 
 (def ^:private no-follow-links
   (into-array LinkOption [LinkOption/NOFOLLOW_LINKS]))
@@ -135,11 +155,24 @@
   "Capture a bounded operation's initial generated-artifact size. Component
   measurement is filesystem-only and never retains a database value."
   [project config operation components]
-  (let [sizes (selected-sizes project config components)]
+  (let [components (set components)
+        probe-target
+        (cond
+          (= components #{:semantic-index})
+          (configured-path project
+                           (get-in config [:semantic :lateon-code :index-path]))
+
+          (= components #{:query-router-index})
+          (configured-path project
+                           (get-in config [:context :query-router :index-path]))
+
+          :else nil)
+        sizes (selected-sizes project config components)]
     {:project project
      :config config
      :operation operation
-     :components (set components)
+     :components components
+     :probe-target probe-target
      :baseline-component-bytes sizes
      :baseline-bytes (reduce + 0 (vals sizes))
      :sample (atom {:sampled-at 0 :bytes nil})}))
@@ -148,9 +181,9 @@
   "Check free-space reserve before every write and rate-limit recursive growth
   measurement. Throws before the next write unit when the operation cap is
   exceeded."
-  [{:keys [project config operation components baseline-component-bytes
-           baseline-bytes sample]}]
-  (let [space (assert-headroom! project config operation)
+  [{:keys [project config operation components probe-target
+           baseline-component-bytes baseline-bytes sample]}]
+  (let [space (assert-headroom! project config operation probe-target)
         now (System/currentTimeMillis)
         interval (get-in config [:store :storage-sample-interval-ms])
         previous @sample]
@@ -309,9 +342,11 @@
 (defn assert-headroom!
   "Fail before the next generated write when the configured reserve would be
   crossed. The caller should leave graph/index state retryable."
-  ([project config] (assert-headroom! project config nil))
+  ([project config] (assert-headroom! project config nil nil))
   ([project config operation]
-   (let [snapshot (status project config)]
+   (assert-headroom! project config operation nil))
+  ([project config operation target]
+   (let [snapshot (status project config target)]
      (when-not (:safe? snapshot)
        (throw
         (ex-info

@@ -636,17 +636,21 @@
     :else nil))
 
 (defn- semantic-processing-speed
-  "Return documents per second. Prefer the worker's cumulative measured rate,
-  which remains meaningful across provider batches; fall back to the change
-  between CLI polling samples when worker telemetry is unavailable."
+  "Return documents per second. Prefer the worker's bounded recent window,
+  then its cumulative compatibility rate, then CLI polling deltas."
   [status previous-status elapsed-ms]
   (let [pending (pending-document-count status)
         health-state (get-in status [:health :state])
+        recent-symbols-per-second
+        (get-in status [:runtime :worker-progress
+                        :recent-completed-symbols-per-second])
         documents-per-minute
         (get-in status [:runtime :worker-progress :documents-per-minute])]
     (cond
       (zero? (or pending 0)) 0.0
       (contains? #{:stalled :failed :recovering} health-state) 0.0
+      (number? recent-symbols-per-second)
+      (double recent-symbols-per-second)
       (number? documents-per-minute)
       (/ (double documents-per-minute) 60.0)
       (and previous-status (pos? (long (or elapsed-ms 0)))

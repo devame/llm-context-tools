@@ -521,6 +521,9 @@
 (defn- semantic-worker-settings [settings runtime]
   (let [lateon (get-in settings [:semantic :lateon-code])]
     (assoc lateon
+           :accelerator
+           (or (get-in runtime [:inference :accelerator])
+               (:accelerator lateon))
            :update-concurrency
            (or (get-in runtime [:inference :update-concurrency])
                (:update-concurrency lateon)))))

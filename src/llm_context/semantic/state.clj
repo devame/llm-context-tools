@@ -695,7 +695,8 @@
                 (throw error))))))))
 
   (retry-job! [graph {:keys [job-id lease-owner failed-at available-at
-                             error max-attempts]}]
+                             error max-attempts consume-attempt?]
+                      :or {consume-attempt? true}}]
     (when-not (and (nat-int? failed-at) (nat-int? available-at)
                    (pos-int? max-attempts))
       (throw (ex-info "Semantic retry times and attempt limit must be valid"
@@ -706,7 +707,8 @@
           eid (eid-by db :semantic.job/id job-id)
           job (when eid (d/pull db '[*] eid))]
       (when (and job (= lease-owner (:semantic.job/lease-owner job)))
-        (let [attempts (inc (long (:semantic.job/attempts job)))
+        (let [attempts (+ (long (:semantic.job/attempts job))
+                          (if consume-attempt? 1 0))
               terminal? (>= attempts max-attempts)
               release-token (str lease-owner "|release|" failed-at)
               message (subs (str error) 0 (min max-error-length

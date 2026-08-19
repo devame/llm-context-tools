@@ -33,5 +33,9 @@
   {:extra-paths ["bench"]
    :jvm-opts ["--enable-native-access=ALL-UNNAMED"]
    :main-opts ["-m" "llm-context.provider-qualification"]}
+  :qualify-semantic-ingestion
+  {:extra-paths ["bench"]
+   :jvm-opts ["--enable-native-access=ALL-UNNAMED"]
+   :main-opts ["-m" "llm-context.semantic-ingestion-qualification"]}
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.14"}}
           :ns-default build}}}

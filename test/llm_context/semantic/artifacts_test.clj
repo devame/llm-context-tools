@@ -1,6 +1,7 @@
 (ns llm-context.semantic.artifacts-test
   (:require [clojure.test :refer [deftest is]]
             [llm-context.config :as config]
+            [llm-context.dependencies :as dependencies]
             [llm-context.semantic.artifacts :as artifacts])
   (:import [java.nio.file Files OpenOption StandardOpenOption]))
 
@@ -36,6 +37,13 @@
     (is (= artifacts/query-router-model-revision
            (:model-revision router)))
     (is (= artifacts/next-plaid-version (:next-plaid-version router)))
+    (is (= "v1.7.0"
+           (dependencies/value [:semantic :next-plaid :source-tag])))
+    (is (= {:encoding {:maximum-texts 64 :collection-window-ms 10}
+            :index-update {:maximum-provider-documents 300
+                           :collection-window-ms 100}
+            :accepted-response-is-visible false}
+           (dependencies/value [:semantic :next-plaid :queue-contract])))
     (is (= 40 (count artifacts/model-revision)))
     (is (= 6 (count artifacts/model-files)))
     (is (= 6 (count artifacts/query-router-model-files)))))

@@ -30,6 +30,38 @@
       (is (= :test-write (:operation (ex-data error))))
       (is (= 1 (:exit-code (ex-data error)))))))
 
+(deftest semantic-operation-probes-the-index-filesystem-ancestor
+  (let [project (temp-project)
+        settings (-> (config/defaults)
+                     (assoc-in [:store :minimum-free-space-bytes] 0)
+                     (assoc-in [:semantic :lateon-code :index-path]
+                               ".llm-context/semantic/missing-index"))
+        semantic-parent (.resolve (:state-dir project) "semantic")]
+    (Files/createDirectories semantic-parent
+                             (make-array java.nio.file.attribute.FileAttribute 0))
+    (let [guard (storage/operation-guard project settings
+                                         :semantic-indexing
+                                         #{:semantic-index})
+          snapshot (storage/assert-operation-safe! guard)]
+      (is (= (str (.toRealPath semantic-parent
+                               (make-array java.nio.file.LinkOption 0)))
+             (:probe-path snapshot)))
+      (is (= (str (.resolve semantic-parent "missing-index"))
+             (:probe-target snapshot))))))
+
+(deftest filesystem-probe-resolves-symbolic-link-ancestors
+  (let [project (temp-project)
+        target (Files/createTempDirectory
+                "llm-context-storage-target-"
+                (make-array java.nio.file.attribute.FileAttribute 0))
+        link (.resolve (:root project) "linked-index")]
+    (Files/createSymbolicLink link target
+                              (make-array java.nio.file.attribute.FileAttribute 0))
+    (is (= (str (.toRealPath target
+                             (make-array java.nio.file.LinkOption 0)))
+           (str (storage/probe-path project (config/defaults)
+                                    (.resolve link "missing")))))))
+
 (deftest operation-growth-guard-stops-before-the-next-write-unit
   (let [project (temp-project)
         settings (-> (config/defaults)

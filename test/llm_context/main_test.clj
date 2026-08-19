@@ -429,6 +429,15 @@
           {:desired 100 :indexed 10}
           2000))))
 
+(deftest semantic-status-prefers-recent-worker-throughput
+  (is (= 3.5
+         (#'cli/semantic-processing-speed
+          {:desired 100 :indexed 50 :pending 50
+           :runtime {:worker-progress
+                     {:recent-completed-symbols-per-second 3.5
+                      :documents-per-minute 120.0}}}
+          nil nil))))
+
 (deftest compact-copy-delegates-to-the-resident-service-owner
   (let [root (Files/createTempDirectory
               "llm-context-maintenance-copy-"

@@ -12,6 +12,7 @@
 (def default-resource "llm_context/default-config.edn")
 
 (def ^:private semantic-modes #{:background :disabled})
+(def ^:private semantic-ingestion-profiles #{:steady :cold :auto})
 
 (defn- non-blank-string? [value]
   (and (string? value) (not (str/blank? value))))
@@ -45,6 +46,8 @@
 
 (defn- validation-errors [config]
   (let [lateon (get-in config [:semantic :lateon-code])
+        cold-ingestion (:cold-ingestion lateon)
+        visibility-finalizer (:visibility-finalizer lateon)
         router (get-in config [:context :query-router])
         reranker (get-in config [:context :candidate-reranker])]
     (cond-> []
@@ -327,6 +330,9 @@
     (not (pos-int? (:model-document-length lateon)))
     (conj ":semantic/:lateon-code/:model-document-length must be a positive integer")
 
+    (not (contains? semantic-ingestion-profiles (:ingestion-profile lateon)))
+    (conj ":semantic/:lateon-code/:ingestion-profile must be :steady, :cold, or :auto")
+
     (not (pos-int? (:update-batch-size lateon)))
     (conj ":semantic/:lateon-code/:update-batch-size must be a positive integer")
 
@@ -335,6 +341,88 @@
 
     (not (pos-int? (:cuda-update-concurrency lateon)))
     (conj ":semantic/:lateon-code/:cuda-update-concurrency must be a positive integer")
+
+    (not (map? cold-ingestion))
+    (conj ":semantic/:lateon-code/:cold-ingestion must be a map")
+
+    (not (boolean? (:enabled cold-ingestion)))
+    (conj ":semantic/:lateon-code/:cold-ingestion/:enabled must be true or false")
+
+    (not (pos-int? (:backlog-threshold cold-ingestion)))
+    (conj ":semantic/:lateon-code/:cold-ingestion/:backlog-threshold must be a positive integer")
+
+    (not (pos-int? (:exit-threshold cold-ingestion)))
+    (conj ":semantic/:lateon-code/:cold-ingestion/:exit-threshold must be a positive integer")
+
+    (and (pos-int? (:backlog-threshold cold-ingestion))
+         (pos-int? (:exit-threshold cold-ingestion))
+         (> (:exit-threshold cold-ingestion)
+            (:backlog-threshold cold-ingestion)))
+    (conj ":semantic/:lateon-code/:cold-ingestion/:exit-threshold must not exceed :backlog-threshold")
+
+    (not (pos-int? (:update-batch-size cold-ingestion)))
+    (conj ":semantic/:lateon-code/:cold-ingestion/:update-batch-size must be a positive integer")
+
+    (not (pos-int? (:update-concurrency cold-ingestion)))
+    (conj ":semantic/:lateon-code/:cold-ingestion/:update-concurrency must be a positive integer")
+
+    (not (pos-int? (:max-inflight-provider-documents cold-ingestion)))
+    (conj ":semantic/:lateon-code/:cold-ingestion/:max-inflight-provider-documents must be a positive integer")
+
+    (and (pos-int? (:update-batch-size cold-ingestion))
+         (pos-int? (:max-inflight-provider-documents cold-ingestion))
+         (< (:max-inflight-provider-documents cold-ingestion)
+            (:update-batch-size cold-ingestion)))
+    (conj ":semantic/:lateon-code/:cold-ingestion/:max-inflight-provider-documents must hold at least one request")
+
+    (not (map? visibility-finalizer))
+    (conj ":semantic/:lateon-code/:visibility-finalizer must be a map")
+
+    (not (boolean? (:enabled visibility-finalizer)))
+    (conj ":semantic/:lateon-code/:visibility-finalizer/:enabled must be true or false")
+
+    (not (pos-int? (:max-accepted-symbols visibility-finalizer)))
+    (conj ":semantic/:lateon-code/:visibility-finalizer/:max-accepted-symbols must be a positive integer")
+
+    (not (pos-int? (:max-accepted-provider-documents visibility-finalizer)))
+    (conj ":semantic/:lateon-code/:visibility-finalizer/:max-accepted-provider-documents must be a positive integer")
+
+    (and (pos-int? (:max-accepted-symbols visibility-finalizer))
+         (pos-int? (:update-batch-size cold-ingestion))
+         (< (:max-accepted-symbols visibility-finalizer)
+            (:update-batch-size cold-ingestion)))
+    (conj ":semantic/:lateon-code/:visibility-finalizer/:max-accepted-symbols must hold at least one cold request")
+
+    (and (pos-int? (:max-accepted-provider-documents visibility-finalizer))
+         (pos-int? (:update-batch-size cold-ingestion))
+         (< (:max-accepted-provider-documents visibility-finalizer)
+            (:update-batch-size cold-ingestion)))
+    (conj ":semantic/:lateon-code/:visibility-finalizer/:max-accepted-provider-documents must hold at least one cold request")
+
+    (not (pos-int? (:initial-poll-ms visibility-finalizer)))
+    (conj ":semantic/:lateon-code/:visibility-finalizer/:initial-poll-ms must be a positive integer")
+
+    (not (pos-int? (:max-poll-ms visibility-finalizer)))
+    (conj ":semantic/:lateon-code/:visibility-finalizer/:max-poll-ms must be a positive integer")
+
+    (and (pos-int? (:initial-poll-ms visibility-finalizer))
+         (pos-int? (:max-poll-ms visibility-finalizer))
+         (> (:initial-poll-ms visibility-finalizer)
+            (:max-poll-ms visibility-finalizer)))
+    (conj ":semantic/:lateon-code/:visibility-finalizer/:initial-poll-ms must not exceed :max-poll-ms")
+
+    (and (true? (:enabled visibility-finalizer))
+         (not (true? (:enabled cold-ingestion))))
+    (conj ":semantic/:lateon-code/:visibility-finalizer requires enabled queue-aware cold ingestion")
+
+    (true? (:enabled visibility-finalizer))
+    (conj ":semantic/:lateon-code/:visibility-finalizer is not available until the pipeline qualification gate passes")
+
+    (not (pos-int? (:backpressure-cooldown-ms lateon)))
+    (conj ":semantic/:lateon-code/:backpressure-cooldown-ms must be a positive integer")
+
+    (not (pos-int? (:backpressure-recovery-successes lateon)))
+    (conj ":semantic/:lateon-code/:backpressure-recovery-successes must be a positive integer")
 
     (not (pos-int? (:health-timeout-ms lateon)))
     (conj ":semantic/:lateon-code/:health-timeout-ms must be a positive integer")
