@@ -1,3 +1,8 @@
+## 0.12.8
+
+- Fix CUDA provider diagnostics so stale errors from a previous NextPlaid
+  process cannot force a healthy CUDA runtime onto CPU fallback.
+
 ## 0.12.7
 
 - Fix explicit CUDA installer selection and require the CUDA math libraries

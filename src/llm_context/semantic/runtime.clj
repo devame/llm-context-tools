@@ -114,9 +114,10 @@
       (with-open [file (java.io.RandomAccessFile. (str log-path) "r")]
         (let [size (.length file)
               start (min size (long (or (:log-offset runtime) 0)))
-              byte-count (int (min diagnostic-tail-bytes (- size start)))]
+              read-start (max start (- size diagnostic-tail-bytes))
+              byte-count (int (- size read-start))]
           (when (pos? byte-count)
-            (.seek file (- size byte-count))
+            (.seek file read-start)
             (let [bytes (byte-array byte-count)]
               (.readFully file bytes)
               (str/split-lines
