@@ -86,7 +86,7 @@ Each indexed chunk carries at least:
 {:symbol-id "symbol:..."
  :file-id "file:..."
  :document-hash "sha256:..."
- :model-revision "734b659a57935ef50562d79581c3ff1f8d825c93"
+ :model-revision "ace431824f35db231178fc602e33296784762a2e"
  :document-version 4
  :chunk-index 0}
 ```
@@ -198,7 +198,7 @@ not contain complete source documents, service tokens, or model request bodies.
 ## Defaults and resource profile
 
 The default model is `lightonai/LateOn-Code` at immutable revision
-`734b659a57935ef50562d79581c3ff1f8d825c93`, using its INT8 ONNX artifact. The
+`ace431824f35db231178fc602e33296784762a2e`, using its INT8 ONNX artifact. The
 default retrieval and ingestion settings reflect the repository benchmark:
 
 - pool factor 2;

@@ -35,7 +35,7 @@
           locals (get-in snapshot [:analysis :locals])
           local-usages (get-in snapshot [:analysis :local-usages])]
       (is (= :clj-kondo (:analyzer snapshot)))
-      (is (= "2026.07.24" (:analyzer-version snapshot)))
+      (is (= "2026.08.04" (:analyzer-version snapshot)))
       (is (some #(and (= 'greet (:name %))
                       (= 'sample.api (:to %))
                       (= 'sample.caller (:from %)))

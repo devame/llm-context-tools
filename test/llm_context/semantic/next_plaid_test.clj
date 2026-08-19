@@ -24,7 +24,7 @@
 
 (def ready-health
   {:status "healthy"
-   :version "1.6.4"
+     :version "1.7.0"
    :indices [{:name (:index-name settings) :num_documents 10}]
    :updates []
    :model {:name "lightonai/LateOn-Code"

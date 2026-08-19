@@ -4,13 +4,16 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [llm-context.analysis.effects :as effects]
+            [llm-context.dependencies :as dependencies]
             [llm-context.model.ids :as ids]
             [llm-context.parser.jtreesitter :as jtreesitter]
             [llm-context.parser.provider :as parser])
   (:import [java.nio.charset StandardCharsets]))
 
-(def catalog-resource "llm_context/janet/catalog-1.41.2.edn")
-(def catalog-version "1.41.2")
+(def catalog-resource
+  (dependencies/value [:language :janet :catalog-resource]))
+(def catalog-version
+  (dependencies/value [:language :janet :version]))
 
 (def catalog
   (delay (edn/read-string (slurp (io/resource catalog-resource)))))

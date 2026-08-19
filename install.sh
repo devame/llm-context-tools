@@ -3,11 +3,11 @@ set -eu
 
 REPOSITORY="devame/llm-context-tools"
 VERSION=${LLM_CONTEXT_VERSION:-latest}
-NEXT_PLAID_VERSION="1.6.4"
+NEXT_PLAID_VERSION="1.7.0"
 MODEL_ID="lightonai/LateOn-Code"
-MODEL_REVISION="734b659a57935ef50562d79581c3ff1f8d825c93"
+MODEL_REVISION="ace431824f35db231178fc602e33296784762a2e"
 ROUTER_MODEL_ID="mixedbread-ai/mxbai-edge-colbert-v0-32m"
-ROUTER_MODEL_REVISION="963e23afa1478d8bcc12e5d7115adcfdbd22c3af"
+ROUTER_MODEL_REVISION="bb13a29ec9b1e7edd4ba8f7a0776c48b55cbad66"
 DEFAULT_INSTALL_DIR="${HOME}/.local/bin"
 INSTALL_DIR=${LLM_CONTEXT_INSTALL_DIR:-"$DEFAULT_INSTALL_DIR"}
 MODEL_CACHE_ROOT=${LLM_CONTEXT_MODEL_CACHE:-"${HOME}/.cache/llm-context/models"}
@@ -211,9 +211,81 @@ print_cuda_host_actions() {
   if [ "$CUDA_RUNTIME_PRESENT" -eq 0 ]; then
     printf 'Action: install or expose the CUDA 12 runtime (libcudart.so.12).\n'
   fi
-  if [ "$CUDA_CUDNN_PRESENT" -eq 0 ]; then
+  if [ "$CUDA_DEVICE_VISIBLE" -eq 1 ] &&
+     [ "$CUDA_DRIVER_PRESENT" -eq 1 ] &&
+     [ "$CUDA_DRIVER_COMPATIBLE" -eq 1 ] &&
+     [ "$CUDA_RUNTIME_PRESENT" -eq 1 ] &&
+     [ "$CUDA_CUDNN_PRESENT" -eq 0 ]; then
     printf 'Action: install the CPU package first, then run llm-context setup --install-cudnn, or install cuDNN 9 for CUDA 12 using your distribution package manager.\n'
   fi
+}
+
+apt_cudnn_install_available() {
+  command -v apt-get >/dev/null 2>&1 &&
+    { [ "$(id -u)" -eq 0 ] || command -v sudo >/dev/null 2>&1; }
+}
+
+run_cudnn_install() {
+  if [ "$(id -u)" -eq 0 ]; then
+    apt-get update && apt-get -y install cudnn9-cuda-12
+  else
+    sudo apt-get update && sudo apt-get -y install cudnn9-cuda-12
+  fi
+}
+
+read_cudnn_install_choice() {
+  prompt='NVIDIA GPU and CUDA 12 runtime detected, but cuDNN 9 is missing. Install cuDNN 9 now? [y/N] '
+  if [ -r /dev/tty ]; then
+    printf '%s' "$prompt" >/dev/tty
+    IFS= read -r answer </dev/tty || answer=''
+  elif [ -t 0 ]; then
+    printf '%s' "$prompt"
+    IFS= read -r answer || answer=''
+  else
+    return 1
+  fi
+  answer=$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')
+  [ "$answer" = y ] || [ "$answer" = yes ]
+}
+
+maybe_install_cudnn() {
+  [ "$CUDA_DEVICE_VISIBLE" -eq 1 ] &&
+    [ "$CUDA_DRIVER_PRESENT" -eq 1 ] &&
+    [ "$CUDA_DRIVER_COMPATIBLE" -eq 1 ] &&
+    [ "$CUDA_RUNTIME_PRESENT" -eq 1 ] &&
+    [ "$CUDA_CUDNN_PRESENT" -eq 0 ] || return 0
+
+  if ! apt_cudnn_install_available; then
+    printf 'cuDNN is missing, but this installer cannot install the supported Debian/Ubuntu package (apt-get plus root/sudo required).\n'
+    return 0
+  fi
+
+  cudnn_choice=${LLM_CONTEXT_CUDNN_INSTALL:-prompt}
+  case "$cudnn_choice" in
+    yes|true|1|YES|TRUE)
+      printf 'Installing cuDNN 9 for CUDA 12...\n' ;;
+    no|false|0|NO|FALSE)
+      printf 'Skipping cuDNN installation by request.\n'
+      return 0 ;;
+    prompt)
+      [ -n "${CI:-}" ] && {
+        printf 'CI detected; skipping interactive cuDNN installation. Set LLM_CONTEXT_CUDNN_INSTALL=yes to opt in.\n'
+        return 0
+      }
+      read_cudnn_install_choice || {
+        printf 'Skipping cuDNN installation. Set LLM_CONTEXT_CUDNN_INSTALL=yes to install it non-interactively.\n'
+        return 0
+      } ;;
+    *)
+      fail 'LLM_CONTEXT_CUDNN_INSTALL must be prompt, yes, or no' ;;
+  esac
+
+  if run_cudnn_install; then
+    printf 'cuDNN installation completed; rerunning GPU preflight.\n'
+  else
+    printf 'cuDNN installation failed; rerunning GPU preflight before selecting a fallback.\n'
+  fi
+  cuda_host_preflight
 }
 
 TEMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/llm-context-install.XXXXXX")
@@ -254,6 +326,7 @@ if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
     Linux:x86_64|Linux:amd64)
       if [ "$RUNTIME_FLAVOR_REQUESTED" = "cuda" ]; then
         cuda_host_preflight
+        maybe_install_cudnn
         print_cuda_host_preflight
         [ "$CUDA_HOST_READY" -eq 1 ] || {
           print_cuda_host_actions
@@ -261,6 +334,7 @@ if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
         }
       elif [ "$RUNTIME_FLAVOR_REQUESTED" = "auto" ]; then
         cuda_host_preflight
+        maybe_install_cudnn
         print_cuda_host_preflight
         if [ "$CUDA_HOST_READY" -eq 1 ]; then
           RUNTIME_FLAVOR=cuda

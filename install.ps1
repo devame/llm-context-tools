@@ -2,11 +2,11 @@ $ErrorActionPreference = "Stop"
 
 $Repository = "devame/llm-context-tools"
 $Version = if ($env:LLM_CONTEXT_VERSION) { $env:LLM_CONTEXT_VERSION } else { "latest" }
-$NextPlaidVersion = "1.6.4"
+$NextPlaidVersion = "1.7.0"
 $ModelId = "lightonai/LateOn-Code"
-$ModelRevision = "734b659a57935ef50562d79581c3ff1f8d825c93"
+$ModelRevision = "ace431824f35db231178fc602e33296784762a2e"
 $RouterModelId = "mixedbread-ai/mxbai-edge-colbert-v0-32m"
-$RouterModelRevision = "963e23afa1478d8bcc12e5d7115adcfdbd22c3af"
+$RouterModelRevision = "bb13a29ec9b1e7edd4ba8f7a0776c48b55cbad66"
 $InstallDir = if ($env:LLM_CONTEXT_INSTALL_DIR) {
     $env:LLM_CONTEXT_INSTALL_DIR
 } else {

@@ -1,45 +1,27 @@
 (ns llm-context.semantic.artifacts
   "Immutable third-party runtime and model artifact contract."
+  (:require [llm-context.dependencies :as dependencies])
   (:import [java.io BufferedInputStream]
            [java.nio.file Files LinkOption Path]
            [java.security DigestInputStream MessageDigest]
            [java.util HexFormat]))
 
-(def next-plaid-version "1.6.4")
-(def onnx-runtime-version "1.23.0")
-(def model-id "lightonai/LateOn-Code")
-(def model-revision "734b659a57935ef50562d79581c3ff1f8d825c93")
-(def query-router-model-id "mixedbread-ai/mxbai-edge-colbert-v0-32m")
+(def next-plaid-version
+  (dependencies/value [:semantic :next-plaid :version]))
+(def onnx-runtime-version
+  (dependencies/value [:semantic :onnx-runtime :version]))
+(def model-id
+  (dependencies/value [:roles :semantic-retriever :model]))
+(def model-revision
+  (dependencies/value [:roles :semantic-retriever :revision]))
+(def query-router-model-id
+  (dependencies/value [:roles :query-router-reranker :model]))
 (def query-router-model-revision
-  "963e23afa1478d8bcc12e5d7115adcfdbd22c3af")
-
+  (dependencies/value [:roles :query-router-reranker :revision]))
 (def model-files
-  {"model.onnx"
-   "75f8f308994224ac88d580d5a37b68e94bd78be4887b7beb8578ed8b30bad242"
-   "model_int8.onnx"
-   "a62a88b4e3ebb76e8bc5f0263d17b773c667d27bc73c5120e3131048dd1554ef"
-   "tokenizer.json"
-   "a388b94942e98e5c661c6c23f919842285738bfd123a0d148dea0c56287505d0"
-   "config_sentence_transformers.json"
-   "34942289dec20e285b07132aa1d09980ed776a0bc34e531dd7b49c4701876871"
-   "config.json"
-   "424fa6fedd42b6a78257145a6068c17cc7e67ac5d7cc3c011ed9d8141c9159d4"
-   "onnx_config.json"
-   "eedf90bb3b71b7500a973e140b72a736c4c5ca4b6746c1f69fcc64b29924a8d5"})
-
+  (dependencies/value [:roles :semantic-retriever :files]))
 (def query-router-model-files
-  {"model.onnx"
-   "886e3a1638af8222613a8b3baf73520d5ab8c8275fc5ea16e3166982d01df24e"
-   "model_int8.onnx"
-   "264ba680e960af9fffb4f78c3af1e4ff92520678b8e136c79434d88fb2549e1b"
-   "tokenizer.json"
-   "594291000b476c98ed600cbb1914ff128c79642a9433aac86213c7a5562d7c1a"
-   "config_sentence_transformers.json"
-   "0c4eb4090ff55ddee69380ad5ea88a3a89500651996a56953af72bafdb7965b6"
-   "config.json"
-   "a60a035a715a686dca530cf41da553a571e26ea45288d04d750b9da1a27c268d"
-   "onnx_config.json"
-   "e10f017e4a8355f6b15f5be5f67295c90d5b25e487568bf0b0d9ee3259dc0eb7"})
+  (dependencies/value [:roles :query-router-reranker :files]))
 
 (defn sha256 [^Path path]
   (let [digest (MessageDigest/getInstance "SHA-256")]

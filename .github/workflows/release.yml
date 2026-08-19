@@ -22,11 +22,11 @@ jobs:
             cuda: false
             executable: next-plaid-api
             archive: tar
-            ort_archive: onnxruntime-linux-x64-1.23.0.tgz
-            ort_root: onnxruntime-linux-x64-1.23.0
-            ort_source: lib/libonnxruntime.so.1.23.0
+            ort_archive: onnxruntime-linux-x64-1.29.0.tgz
+            ort_root: onnxruntime-linux-x64-1.29.0
+            ort_source: lib/libonnxruntime.so.1.29.0
             ort_name: libonnxruntime.so
-            ort_sha256: b6deea7f2e22c10c043019f294a0ea4d2a6c0ae52a009c34847640db75ec5580
+            ort_sha256: c3fddc4f139a045b0c4902c57410f0694f1c2fdf9b6939fbe38b1aeae7cd14ba
           - runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             features: model,cuda
@@ -34,11 +34,11 @@ jobs:
             cuda: true
             executable: next-plaid-api
             archive: tar
-            ort_archive: onnxruntime-linux-x64-gpu-1.23.0.tgz
-            ort_root: onnxruntime-linux-x64-gpu-1.23.0
-            ort_source: lib/libonnxruntime.so.1.23.0
+            ort_archive: onnxruntime-linux-x64-gpu_cuda12-1.29.0.tgz
+            ort_root: onnxruntime-linux-x64-gpu_cuda12-1.29.0
+            ort_source: lib/libonnxruntime.so.1.29.0
             ort_name: libonnxruntime.so
-            ort_sha256: fc5d0e2dbdb893de11758da83523169761a70562dc0f6991f2cdb614f6a62c3d
+            ort_sha256: 4ca594a0da83927befbd73fe020d7f569be151d70bb4fe9741ad405f4882e2ad
           - runner: macos-15
             target: aarch64-apple-darwin
             features: model,accelerate
@@ -46,11 +46,11 @@ jobs:
             cuda: false
             executable: next-plaid-api
             archive: tar
-            ort_archive: onnxruntime-osx-arm64-1.23.0.tgz
-            ort_root: onnxruntime-osx-arm64-1.23.0
-            ort_source: lib/libonnxruntime.1.23.0.dylib
+            ort_archive: onnxruntime-osx-arm64-1.29.0.tgz
+            ort_root: onnxruntime-osx-arm64-1.29.0
+            ort_source: lib/libonnxruntime.1.29.0.dylib
             ort_name: libonnxruntime.dylib
-            ort_sha256: 8182db0ebb5caa21036a3c78178f17fabb98a7916bdab454467c8f4cf34bcfdf
+            ort_sha256: d0706fc34f315d8c88639d0a8c81f2e09e815f282cabed3493c06a054352cf92
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
             features: model
@@ -58,22 +58,22 @@ jobs:
             cuda: false
             executable: next-plaid-api.exe
             archive: zip
-            ort_archive: onnxruntime-win-x64-1.23.0.zip
-            ort_root: onnxruntime-win-x64-1.23.0
+            ort_archive: onnxruntime-win-x64-1.29.0.zip
+            ort_root: onnxruntime-win-x64-1.29.0
             ort_source: lib/onnxruntime.dll
             ort_name: onnxruntime.dll
-            ort_sha256: 72c23470310ec79a7d42d27fe9d257e6c98540c73fa5a1db1f67f538c6c16f2f
+            ort_sha256: c9b4b7086b529ad814f428c1bad028e20a25d7dc0699836775faace4ab5b78b2
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out pinned NextPlaid source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
         with:
           repository: lightonai/next-plaid
-          ref: dba1539dd0b725c9bbd61db1920a28ea85787b17
-      - uses: dtolnay/rust-toolchain@1.91.1
+          ref: 00e26aae0006b322727db277672211d9a0e3ccec
+      - uses: dtolnay/rust-toolchain@1.97.1
         with:
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.2
       - name: Build NextPlaid API
         shell: bash
         run: |
@@ -88,7 +88,7 @@ jobs:
           cp "target/${{ matrix.target }}/release/${{ matrix.executable }}" package/
           cp LICENSE package/next-plaid-LICENSE
           curl --fail --location \
-            "https://github.com/microsoft/onnxruntime/releases/download/v1.23.0/${{ matrix.ort_archive }}" \
+            "https://github.com/microsoft/onnxruntime/releases/download/v1.29.0/${{ matrix.ort_archive }}" \
             --output onnxruntime-archive
           if command -v sha256sum >/dev/null 2>&1; then
             ort_actual_sha256="$(sha256sum onnxruntime-archive | cut -d ' ' -f 1)"
@@ -113,32 +113,49 @@ jobs:
           cp "onnxruntime/${{ matrix.ort_root }}/ThirdPartyNotices.txt" \
             package/onnxruntime-ThirdPartyNotices.txt
           if [ "${{ matrix.archive }}" = "zip" ]; then
-            (cd package && 7z a "../next-plaid-api-1.6.4-${{ matrix.target }}${{ matrix.artifact_suffix }}.zip" .)
+            (cd package && 7z a "../next-plaid-api-1.7.0-${{ matrix.target }}${{ matrix.artifact_suffix }}.zip" .)
           else
-            tar -C package -czf "next-plaid-api-1.6.4-${{ matrix.target }}${{ matrix.artifact_suffix }}.tar.gz" .
+            tar -C package -czf "next-plaid-api-1.7.0-${{ matrix.target }}${{ matrix.artifact_suffix }}.tar.gz" .
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: next-plaid-api-${{ matrix.target }}${{ matrix.artifact_suffix }}
-          path: next-plaid-api-1.6.4-${{ matrix.target }}${{ matrix.artifact_suffix }}.*
+          path: next-plaid-api-1.7.0-${{ matrix.target }}${{ matrix.artifact_suffix }}.*
           if-no-files-found: error
 
   release:
-    needs: semantic-runtime
+    needs: [semantic-runtime, native-parser]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v5
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-java@v5.7.0
         with:
           distribution: zulu
           java-version: "25"
-      - uses: DeLaGuardo/setup-clojure@13.4
+      - uses: DeLaGuardo/setup-clojure@13.6.1
         with:
-          cli: latest
-      - uses: actions/setup-node@v4
+          cli: 1.12.5.1664
+      - uses: actions/setup-node@v7.0.0
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
+      - name: Verify local Linux native parser artifact
+        run: test -s resources/lib/x86_64-linux-gnu-tree-sitter-janet.so
+      - name: Download CI-built non-Linux native parser artifacts
+        uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: native-parser-*
+          path: native-artifacts
+          merge-multiple: true
+      - name: Assemble native parser libraries
+        run: |
+          cp native-artifacts/* resources/lib/
+          test -s resources/lib/x86_64-linux-gnu-tree-sitter-janet.so
+          test -s resources/lib/aarch64-linux-gnu-tree-sitter-janet.so
+          test -s resources/lib/x86_64-macos-tree-sitter-janet.dylib
+          test -s resources/lib/aarch64-macos-tree-sitter-janet.dylib
+          test -s resources/lib/x86_64-windows-tree-sitter-janet.dll
+          test -s resources/lib/x86_64-windows-tree-sitter.dll
       - name: Test, build, and verify release artifacts
         run: scripts/build-release.sh
       - name: Verify tag and prepare checksums
@@ -148,7 +165,7 @@ jobs:
           cd dist
           sha256sum llm-context.jar > llm-context.jar.sha256
       - name: Download semantic runtime artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.1
         with:
           pattern: next-plaid-api-*
           path: dist

@@ -1,0 +1,142 @@
+{:dependency-contract-version 1
+ :contract-version 1
+
+ ;; This is the repository's authoritative dependency inventory. Values in
+ ;; installers, workflows, generated release metadata, and runtime code must
+ ;; agree with this file; script/verify-dependencies.clj enforces that rule.
+ :project
+ {:name "llm-context"
+  :version "0.12.5"
+  :repository "devame/llm-context-tools"}
+
+ :toolchain
+ {:minimum-java-feature 23
+  :compile-java-release 23
+  :ci-java-feature 25
+  :ci-node-major 24
+  :ci-clojure-cli "1.12.5.1664"}
+
+ :host-tools
+ {:source-build ["clojure" "java" "npm"]
+  :native-build ["zig" "curl" "tar" "sha256sum-or-shasum"]
+  :release-build ["cargo" "7z" "curl" "tar" "sha256sum"]
+  :unix-installer ["java" "curl-or-wget" "awk" "sed" "mktemp"]
+  :windows-installer ["java" "PowerShell"]}
+
+ :jvm
+ {:deps
+  {org.clojure/clojure {:mvn/version "1.12.5"}
+   clj-kondo/clj-kondo {:mvn/version "2026.08.04"}
+   org.clojure/data.json {:mvn/version "2.5.2"}
+   org.clojure/tools.reader {:mvn/version "1.6.0"}
+   org.datalevin/datalevin-embedded {:mvn/version "1.0.2"}
+   io.github.tree-sitter/jtreesitter {:mvn/version "0.26.1"}
+   io.github.bonede/tree-sitter {:mvn/version "0.26.6"}}
+  :test-deps
+  {io.github.cognitect-labs/test-runner
+   {:git/tag "v0.5.1"
+    :git/sha "dfb30dd"}}
+  :build-deps
+  {io.github.clojure/tools.build {:mvn/version "0.10.14"}}}
+
+ :language
+ {:janet
+  {:version "1.41.2"
+   :catalog-resource "llm_context/janet/catalog-1.41.2.edn"
+   :catalog-source "https://janet-lang.org/1.41.2/api/index.html"}}
+
+ :native
+ {:tree-sitter
+  {:version "0.26.12"
+   :abi 14
+   :archive-sha256
+   "428e2b182fe38eddc100d8bd851e47c96921a69281b66abafc25ba4b0aaeeeab"}
+  :janet-grammar
+  {:repository "sogaiu/tree-sitter-janet-simple"
+   :source-url "https://github.com/sogaiu/tree-sitter-janet-simple"
+   :revision "3c1bdcfff374138da03a1db25c75efce623910fe"
+   :archive-sha256
+   "afdac751df067aff225a93fbecdf460eb53814ec10bc702512a3fe4a6ae5fa0f"
+   :zig-minimum-version "0.15.1"}}
+
+ :semantic
+ {:next-plaid
+  {:version "1.7.0"
+   :source-repository "lightonai/next-plaid"
+   :source-revision "00e26aae0006b322727db277672211d9a0e3ccec"}
+  :onnx-runtime
+  {:version "1.29.0"
+   :release-url "https://github.com/microsoft/onnxruntime/releases/download/v1.29.0"
+   :artifacts
+   [{:platform :linux-x64-cpu
+     :archive "onnxruntime-linux-x64-1.29.0.tgz"
+     :sha256 "c3fddc4f139a045b0c4902c57410f0694f1c2fdf9b6939fbe38b1aeae7cd14ba"}
+    {:platform :linux-x64-cuda
+     :archive "onnxruntime-linux-x64-gpu_cuda12-1.29.0.tgz"
+     :sha256 "4ca594a0da83927befbd73fe020d7f569be151d70bb4fe9741ad405f4882e2ad"}
+    {:platform :macos-arm64
+     :archive "onnxruntime-osx-arm64-1.29.0.tgz"
+     :sha256 "d0706fc34f315d8c88639d0a8c81f2e09e815f282cabed3493c06a054352cf92"}
+    {:platform :windows-x64
+     :archive "onnxruntime-win-x64-1.29.0.zip"
+     :sha256 "c9b4b7086b529ad814f428c1bad028e20a25d7dc0699836775faace4ab5b78b2"}]}
+  :cuda
+  {:version "12"
+   :cudnn-version "9"
+   :minimum-driver "525.60.13"
+   :debian-package "cudnn9-cuda-12"}}
+
+ :github
+ {:actions
+  {"checkout" "v7.0.1"
+   "setup-java" "v5.7.0"
+   "setup-node" "v7.0.0"
+   "setup-clojure" "13.6.1"
+   "upload-artifact" "v7.0.1"
+   "download-artifact" "v8.0.1"
+   "setup-zig" "v2.2.1"
+   "rust-toolchain" "1.97.1"
+   "rust-cache" "v2.9.2"}
+  :composite-action-release "0.12.4"}
+
+ ;; The top-level :roles map is the verified model package contract. Keeping
+ ;; it here means model IDs, revisions, entrypoints, and file hashes share the
+ ;; same authority as the JVM/native/runtime dependencies.
+ :roles
+ {:semantic-retriever
+  {:model "lightonai/LateOn-Code"
+   :revision "ace431824f35db231178fc602e33296784762a2e"
+   :format :next-plaid-onnx
+   :entrypoint "model_int8.onnx"
+   :base-url "https://huggingface.co/lightonai/LateOn-Code/resolve/ace431824f35db231178fc602e33296784762a2e"
+   :files
+   {"model.onnx" "75f8f308994224ac88d580d5a37b68e94bd78be4887b7beb8578ed8b30bad242"
+    "model_int8.onnx" "a62a88b4e3ebb76e8bc5f0263d17b773c667d27bc73c5120e3131048dd1554ef"
+    "tokenizer.json" "a388b94942e98e5c661c6c23f919842285738bfd123a0d148dea0c56287505d0"
+    "config_sentence_transformers.json" "34942289dec20e285b07132aa1d09980ed776a0bc34e531dd7b49c4701876871"
+    "config.json" "424fa6fedd42b6a78257145a6068c17cc7e67ac5d7cc3c011ed9d8141c9159d4"
+    "onnx_config.json" "eedf90bb3b71b7500a973e140b72a736c4c5ca4b6746c1f69fcc64b29924a8d5"}}
+
+  :query-router-reranker
+  {:model "mixedbread-ai/mxbai-edge-colbert-v0-32m"
+   :revision "bb13a29ec9b1e7edd4ba8f7a0776c48b55cbad66"
+   :format :next-plaid-onnx
+   :entrypoint "model_int8.onnx"
+   :base-url "https://huggingface.co/mixedbread-ai/mxbai-edge-colbert-v0-32m/resolve/bb13a29ec9b1e7edd4ba8f7a0776c48b55cbad66"
+   :files
+   {"model.onnx" "886e3a1638af8222613a8b3baf73520d5ab8c8275fc5ea16e3166982d01df24e"
+    "model_int8.onnx" "264ba680e960af9fffb4f78c3af1e4ff92520678b8e136c79434d88fb2549e1b"
+    "tokenizer.json" "594291000b476c98ed600cbb1914ff128c79642a9433aac86213c7a5562d7c1a"
+    "config_sentence_transformers.json" "0c4eb4090ff55ddee69380ad5ea88a3a89500651996a56953af72bafdb7965b6"
+    "config.json" "a60a035a715a686dca530cf41da553a571e26ea45288d04d750b9da1a27c268d"
+    "onnx_config.json" "e10f017e4a8355f6b15f5be5f67295c90d5b25e487568bf0b0d9ee3259dc0eb7"}}
+
+  :answer-reader
+  {:model "LiquidAI/LFM2.5-1.2B-Instruct-GGUF"
+   :revision "76022b8bfa64af5862d6bce90a676c3cc9b17b52"
+   :format :gguf
+   :alias "lfm2.5-1.2b-instruct"
+   :entrypoint "LFM2.5-1.2B-Instruct-Q4_K_M.gguf"
+   :base-url "https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF/resolve/76022b8bfa64af5862d6bce90a676c3cc9b17b52"
+   :files
+   {"LFM2.5-1.2B-Instruct-Q4_K_M.gguf" "b1b3de114215d9507409a662a501a631095a479a419584e8a2ded6304b19b4f5"}}}}

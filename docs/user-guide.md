@@ -301,6 +301,20 @@ The one-script installer verifies the jar, NextPlaid, ONNX Runtime, and both
 FP32 and INT8 variants of the pinned retrieval and routing models. Set
 `LLM_CONTEXT_SKIP_SEMANTIC=1` when only exact graph and FTS features are wanted.
 
+For a source checkout, use the dependency bootstrap command before building:
+
+```bash
+scripts/install-dependencies.sh install
+```
+
+It checks the authoritative dependency manifest against current upstream
+releases, resolves the JVM graph with retries, and verifies the repository
+contract afterward. Add `--with-native` to build only the local WSL/Linux
+Janet/Tree-sitter library; GitHub Actions builds the other platform libraries
+for releases. Use `--with-models` for the model cache. The command logs failures to
+`.llm-context/dependency-install.log`; `scripts/install-dependencies.sh verify`
+reruns checks without changing files.
+
 After installation, inspect the machine and packaged runtime with:
 
 ```bash
@@ -326,11 +340,22 @@ Setup does not install NVIDIA drivers. In WSL, install or update the
 do not install a Linux NVIDIA driver inside WSL.
 
 On Linux x86-64, `install.sh` defaults to
-`LLM_CONTEXT_ACCELERATOR_PACKAGE=auto`: it selects the CUDA package only when
-the static preflight passes, otherwise it installs the CPU package and prints
-the missing prerequisites. Use `LLM_CONTEXT_ACCELERATOR_PACKAGE=cpu` to force
-CPU or `LLM_CONTEXT_ACCELERATOR_PACKAGE=cuda` to require CUDA and fail early
-when the host is incomplete. The Windows package is currently CPU-only.
+`LLM_CONTEXT_ACCELERATOR_PACKAGE=auto`. When a visible GPU, compatible driver,
+and CUDA 12 runtime are present but cuDNN 9 is missing, the installer asks
+whether it should install `cudnn9-cuda-12` using `apt-get` and `sudo` when
+needed. A declined prompt, a non-interactive terminal, or an unavailable
+package manager falls back to the CPU package and prints the corrective action.
+Set `LLM_CONTEXT_CUDNN_INSTALL=yes` or `no` for automation. Use
+`LLM_CONTEXT_ACCELERATOR_PACKAGE=cpu` to force CPU or
+`LLM_CONTEXT_ACCELERATOR_PACKAGE=cuda` to require CUDA and fail early when the
+host is incomplete. For example, opt in from a non-interactive shell with:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/devame/llm-context-tools/main/install.sh \
+  | LLM_CONTEXT_CUDNN_INSTALL=yes sh
+```
+
+The Windows package is currently CPU-only.
 
 - If `doctor` reports Java failure, install JDK 23 or newer.
 - If graph format is incompatible, run `llm-context analyze`; it automatically
@@ -411,7 +436,7 @@ llm-context models status
 ```
 
 To install a custom Hugging Face-compatible snapshot set, create a contract-v1
-EDN manifest using the built-in `resources/llm_context/model-packages.edn` as a
+EDN manifest using the built-in `resources/llm_context/dependencies.edn` as a
 template. Every role needs an immutable 40-character revision and a SHA-256 for
 every file. Then run the installer with:
 

@@ -25,7 +25,7 @@
    :symbol-id symbol-id
    :file-id "file:src/a.clj"
    :document-hash hash
-   :model-revision "734b659a57935ef50562d79581c3ff1f8d825c93"
+   :model-revision "ace431824f35db231178fc602e33296784762a2e"
    :document-version 1
    :chunk-count 2
    :updated-at now})

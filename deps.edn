@@ -1,11 +1,11 @@
 {:paths ["src" "resources"]
- :deps {org.clojure/clojure {:mvn/version "1.12.0"}
-        clj-kondo/clj-kondo {:mvn/version "2026.07.24"}
-        org.clojure/data.json {:mvn/version "2.5.1"}
+ :deps {org.clojure/clojure {:mvn/version "1.12.5"}
+        clj-kondo/clj-kondo {:mvn/version "2026.08.04"}
+        org.clojure/data.json {:mvn/version "2.5.2"}
         org.clojure/tools.reader {:mvn/version "1.6.0"}
-        org.datalevin/datalevin-embedded {:mvn/version "1.0.0"}
+        org.datalevin/datalevin-embedded {:mvn/version "1.0.2"}
         io.github.tree-sitter/jtreesitter {:mvn/version "0.26.1"}
-        io.github.bonede/tree-sitter {:mvn/version "0.25.3"}}
+        io.github.bonede/tree-sitter {:mvn/version "0.26.6"}}
  :aliases
  {:dev {:extra-paths ["dev"]}
   :test {:extra-paths ["test" "bench"]
@@ -33,5 +33,5 @@
   {:extra-paths ["bench"]
    :jvm-opts ["--enable-native-access=ALL-UNNAMED"]
    :main-opts ["-m" "llm-context.provider-qualification"]}
-  :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.8"}}
+  :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.14"}}
           :ns-default build}}}

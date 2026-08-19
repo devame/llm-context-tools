@@ -7,7 +7,7 @@
 
 (def model-settings
   {:model "mixedbread-ai/mxbai-edge-colbert-v0-32m"
-   :model-revision "963e23afa1478d8bcc12e5d7115adcfdbd22c3af"})
+   :model-revision "bb13a29ec9b1e7edd4ba8f7a0776c48b55cbad66"})
 
 (def reranker-settings
   {:mode :enforce :candidate-count 2

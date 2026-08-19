@@ -29,6 +29,11 @@ requires a clean main branch, runs scripts/build-release.sh, pushes main,
 creates the matching annotated v<version> tag, and waits for the GitHub release
 workflow unless --no-wait is supplied.
 
+The tagged checkout must already contain the local x86_64 Linux native parser
+library. Build it with scripts/install-dependencies.sh install --with-native
+and commit that Linux artifact; the release workflow builds and overlays the
+ARM Linux, macOS, and Windows variants from GitHub Actions.
+
 Environment overrides: REPOSITORY, REMOTE, BRANCH.
 EOF
 }
@@ -214,6 +219,11 @@ VERSION=$(version)
   exit 1
 }
 TAG="v$VERSION"
+
+[[ -s "$ROOT_DIR/resources/lib/x86_64-linux-gnu-tree-sitter-janet.so" ]] || {
+  echo "local Linux native parser artifact is missing; run install-dependencies.sh install --with-native and commit it" >&2
+  exit 1
+}
 
 [[ "$(git branch --show-current)" == "$BRANCH" ]] || {
   echo "release must run from $BRANCH" >&2

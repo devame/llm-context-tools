@@ -46,6 +46,35 @@ sha256_file() {
 
 cd "$ROOT_DIR"
 
+# Windows Node/npm can be exposed through WSL PATH, but npm's pack command
+# cannot reliably resolve a WSL UNC working directory. Prefer an explicitly
+# selected Node toolchain, then the repository-local Linux toolchain installed
+# by scripts/install-dependencies.sh, before checking the ambient PATH.
+prepend_tool_dir() {
+  local executable=$1
+  if [[ -n "$executable" && ( -x "$executable" || -f "$executable" ) ]]; then
+    PATH="$(dirname -- "$executable"):$PATH"
+  fi
+}
+
+prepend_tool_dir "${LLM_CONTEXT_NPM_BIN:-}"
+prepend_tool_dir "${LLM_CONTEXT_NODE_BIN:-}"
+LOCAL_NODE_BIN="$ROOT_DIR/.llm-context/toolchain/node/current/bin"
+if [[ -x "$LOCAL_NODE_BIN/node" && -x "$LOCAL_NODE_BIN/npm" ]]; then
+  PATH="$LOCAL_NODE_BIN:$PATH"
+fi
+export PATH
+
+# The local release input is the Linux/WSL parser library. GitHub Actions
+# overlays the ARM Linux, macOS, and Windows variants before its release build.
+test -s resources/lib/x86_64-linux-gnu-tree-sitter-janet.so || {
+  echo "missing local x86_64 Linux native parser library; run install-dependencies.sh install --with-native" >&2
+  exit 1
+}
+
+echo "==> Verifying dependency manifest"
+clojure -M script/verify-dependencies.clj
+
 echo "==> Installing npm dependencies"
 npm ci
 

@@ -29,10 +29,10 @@
   :lateon-code
   {:enabled true
    :mode :background
-   :next-plaid-version "1.6.4"
+   :next-plaid-version "1.7.0"
    :next-plaid-command ["next-plaid-api"]
    :model "lightonai/LateOn-Code"
-   :model-revision "734b659a57935ef50562d79581c3ff1f8d825c93"
+   :model-revision "ace431824f35db231178fc602e33296784762a2e"
    :model-path nil
    :accelerator :auto
    :quantization :auto
@@ -86,10 +86,10 @@
    :document-cache-size 2048}
   :query-router
   {:enabled true
-   :next-plaid-version "1.6.4"
+   :next-plaid-version "1.7.0"
    :next-plaid-command ["next-plaid-api"]
    :model "mixedbread-ai/mxbai-edge-colbert-v0-32m"
-   :model-revision "963e23afa1478d8bcc12e5d7115adcfdbd22c3af"
+   :model-revision "bb13a29ec9b1e7edd4ba8f7a0776c48b55cbad66"
    :model-path nil
    :accelerator :cpu
    :quantization :int8

@@ -265,9 +265,26 @@ registry package.
 
 ## Development
 
+Bootstrap or audit the development dependency set with the checked-in
+manifest. The command retries downloads, shows progress, checks current
+upstream releases, verifies hashes, and retains its error log:
+
+```bash
+scripts/install-dependencies.sh install
+scripts/install-dependencies.sh verify
+```
+
+Use `--with-native` to build only the local WSL/Linux Janet parser library and
+`--with-models` to download and verify all model packages. GitHub Actions builds
+the ARM Linux, macOS, and Windows parser libraries; the release workflow
+combines those CI artifacts with the Linux library present in the tagged
+checkout. `--offline` skips only the live release lookup; static contract and
+checksum checks still run.
+
 ```bash
 clojure -M:test
 clojure -T:build dist
+clojure -M script/verify-dependencies.clj
 scripts/verify-release-quality.sh dist/llm-context.jar
 npm pack --dry-run
 ```
@@ -300,6 +317,8 @@ Additional benchmark and release workflows are in
 ## Documentation
 
 - [User guide](docs/user-guide.md) — complete workflows and troubleshooting.
+- [Dependency registry](docs/dependencies.md) — authoritative versions,
+  artifacts, hashes, and drift checks.
 - [Architecture and tradeoffs](docs/architecture.md) — runtime and storage
   design.
 - [Semantic graph model](docs/semantic-graph.md) — entities, relationships,

@@ -518,9 +518,11 @@
         (recur)))))
 
 (defn- semantic-worker-settings [settings runtime]
-  (assoc (get-in settings [:semantic :lateon-code])
-         :update-concurrency
-         (get-in runtime [:inference :update-concurrency])))
+  (let [lateon (get-in settings [:semantic :lateon-code])]
+    (assoc lateon
+           :update-concurrency
+           (or (get-in runtime [:inference :update-concurrency])
+               (:update-concurrency lateon)))))
 
 (defn- retriable-supervisor-error? [error]
   (let [data (ex-data error)]

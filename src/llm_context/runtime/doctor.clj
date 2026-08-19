@@ -5,6 +5,7 @@
             [llm-context.analysis.clj-kondo :as clj-kondo]
             [llm-context.analysis.janet :as janet]
             [llm-context.config :as config]
+            [llm-context.dependencies :as dependencies]
             [llm-context.graph.read :as graph-read]
             [llm-context.health :as health]
             [llm-context.intent.router :as intent-router]
@@ -22,7 +23,8 @@
             [llm-context.store :as store])
   (:import [java.nio.file Files LinkOption Path Paths]))
 
-(def minimum-java-feature 23)
+(def minimum-java-feature
+  (dependencies/value [:toolchain :minimum-java-feature]))
 
 (defn java-feature
   ([] (.feature (Runtime/version)))

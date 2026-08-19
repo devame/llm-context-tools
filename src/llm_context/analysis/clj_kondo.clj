@@ -7,11 +7,13 @@
   (:require [clj-kondo.core :as kondo]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [llm-context.dependencies :as dependencies]
             [llm-context.model.ids :as ids]
             [llm-context.project :as project])
   (:import [java.nio.file Files LinkOption Path]))
 
-(def analyzer-version "2026.07.24")
+(def analyzer-version
+  (dependencies/value [:jvm :deps 'clj-kondo/clj-kondo :mvn/version]))
 (def analyzer-name :clj-kondo)
 
 (def clojure-languages
@@ -96,7 +98,7 @@
           (.resolve ^Path (:state-dir project) "cache/clj-kondo-config"))]
     (Files/createDirectories
      cache-dir (make-array java.nio.file.attribute.FileAttribute 0))
-    ;; clj-kondo 2026.07.24's cache synchronizer expects a non-nil config-dir
+    ;; The pinned clj-kondo cache synchronizer expects a non-nil config-dir.
     ;; even when no project configuration exists. The isolated empty directory
     ;; preserves source-first behavior and never writes into the repository.
     (Files/createDirectories

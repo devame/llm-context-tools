@@ -6,12 +6,12 @@ revision `3c1bdcfff374138da03a1db25c75efce623910fe` (Tree-sitter ABI 14).
 
 The grammar is dedicated to the public domain under CC0 1.0. Its complete
 license text and source are available in the upstream repository. Run
-`script/build-janet-grammar.sh` with Zig 0.15 or newer to reproduce all shipped
+`script/build-janet-grammar.sh` with Zig 0.15.1 or newer to reproduce all shipped
 Linux and macOS libraries for x86-64 and ARM64, plus Windows x86-64. These are
 the platforms provided by the packaged Tree-sitter core runtime.
 
 The Windows package also contains a rebuild of the official Tree-sitter
-`v0.25.3` core. The corresponding Maven DLL does not export its public C API,
+`v0.26.12` core. The corresponding Maven DLL does not export its public C API,
 which prevents JTreeSitter from resolving `ts_set_allocator`. The rebuild uses
 the unmodified official source and public API declarations and is distributed
 under Tree-sitter's MIT license in `TREE_SITTER_CORE_LICENSE.txt`.

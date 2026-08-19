@@ -1,12 +1,14 @@
 (ns llm-context.accelerator
   "Resolve a NextPlaid inference device without confusing device visibility
   with a usable CUDA-enabled ONNX Runtime installation."
-  (:require [clojure.string :as str])
+  (:require [clojure.string :as str]
+            [llm-context.dependencies :as dependencies])
   (:import [java.nio.file Files LinkOption Path Paths]))
 
 (def accelerators #{:auto :cpu :cuda})
 (def quantizations #{:auto :int8 :fp32})
-(def minimum-cuda-driver "525.60.13")
+(def minimum-cuda-driver
+  (dependencies/value [:semantic :cuda :minimum-driver]))
 
 (defn- regular-file? [^Path path]
   (Files/isRegularFile path (make-array LinkOption 0)))
@@ -203,6 +205,20 @@
 (defn fallback-actions [reasons]
   (str/join "; " (map fallback-action reasons)))
 
+(defn cudnn-installation-eligible?
+  "Return true when installing cuDNN is the next useful host action.
+
+  A missing cuDNN library is only actionable after this process can see an
+  NVIDIA device, a compatible driver, and the CUDA 12 runtime. This prevents
+  setup from offering a cuDNN install while the real problem is driver or
+  device visibility."
+  [host]
+  (and (:device-visible? host)
+       (:driver-present? host)
+       (:driver-compatible? host)
+       (:cuda-runtime-present? host)
+       (not (:cudnn-present? host))))
+
 (defn host-actions [host]
   (let [reasons (cond-> []
                   (not (:device-visible? host))
@@ -216,7 +232,7 @@
                   (conj :cuda-driver-library-missing)
                   (not (:cuda-runtime-present? host))
                   (conj :cuda-runtime-missing)
-                  (not (:cudnn-present? host))
+                  (cudnn-installation-eligible? host)
                   (conj :cudnn-missing))]
     (mapv fallback-action reasons)))
 

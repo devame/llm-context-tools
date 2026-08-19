@@ -1,14 +1,15 @@
 (ns llm-context.model-packages
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [llm-context.dependencies :as dependencies])
   (:import [java.io BufferedInputStream File PushbackReader]
            [java.lang ProcessHandle]
            [java.net URI]
            [java.nio.file Files StandardCopyOption]
            [java.security DigestInputStream MessageDigest]))
 
-(def default-resource "llm_context/model-packages.edn")
+(def default-resource dependencies/default-resource)
 (def roles #{:semantic-retriever :query-router-reranker :answer-reader})
 (def formats #{:next-plaid-onnx :gguf})
 (def ^:private sha-pattern #"[0-9a-f]{64}")
@@ -20,7 +21,7 @@
   (with-open [reader (PushbackReader. (io/reader source))]
     (edn/read {:eof nil} reader)))
 
-(defn defaults [] (read-edn (io/resource default-resource)))
+(defn defaults [] (dependencies/all))
 
 (defn sha256 [source]
   (let [digest (MessageDigest/getInstance "SHA-256")]
