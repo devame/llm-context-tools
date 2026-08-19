@@ -176,7 +176,7 @@
         (is (= 1 @builds))
         (is (= 1 (count additions)))
         (is (= 3 (count (:document-ids (first additions)))))
-        (is (<= 6 @renewals 9))
+        (is (<= 9 @renewals 12))
         (is (= [3] @completion-batches))))))
 
 (deftest worker-keeps-multiple-update-requests-in-flight
@@ -220,6 +220,55 @@
           (is (= 40 (:completed result)))
           (is (= 4 (:upload-batches result)))
           (is (<= 2 @maximum 4)))))))
+
+(deftest worker-does-not-release-the-next-wave-before-provider-visibility
+  (let [definitions
+        (str "(defn f0 [] \"" (apply str (repeat 7000 "x")) "\")\n"
+             (apply str (for [index (range 1 32)]
+                          (format "(defn f%d [] %d)\n" index index))))
+        {:keys [project]} (fixture (str "(ns sample.app)\n" definitions))
+        base (fake/create)
+        pending (atom [])
+        maximum-pending (atom 0)
+        drain! (fn []
+                 (let [documents
+                       (vec (first (swap-vals! pending (constantly []))))]
+                   (when (seq documents)
+                     (index/add-documents! base documents))))
+        delayed-visibility
+        (reify index/SemanticIndex
+          (index-health [_] (index/index-health base))
+          (ensure-index! [_] (index/ensure-index! base))
+          (add-documents! [_ documents]
+            (let [accepted (swap! pending into documents)]
+              (swap! maximum-pending max (count accepted)))
+            "queued")
+          (delete-symbols! [_ symbols]
+            (index/delete-symbols! base symbols))
+          (indexed-documents [_ symbols]
+            (drain!)
+            (index/indexed-documents base symbols))
+          (indexed-chunk-count [_ symbol hash]
+            (index/indexed-chunk-count base symbol hash))
+          (search-text [_ query options]
+            (index/search-text base query options))
+          (close-index! [_] nil))
+        bounded-settings
+        (-> settings
+            (assoc-in [:semantic :lateon-code :update-batch-size] 32)
+            (assoc-in [:semantic :lateon-code :update-concurrency] 1))]
+    (store/with-store [graph project bounded-settings]
+      (let [semantic-worker
+            (worker/create graph project bounded-settings delayed-visibility
+                           {:owner "visibility-bounded-worker"})]
+        (worker/prepare! semantic-worker)
+        (reset! maximum-pending 0)
+        (let [result (worker/process-once! semantic-worker)]
+          (is (= 32 (:completed result)))
+          (is (= 2 (:upload-batches result)))
+          (is (> (:request-provider-documents result) 32))
+          (is (= 32 @maximum-pending))
+          (is (empty? @pending)))))))
 
 (deftest opt-in-cold-profile-routes-leasing-and-requests-through-the-planner
   (let [definitions (apply str (for [index (range 30)]

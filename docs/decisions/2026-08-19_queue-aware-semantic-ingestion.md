@@ -446,10 +446,20 @@ cross-repository gate.
 
 ### 5. Exercise the existing provider queues before adding a finalizer
 
-The first execution change retains one `process-once!` visibility barrier but
-uses the planner's lease, request, and concurrency bounds. Existing bounded
-executor submission remains the mechanism for keeping provider requests in
-flight.
+Implementation correction (2026-08-19): live qualification showed that a 202
+response only acknowledged queueing. Releasing the next request immediately
+allowed NextPlaid to coalesce nominally bounded 32-document requests into
+33- and 64-document physical CUDA compression batches. The submitter therefore
+uses bounded waves: requests within one wave remain concurrent, but the next
+wave is not released until every document in the current wave has exact
+provider visibility. The configured in-flight bound now covers accepted but
+not yet visible documents. This is a synchronous safety barrier, not the
+separate background visibility finalizer described in Gate 2.
+
+The first execution change uses the planner's lease, request, and concurrency
+bounds. Bounded executor submission keeps requests within a wave in flight;
+the implementation correction above adds visibility barriers between waves
+while retaining the final `process-once!` exact-visibility check.
 
 For a cold profile with request concurrency two:
 

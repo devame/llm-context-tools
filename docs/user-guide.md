@@ -413,8 +413,13 @@ hardware, a project may explicitly enable `:cold` or `:auto`; auto enters cold
 mode only for an upsert-dominated backlog and returns to steady mode with the
 configured hysteresis. HTTP 429/503 saturation reduces effective request
 concurrency to one during a bounded cooldown without consuming document retry
-attempts. The visibility finalizer remains disabled until its separate
-performance and fault-recovery gate is satisfied.
+attempts. A provider 202 response means queued rather than visible, so the
+worker submits only one bounded request wave at a time and verifies exact
+visibility before releasing the next wave. Concurrency is retained within a
+wave. This makes `:max-inflight-provider-documents` include accepted-but-not-yet
+visible documents and prevents the provider from coalescing consecutive CUDA
+requests past that memory bound. The background visibility finalizer remains
+disabled until its separate performance and fault-recovery gate is satisfied.
 
 `:auto` selects CUDA/FP32 only when a GPU device, both ONNX Runtime CUDA
 provider libraries, cuDNN 9, and the verified `model.onnx` are present.

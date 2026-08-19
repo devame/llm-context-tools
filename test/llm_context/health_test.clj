@@ -47,6 +47,34 @@
     (is (= :warning (-> snapshot :alerts first :severity)))
     (is (true? (-> snapshot :alerts first :self-healing?)))))
 
+(deftest batch-local-cuda-oom-warns-without-marking-cuda-unavailable
+  (let [snapshot
+        (health/semantic-health
+         {:desired 0 :indexed 0 :pending 0 :leased 0
+          :failed 0 :dirty 0 :completeness :complete
+          :service-state :running :graph-state :ready
+          :analysis-progress {:state :complete}
+          :runtime
+          (assoc healthy-runtime
+                 :inference {:accelerator :cuda}
+                 :runtime-diagnostic
+                 {:kind :cuda-compression-oom
+                  :severity :warning
+                  :degrades-runtime? false
+                  :degrades-accelerator? false
+                  :self-healing? true
+                  :detail "one CUDA compression batch fell back to CPU"
+                  :action "reduce the update batch"})}
+         2000 30000)
+        alert (first (:alerts snapshot))]
+    (is (= :healthy
+           (get-in snapshot [:components :semantic-runtime :state])))
+    (is (= :healthy
+           (get-in snapshot [:components :accelerator :state])))
+    (is (= :cuda-compression-oom (:kind alert)))
+    (is (= :warning (:severity alert)))
+    (is (true? (:self-healing? alert)))))
+
 (deftest durable-alerts-preserve-the-original-transition-time
   (let [root (Files/createTempDirectory
               "llm-context-health-"

@@ -132,6 +132,30 @@
 
 (defn- cuda-diagnostic [line]
   (cond
+    (re-find #"(?i)CUDA compression error:.*(CUDA_ERROR_OUT_OF_MEMORY|out of memory|Failed to allocate)"
+             line)
+    {:kind :cuda-compression-oom
+     :severity :warning
+     :degrades-runtime? false
+     :degrades-accelerator? false
+     :self-healing? true
+     :detail (str "NextPlaid exhausted GPU memory while compressing one update "
+                  "batch and compressed that batch on CPU; CUDA encoding remains active.")
+     :action (str "use visibility-bounded ingestion, reduce "
+                  ":semantic/:lateon-code/:update-batch-size, or free GPU memory")
+     :line line}
+
+    (re-find #"(?i)CUDA compression error" line)
+    {:kind :cuda-compression-failed
+     :severity :warning
+     :degrades-runtime? false
+     :degrades-accelerator? false
+     :self-healing? true
+     :detail (str "NextPlaid could not compress one update batch on CUDA and "
+                  "compressed that batch on CPU; CUDA encoding remains active.")
+     :action "inspect the NextPlaid log and reduce the provider update batch if the warning repeats"
+     :line line}
+
     (re-find #"(?i)CUDA support not compiled" line)
     {:kind :cuda-build-missing
      :detail "The installed NextPlaid binary does not include CUDA support."
@@ -154,7 +178,7 @@
      :action "install cuDNN 9 and expose libcudnn.so.9 to the service"
      :line line}
 
-    (re-find #"(?i)(CUDA initialization error|Falling back to CPU|No execution providers from session options registered successfully)"
+    (re-find #"(?i)(CUDA initialization error|No execution providers from session options registered successfully)"
              line)
     {:kind :cuda-provider-failed
      :detail "NextPlaid failed to initialize its CUDA provider and is falling back to CPU."
@@ -168,11 +192,14 @@
   [runtime]
   (when-let [lines (recent-log-lines runtime)]
     (when-let [line (or (latest-line lines
+                                     #"(?i)CUDA compression error:.*(CUDA_ERROR_OUT_OF_MEMORY|out of memory|Failed to allocate)")
+                        (latest-line lines #"(?i)CUDA compression error")
+                        (latest-line lines
                                      #"(?i)(no CUDA-capable device|CUDA_ERROR_NO_DEVICE|CUDA failure 100)")
                         (latest-line lines #"(?i)CUDA support not compiled")
                         (latest-line lines #"(?i)(libcudnn[.]so[.]9|cudnn).*not found")
                         (latest-line lines
-                                     #"(?i)(CUDA initialization error|Falling back to CPU|No execution providers from session options registered successfully)"))]
+                                     #"(?i)(CUDA initialization error|No execution providers from session options registered successfully)"))]
       (cuda-diagnostic line))))
 
 (defn- startup-diagnostic [runtime]

@@ -692,17 +692,21 @@
   ([status previous-status elapsed-ms]
    (println (semantic-status-summary status previous-status elapsed-ms))
    (println (aggregate-analysis-summary status))
-   (doseq [{:keys [id severity detail action] :as alert}
+   (doseq [{:keys [id severity detail action]}
            (get-in status [:health :alerts])
            :when (not (some #(= id (:id %))
                             (get-in previous-status [:health :alerts])))]
      (println (str (str/capitalize (name severity)) ": " detail
                    (when (seq action) (str " Action: " action ".")))))
    (when-let [diagnostic (get-in status [:runtime :runtime-diagnostic])]
-     (when (not= diagnostic
-                 (get-in previous-status [:runtime :runtime-diagnostic]))
+     (when (and (not= diagnostic
+                      (get-in previous-status [:runtime :runtime-diagnostic]))
+                (not-any? #(= (:kind diagnostic) (:kind %))
+                          (get-in status [:health :alerts])))
        (println
-        (str "Warning: semantic inference is degraded: "
+        (str (if (get diagnostic :degrades-runtime? true)
+               "Warning: semantic inference is degraded: "
+               "Warning: ")
              (:detail diagnostic) " Action: " (:action diagnostic)
              ". Run 'llm-context doctor' for details."))))
    (when-let [inference (get-in status [:runtime :inference])]

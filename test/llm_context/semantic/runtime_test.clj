@@ -89,6 +89,36 @@
                    (:action diagnostic))))
     (Files/deleteIfExists log-path)))
 
+(deftest runtime-diagnostic-distinguishes-cuda-compression-oom
+  (let [log-path (Files/createTempFile
+                  "llm-context-next-plaid-compression-" ".log"
+                  (make-array java.nio.file.attribute.FileAttribute 0))]
+    (Files/writeString
+     log-path
+     (str "ERROR next_plaid: CUDA compression error: Codec error: "
+          "Failed to allocate scores: DriverError(CUDA_ERROR_OUT_OF_MEMORY, "
+          "\"out of memory\"). Falling back to CPU.\n")
+     (make-array java.nio.file.OpenOption 0))
+    (let [diagnostic (runtime/runtime-diagnostic {:log-path log-path})]
+      (is (= :cuda-compression-oom (:kind diagnostic)))
+      (is (= :warning (:severity diagnostic)))
+      (is (false? (:degrades-runtime? diagnostic)))
+      (is (false? (:degrades-accelerator? diagnostic)))
+      (is (re-find #"CUDA encoding remains active" (:detail diagnostic))))
+    (Files/deleteIfExists log-path)))
+
+(deftest runtime-diagnostic-still-classifies-provider-initialization-failure
+  (let [log-path (Files/createTempFile
+                  "llm-context-next-plaid-provider-" ".log"
+                  (make-array java.nio.file.attribute.FileAttribute 0))]
+    (Files/writeString
+     log-path
+     "ERROR ort: CUDA initialization error; Falling back to CPU.\n"
+     (make-array java.nio.file.OpenOption 0))
+    (is (= :cuda-provider-failed
+           (:kind (runtime/runtime-diagnostic {:log-path log-path}))))
+    (Files/deleteIfExists log-path)))
+
 (deftest runtime-diagnostic-ignores-provider-failures-before-process-start
   (let [log-path (Files/createTempFile
                   "llm-context-next-plaid-offset-" ".log"

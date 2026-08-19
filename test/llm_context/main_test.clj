@@ -112,6 +112,27 @@
     (is (str/includes? output "runtime could not detect a CUDA-capable device"))
     (is (str/includes? output "fix NVIDIA/WSL CUDA device visibility"))))
 
+(deftest semantic-status-does-not-repeat-a-batch-local-cuda-warning
+  (let [detail "one CUDA compression batch fell back to CPU"
+        diagnostic {:kind :cuda-compression-oom
+                    :severity :warning
+                    :degrades-runtime? false
+                    :detail detail
+                    :action "keep provider waves visibility bounded"}
+        output
+        (with-out-str
+          (#'cli/print-semantic-summary!
+           {:desired 1 :indexed 0
+            :aggregate-analysis {:aggregates 0
+                                 :memberships 0
+                                 :semantic-documents :partial
+                                 :skipped-files 0}
+            :runtime {:runtime-diagnostic diagnostic}
+            :health {:alerts [(assoc diagnostic
+                                    :id "semantic-runtime/cuda-compression-oom")]}}))]
+    (is (= 1 (count (re-seq (re-pattern detail) output))))
+    (is (not (str/includes? output "semantic inference is degraded")))))
+
 (deftest analyze-service-warning-surfaces-runtime-provider-failure
   (with-redefs [service-client/request
                 (fn [_ _ _]

@@ -99,6 +99,13 @@
    (semantic-health status now 300000))
   ([status now stall-window-ms]
    (let [runtime (:runtime status)
+         runtime-diagnostic (:runtime-diagnostic runtime)
+         diagnostic-degrades-runtime?
+         (and runtime-diagnostic
+              (get runtime-diagnostic :degrades-runtime? true))
+         diagnostic-degrades-accelerator?
+         (and runtime-diagnostic
+              (get runtime-diagnostic :degrades-accelerator? true))
          runtime-status (:status runtime)
          worker-status (:worker-status runtime)
          watcher-status (:watcher-status runtime)
@@ -127,9 +134,9 @@
                       :attempt (:recovery-attempt runtime))
 
            (= :ready runtime-status)
-           (if (:runtime-diagnostic runtime)
+           (if diagnostic-degrades-runtime?
              (component :degraded
-                        (get-in runtime [:runtime-diagnostic :detail]))
+                        (:detail runtime-diagnostic))
              (component :healthy "semantic runtime ready"))
 
            (contains? #{:failed :unavailable :not-running} runtime-status)
@@ -243,7 +250,7 @@
          accelerator-component
          (cond
            (= :disabled runtime-status) (component :disabled "accelerator disabled")
-           (or (:runtime-diagnostic runtime) (:recovery runtime)
+           (or diagnostic-degrades-accelerator? (:recovery runtime)
                (seq (get-in runtime [:inference :fallback-reasons])))
            (component :degraded
                       (str "effective accelerator "
@@ -302,14 +309,16 @@
                         "run llm-context analyze or llm-context service start"
                         true))
 
-           (:runtime-diagnostic runtime)
-           (conj (alert :error :semantic-runtime
-                        (or (get-in runtime [:runtime-diagnostic :kind])
+           runtime-diagnostic
+           (conj (alert (or (:severity runtime-diagnostic) :error)
+                        :semantic-runtime
+                        (or (:kind runtime-diagnostic)
                             :provider-degraded)
-                        (get-in runtime [:runtime-diagnostic :detail])
-                        (get-in runtime [:runtime-diagnostic :action])
-                        (= :auto (get-in runtime [:inference
-                                                  :requested-accelerator]))))
+                        (:detail runtime-diagnostic)
+                        (:action runtime-diagnostic)
+                        (get runtime-diagnostic :self-healing?
+                             (= :auto (get-in runtime [:inference
+                                                       :requested-accelerator])))))
 
            (and (= :failed (:state runtime-component))
                 (nil? (:runtime-diagnostic runtime)))

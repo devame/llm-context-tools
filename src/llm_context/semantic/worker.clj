@@ -460,6 +460,20 @@
     (partition-all inventory-batch-size
                    (mapv (comp :symbol-id :desired) prepared)))))
 
+(defn- visible-provider-documents
+  [worker documents]
+  (vec
+   (mapcat
+    #(index/indexed-documents (:client worker) %)
+    (partition-all inventory-batch-size
+                   (distinct (map :symbol-id documents))))))
+
+(defn- provider-documents-visible?
+  [visible documents]
+  (let [expected (set (map #(select-keys % visible-attributes) documents))
+        actual (set (map #(select-keys % visible-attributes) visible))]
+    (every? actual expected)))
+
 (defn- await-documents!
   [worker prepared predicate description]
   (let [jobs (mapv :job prepared)
@@ -481,46 +495,78 @@
             (sleep! worker (:visibility-poll-ms (:settings worker)))
             (recur)))))))
 
+(defn- await-provider-documents!
+  [worker jobs documents description]
+  (let [deadline (+ (now worker) (:visibility-timeout-ms (:settings worker)))]
+    (loop []
+      (renew-leases! worker jobs)
+      (let [visible (visible-provider-documents worker documents)]
+        (cond
+          (provider-documents-visible? visible documents) visible
+          (>= (now worker) deadline)
+          (throw
+           (ex-info (str "Timed out waiting for NextPlaid " description)
+                    {:type :semantic/visibility-timeout
+                     :retriable? true
+                     :provider-document-count (count documents)
+                     :visible-chunks (count visible)}))
+          :else
+          (do
+            (sleep! worker (:visibility-poll-ms (:settings worker)))
+            (recur)))))))
+
+(defn- submit-update-wave!
+  [worker executor batches]
+  (let [completions (ExecutorCompletionService. executor)]
+    (doseq [batch batches]
+      (.submit completions
+               ^Callable
+               (fn []
+                 (index/add-documents! (:client worker) batch))))
+    (dotimes [_ (count batches)]
+      (let [future (.take completions)]
+        (try
+          (.get future)
+          (catch ExecutionException error
+            (throw (.getCause error))))))))
+
 (defn- submit-update-batches!
   [worker jobs batches concurrency max-inflight]
   (let [threads (min (count batches) concurrency)
-        executor (Executors/newFixedThreadPool threads)
-        completions (ExecutorCompletionService. executor)
-        submit! (fn [batch]
-                  (.submit completions
-                           ^Callable
-                           (fn []
-                             (index/add-documents! (:client worker) batch))))]
+        executor (Executors/newFixedThreadPool threads)]
     (try
-      (renew-leases! worker jobs)
-      ;; Keep only active requests in the executor. As each request completes,
-      ;; submit the next stable batch immediately instead of retaining the full
-      ;; cold-ingestion lease in an unbounded executor queue.
-      (let [largest-batch (reduce max 0 (map count batches))]
-        (when (> (* threads largest-batch) max-inflight)
-          (throw
-           (ex-info "Semantic provider requests exceed their in-flight bound"
-                    {:type :semantic/inflight-bound-exceeded
-                     :request-concurrency threads
-                     :largest-provider-request largest-batch
-                     :max-inflight-provider-documents max-inflight}))))
-      (let [[initial remaining] (split-at threads batches)]
-        (doseq [batch initial]
-          (submit! batch))
-        (loop [remaining remaining
-               in-flight (count initial)]
-          (when (pos? in-flight)
-            (let [future (.take completions)]
-              (try
-                (.get future)
-                (catch ExecutionException error
-                  (throw (.getCause error))))
-              (if-let [batch (first remaining)]
-                (do
-                  (submit! batch)
-                  (recur (rest remaining) in-flight))
-                (recur remaining (dec in-flight)))))))
-      (let [job-ids (mapv :semantic.job/id jobs)
+      ;; A 202 response means queued, not physically indexed. Submit bounded
+      ;; concurrent waves and wait for exact provider visibility before
+      ;; releasing the next wave. This makes max-inflight cover accepted work,
+      ;; preventing NextPlaid from coalescing successive CUDA requests into a
+      ;; physical batch larger than the configured memory bound.
+      (let [{:keys [submit-nanos visibility-nanos]}
+            (reduce
+             (fn [timings wave]
+               (let [wave (vec wave)
+                     documents (vec (mapcat identity wave))
+                     document-count (count documents)]
+                 (when (> document-count max-inflight)
+                   (throw
+                    (ex-info
+                     "Semantic provider requests exceed their in-flight bound"
+                     {:type :semantic/inflight-bound-exceeded
+                      :request-concurrency (count wave)
+                      :inflight-provider-documents document-count
+                      :max-inflight-provider-documents max-inflight})))
+                 (renew-leases! worker jobs)
+                 (let [submit-start (System/nanoTime)]
+                   (submit-update-wave! worker executor wave)
+                   (let [after-submit (System/nanoTime)]
+                     (await-provider-documents!
+                      worker jobs documents "bounded upsert wave visibility")
+                     (-> timings
+                         (update :submit-nanos + (- after-submit submit-start))
+                         (update :visibility-nanos +
+                                 (- (System/nanoTime) after-submit)))))))
+             {:submit-nanos 0 :visibility-nanos 0}
+             (partition-all threads batches))
+            job-ids (mapv :semantic.job/id jobs)
             accepted-at (now worker)
             accepted
             (with-graph-lock
@@ -535,7 +581,9 @@
              :retriable? true
              :submitted (count job-ids)
              :accepted (count accepted)})))
-        (count accepted))
+        {:accepted-documents (count accepted)
+         :submit-nanos submit-nanos
+         :visibility-nanos visibility-nanos})
       (finally
         (.shutdown executor)
         (.awaitTermination executor 5 TimeUnit/SECONDS)))))
@@ -598,14 +646,16 @@
               batches (mapv vec
                             (partition-all
                              (:request-provider-document-limit plan) chunks))
-              upload-start (System/nanoTime)
-              accepted-documents (if (seq batches)
-                                   (submit-update-batches!
-                                    worker replacement-jobs batches
-                                    (:request-concurrency-effective plan)
-                                    (:max-inflight-provider-documents plan))
-                                   0)
-              upload-ms (long (/ (- (System/nanoTime) upload-start) 1000000))
+              submission (if (seq batches)
+                           (submit-update-batches!
+                            worker replacement-jobs batches
+                            (:request-concurrency-effective plan)
+                            (:max-inflight-provider-documents plan))
+                           {:accepted-documents 0
+                            :submit-nanos 0
+                            :visibility-nanos 0})
+              accepted-documents (:accepted-documents submission)
+              upload-ms (long (/ (:submit-nanos submission) 1000000))
               visibility-start (System/nanoTime)
               _ (when (seq replacements)
                   (await-documents!
@@ -615,7 +665,8 @@
                             replacements)
                    "batched upsert visibility"))
               visibility-ms
-              (long (/ (- (System/nanoTime) visibility-start) 1000000))
+              (+ (long (/ (:visibility-nanos submission) 1000000))
+                 (long (/ (- (System/nanoTime) visibility-start) 1000000)))
               completion-start (System/nanoTime)
               results (into immediate (complete-prepared! worker prepared))
               completion-ms
