@@ -56,7 +56,7 @@ SOURCE_VERSION=$(sed -n 's/^(def value "\(.*\)")$/\1/p' \
 }
 
 for file in build.clj package.json package-lock.json \
-  src/llm_context/version.clj; do
+  resources/llm_context/dependencies.edn src/llm_context/version.clj; do
   OLD_VERSION="$SOURCE_VERSION" NEW_VERSION="$NEW_VERSION" \
     perl -0pi -e '
       s/\Q$ENV{OLD_VERSION}\E/$ENV{NEW_VERSION}/g
