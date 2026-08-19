@@ -1,3 +1,8 @@
+## 0.12.9
+
+- Preserve the NextPlaid log offset in resident-service health views so stale
+  CUDA diagnostics cannot trigger CPU fallback after service startup.
+
 ## 0.12.8
 
 - Fix CUDA provider diagnostics so stale errors from a previous NextPlaid

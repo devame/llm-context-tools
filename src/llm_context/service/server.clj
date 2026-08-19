@@ -64,6 +64,7 @@
 (defn- runtime-view [runtime-state]
   (let [selected-runtime (select-keys runtime-state
                                       [:status :reason :detail :endpoint :log-path
+                                       :log-offset
                                        :inference :runtime-diagnostic :recovery
                                        :worker-status :worker-detail :worker-progress
                                        :recovery-attempt :last-recovery-at
