@@ -58,8 +58,10 @@ llm-context setup --install-cudnn       # install missing CUDA 12/cuDNN packages
 llm-context setup --install-cudnn --yes # explicit non-interactive install
 ```
 
-The setup command can install the supported CUDA 12/cuDNN packages on Debian/Ubuntu,
-but it never installs a GPU driver automatically. In WSL, install or update
+The dependency bootstrap and top-level installer can install the supported CUDA
+12/cuDNN packages on Debian/Ubuntu and configure NVIDIA's signed CUDA apt
+repository when those packages are not already available. They never install a
+GPU driver automatically. In WSL, install or update
 the NVIDIA CUDA-enabled driver on Windows, not a Linux driver inside WSL.
 
 For graph analysis and lexical search without the semantic models:

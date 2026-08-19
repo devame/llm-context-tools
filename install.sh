@@ -250,6 +250,63 @@ cuda_sudo_preflight() {
   sudo -v
 }
 
+cuda_apt_package_available() {
+  package=$1
+  candidate=$(apt-cache policy "$package" 2>/dev/null |
+    sed -n 's/^  Candidate: //p' | sed -n '1p')
+  [ -n "$candidate" ] && [ "$candidate" != '(none)' ]
+}
+
+cuda_configure_apt_repositories() {
+  ubuntu_repo=ubuntu2404
+  if [ -r /etc/os-release ]; then
+    . /etc/os-release
+    case "${VERSION_ID:-}" in
+      26.04) ubuntu_repo=ubuntu2604 ;;
+      24.04) ubuntu_repo=ubuntu2404 ;;
+      22.04) ubuntu_repo=ubuntu2204 ;;
+      20.04) ubuntu_repo=ubuntu2004 ;;
+    esac
+  fi
+  keyring_url="https://developer.download.nvidia.com/compute/cuda/repos/${ubuntu_repo}/x86_64/cuda-keyring_1.1-1_all.deb"
+  keyring_deb="$TEMP_DIR/cuda-keyring_1.1-1_all.deb"
+  command -v dpkg >/dev/null 2>&1 || {
+    printf 'ERROR: dpkg is required to configure the NVIDIA CUDA apt repository.\n' >&2
+    return 1
+  }
+  download "$keyring_url" "$keyring_deb"
+  if [ "$(id -u)" -eq 0 ]; then
+    dpkg -i "$keyring_deb"
+  else
+    sudo dpkg -i "$keyring_deb"
+  fi
+  if [ -e /dev/dxg ] || grep -qi microsoft /proc/version 2>/dev/null; then
+    wsl_source=/etc/apt/sources.list.d/cuda-wsl-ubuntu-x86_64.list
+    wsl_repo='deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/wsl-ubuntu/x86_64/ /'
+    if [ "$(id -u)" -eq 0 ]; then
+      printf '%s\n' "$wsl_repo" >"$wsl_source"
+    else
+      printf '%s\n' "$wsl_repo" | sudo tee "$wsl_source" >/dev/null
+    fi
+  fi
+  if [ "$(id -u)" -eq 0 ]; then
+    apt-get update
+  else
+    sudo apt-get update
+  fi
+  cuda_apt_package_available "$CUDA_RUNTIME_PACKAGE" || {
+    printf 'ERROR: NVIDIA CUDA repository still has no candidate for %s.\n' \
+      "$CUDA_RUNTIME_PACKAGE" >&2
+    return 1
+  }
+  cuda_apt_package_available "$CUDA_CUDNN_PACKAGE" || {
+    printf 'ERROR: NVIDIA CUDA repository still has no candidate for %s.\n' \
+      "$CUDA_CUDNN_PACKAGE" >&2
+    return 1
+  }
+  printf 'NVIDIA CUDA repositories configured; both package candidates are available.\n'
+}
+
 run_cuda_install() {
   if [ "$(id -u)" -eq 0 ]; then
     apt-get update && apt-get -y install $CUDA_INSTALL_PACKAGES
@@ -320,6 +377,10 @@ maybe_install_cuda_dependencies() {
     printf 'CUDA host dependency installation was not started; authenticate with sudo and rerun the installer.\n' >&2
     return 0
   }
+  if ! cuda_configure_apt_repositories; then
+    printf 'CUDA host dependency installation was not started; configure the NVIDIA CUDA repository and rerun the installer.\n' >&2
+    return 0
+  fi
   if run_cuda_install; then
     printf 'CUDA host dependency installation completed; rerunning GPU preflight.\n'
   else

@@ -332,8 +332,9 @@ packages on Debian/Ubuntu, setup offers:
 sudo apt-get update && sudo apt-get -y install cuda-cudart-12-9 cudnn9-cuda-12
 ```
 
-Use `llm-context setup --install-cudnn --yes` only when the packages and their
-repository are already configured; the package names follow the
+Use `llm-context setup --install-cudnn --yes` after authenticating with sudo and
+configuring NVIDIA's signed CUDA repository if it is not already present. The
+top-level installer configures that repository automatically. The package names follow the
 [NVIDIA cuDNN Linux installation guide](https://docs.nvidia.com/deeplearning/cudnn/installation/latest/linux.html).
 Setup does not install NVIDIA drivers. In WSL, install or update the
 [CUDA-enabled NVIDIA driver on Windows](https://docs.nvidia.com/cuda/pdf/CUDA_on_WSL_User_Guide.pdf);
