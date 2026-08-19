@@ -4,7 +4,7 @@
            [java.security MessageDigest]))
 
 (def lib 'devame/llm-context)
-(def version "0.12.5")
+(def version "0.12.6")
 (def class-dir "target/classes")
 (def basis (delay (b/create-basis {:project "deps.edn"})))
 (def uber-file (format "target/llm-context-%s-standalone.jar" version))

@@ -1,3 +1,10 @@
+## 0.12.6
+
+- feat: harden dependencies and release workflows
+
+
+
+
 ## 0.12.5
 
 - feat: add operational health and self-healing
