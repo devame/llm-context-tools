@@ -64,7 +64,7 @@ if [ "$DOCTOR_STATUS" -ne 0 ]; then
   printf '%s\n' "$DOCTOR_OUTPUT" |
     grep -E '^warn +semantic-accelerator cpu/' >/dev/null
   printf '%s\n' "$DOCTOR_OUTPUT" |
-    grep -E '^warn +cuda-host GPU: not detected' >/dev/null
+    grep -E '^warn +cuda-host +GPU: not detected' >/dev/null
   printf '%s\n' "$DOCTOR_OUTPUT" |
     grep -E '^ok +semantic-execution' >/dev/null
   printf '%s\n' "$DOCTOR_OUTPUT" |
