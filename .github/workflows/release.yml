@@ -123,6 +123,46 @@ jobs:
           path: next-plaid-api-1.7.0-${{ matrix.target }}${{ matrix.artifact_suffix }}.*
           if-no-files-found: error
 
+  native-parser:
+    name: Native parser (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04-arm
+            platform: linux-aarch64
+            artifact: native-parser-linux-aarch64
+          - runner: macos-15-intel
+            platform: macos-x86_64
+            artifact: native-parser-macos-x86_64
+          - runner: macos-15
+            platform: macos-aarch64
+            artifact: native-parser-macos-aarch64
+          - runner: windows-latest
+            platform: windows-x86_64
+            artifact: native-parser-windows-x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: latest
+      - name: Build native parser library
+        shell: bash
+        run: |
+          mkdir -p native-artifacts
+          script/build-janet-grammar.sh \
+            --platform "${{ matrix.platform }}" \
+            --output-dir native-artifacts
+      - name: Verify native parser artifact
+        shell: bash
+        run: test -s native-artifacts/*
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ${{ matrix.artifact }}
+          path: native-artifacts/*
+          if-no-files-found: error
+
   release:
     needs: [semantic-runtime, native-parser]
     runs-on: ubuntu-latest
