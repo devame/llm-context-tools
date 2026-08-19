@@ -391,6 +391,25 @@
            #"LateOn semantic worker failed: fixture decoding failed"
            (cli/execute context "semantic" ["sync" "--wait"]))))))
 
+(deftest semantic-sync-waits-through-runtime-recovery
+  (let [root (Files/createTempDirectory
+              "llm-context-semantic-sync-recovery-"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        context (assoc (project/context (str root)) :options {:quiet? true})
+        calls (atom 0)
+        recovering {:indexed 0 :desired 1 :pending 1 :leased 0 :failed 0
+                    :dirty 0 :completeness :partial
+                    :runtime {:status :recovering :worker-status :running}}
+        ready (assoc recovering
+                     :indexed 1 :pending 0 :completeness :complete
+                     :runtime {:status :ready :worker-status :running})]
+    (with-redefs [service-client/request
+                  (fn [_ _]
+                    {:ok true
+                     :value (if (= 1 (swap! calls inc)) recovering ready)})]
+      (is (zero? (cli/execute context "semantic" ["sync" "--wait"]))))
+    (is (= 2 @calls))))
+
 (deftest semantic-status-accepts-watch-options
   (is (= {:watch? true :verbose? true :interval-ms 1500}
          (#'cli/parse-semantic-status-options

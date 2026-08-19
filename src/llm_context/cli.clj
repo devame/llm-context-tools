@@ -795,7 +795,7 @@
                              (str " - " detail)))
                       {:exit-code 1 :status status}))
 
-                    (not (contains? #{:starting :ready}
+                    (not (contains? #{:starting :recovering :ready}
                                     (:status runtime)))
                     (throw
                      (ex-info
