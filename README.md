@@ -60,8 +60,11 @@ llm-context setup --install-cudnn --yes # explicit non-interactive install
 
 The dependency bootstrap and top-level installer can install the supported CUDA
 12/cuDNN packages on Debian/Ubuntu and configure NVIDIA's signed CUDA apt
-repository when those packages are not already available. They never install a
-GPU driver automatically. In WSL, install or update
+repositories when those packages are not already available. Repository repair is
+self-healing: stale NVIDIA source entries are removed, the WSL CUDA and Ubuntu
+cuDNN repositories use separate verified keyrings, and the current keyring
+package is selected from each repository's metadata. They never install a GPU
+driver automatically. In WSL, install or update
 the NVIDIA CUDA-enabled driver on Windows, not a Linux driver inside WSL.
 
 For graph analysis and lexical search without the semantic models:

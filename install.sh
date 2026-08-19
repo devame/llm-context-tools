@@ -257,6 +257,113 @@ cuda_apt_package_available() {
   [ -n "$candidate" ] && [ "$candidate" != '(none)' ]
 }
 
+cuda_keyring_metadata() {
+  packages_gz=$1
+  command -v gzip >/dev/null 2>&1 || {
+    printf 'ERROR: gzip is required to inspect NVIDIA CUDA repository metadata.\n' >&2
+    return 1
+  }
+  metadata=$(gzip -dc "$packages_gz" | awk '
+    BEGIN { RS = "" }
+    $0 ~ /(^|\n)Package: cuda-keyring(\n|$)/ && !found {
+      version = filename = sha256 = ""
+      n = split($0, lines, "\n")
+      for (i = 1; i <= n; i++) {
+        if (lines[i] ~ /^Version: /) { sub(/^Version: /, "", lines[i]); version = lines[i] }
+        if (lines[i] ~ /^Filename: /) { sub(/^Filename: /, "", lines[i]); filename = lines[i] }
+        if (lines[i] ~ /^SHA256: /) { sub(/^SHA256: /, "", lines[i]); sha256 = lines[i] }
+      }
+      if (version != "" && filename != "" && sha256 != "") {
+        printf "%s\t%s\t%s\n", version, filename, sha256
+        found = 1
+      }
+    }
+  ')
+  [ -n "$metadata" ] || {
+    printf 'ERROR: NVIDIA CUDA repository metadata did not advertise a cuda-keyring package.\n' >&2
+    return 1
+  }
+  printf '%s\n' "$metadata"
+}
+
+cuda_install_keyring() {
+  repo=$1
+  keyring_name=$2
+  repo_base="https://developer.download.nvidia.com/compute/cuda/repos/${repo}/x86_64"
+  packages_gz="$TEMP_DIR/cuda-${keyring_name}-Packages.gz"
+  keyring_deb="$TEMP_DIR/cuda-${keyring_name}-keyring.deb"
+  extracted="$TEMP_DIR/cuda-${keyring_name}-keyring"
+  key_file="$extracted/usr/share/keyrings/cuda-archive-keyring.gpg"
+  destination="/usr/share/keyrings/cuda-${keyring_name}-archive-keyring.gpg"
+
+  printf 'Refreshing NVIDIA %s CUDA repository metadata\n' "$keyring_name"
+  download "${repo_base}/Packages.gz" "$packages_gz"
+  if ! metadata=$(cuda_keyring_metadata "$packages_gz"); then
+    return 1
+  fi
+  IFS='	' read -r version filename expected_hash <<EOF
+$metadata
+EOF
+  case "$filename" in
+    http://*|https://*) keyring_url=$filename ;;
+    ./*) keyring_url="${repo_base}/${filename#./}" ;;
+    /*) keyring_url="https://developer.download.nvidia.com${filename}" ;;
+    *) keyring_url="${repo_base}/${filename}" ;;
+  esac
+  printf 'Downloading and verifying NVIDIA %s keyring %s\n' "$keyring_name" "$version"
+  if [ ! -s "$keyring_deb" ] || [ "$(file_hash "$keyring_deb")" != "$expected_hash" ]; then
+    download "$keyring_url" "$keyring_deb"
+  fi
+  actual_hash=$(file_hash "$keyring_deb")
+  [ "$actual_hash" = "$expected_hash" ] || {
+    printf 'ERROR: NVIDIA %s keyring checksum mismatch (expected %s, got %s).\n' \
+      "$keyring_name" "$expected_hash" "$actual_hash" >&2
+    return 1
+  }
+  command -v dpkg-deb >/dev/null 2>&1 || {
+    printf 'ERROR: dpkg-deb is required to extract the NVIDIA CUDA keyring.\n' >&2
+    return 1
+  }
+  mkdir -p "$extracted"
+  dpkg-deb -x "$keyring_deb" "$extracted"
+  [ -s "$key_file" ] || {
+    printf 'ERROR: NVIDIA %s keyring package did not contain its signing key.\n' \
+      "$keyring_name" >&2
+    return 1
+  }
+  if [ "$(id -u)" -eq 0 ]; then
+    install -m 0644 "$key_file" "$destination"
+  else
+    sudo install -m 0644 "$key_file" "$destination"
+  fi
+}
+
+cuda_remove_stale_sources() {
+  for source in /etc/apt/sources.list.d/*; do
+    [ -f "$source" ] || continue
+    if grep -q 'developer.download.nvidia.com/compute/cuda/repos' "$source"; then
+      printf 'Removing stale NVIDIA CUDA source %s\n' "${source##*/}"
+      if [ "$(id -u)" -eq 0 ]; then
+        rm -f -- "$source"
+      else
+        sudo rm -f -- "$source"
+      fi
+    fi
+  done
+}
+
+cuda_write_source() {
+  destination=$1
+  contents=$2
+  temporary="$TEMP_DIR/${destination##*/}.new"
+  printf '%s\n' "$contents" >"$temporary"
+  if [ "$(id -u)" -eq 0 ]; then
+    install -m 0644 "$temporary" "$destination"
+  else
+    sudo install -m 0644 "$temporary" "$destination"
+  fi
+}
+
 cuda_configure_apt_repositories() {
   ubuntu_repo=ubuntu2404
   if [ -r /etc/os-release ]; then
@@ -268,27 +375,23 @@ cuda_configure_apt_repositories() {
       20.04) ubuntu_repo=ubuntu2004 ;;
     esac
   fi
-  keyring_url="https://developer.download.nvidia.com/compute/cuda/repos/${ubuntu_repo}/x86_64/cuda-keyring_1.1-1_all.deb"
-  keyring_deb="$TEMP_DIR/cuda-keyring_1.1-1_all.deb"
-  command -v dpkg >/dev/null 2>&1 || {
-    printf 'ERROR: dpkg is required to configure the NVIDIA CUDA apt repository.\n' >&2
+  command -v apt-get >/dev/null 2>&1 || {
+    printf 'ERROR: apt-get is required to configure the NVIDIA CUDA apt repository.\n' >&2
     return 1
   }
-  download "$keyring_url" "$keyring_deb"
-  if [ "$(id -u)" -eq 0 ]; then
-    dpkg -i "$keyring_deb"
-  else
-    sudo dpkg -i "$keyring_deb"
-  fi
+  command -v apt-cache >/dev/null 2>&1 || {
+    printf 'ERROR: apt-cache is required to verify NVIDIA CUDA package candidates.\n' >&2
+    return 1
+  }
+  cuda_remove_stale_sources
+  cuda_install_keyring "$ubuntu_repo" ubuntu
   if [ -e /dev/dxg ] || grep -qi microsoft /proc/version 2>/dev/null; then
-    wsl_source=/etc/apt/sources.list.d/cuda-wsl-ubuntu-x86_64.list
-    wsl_repo='deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/wsl-ubuntu/x86_64/ /'
-    if [ "$(id -u)" -eq 0 ]; then
-      printf '%s\n' "$wsl_repo" >"$wsl_source"
-    else
-      printf '%s\n' "$wsl_repo" | sudo tee "$wsl_source" >/dev/null
-    fi
+    cuda_install_keyring wsl wsl
+    wsl_repo='deb [signed-by=/usr/share/keyrings/cuda-wsl-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/wsl-ubuntu/x86_64/ /'
+    cuda_write_source /etc/apt/sources.list.d/llm-context-cuda-wsl.list "$wsl_repo"
   fi
+  cuda_write_source /etc/apt/sources.list.d/llm-context-cuda-ubuntu.list \
+    "deb [signed-by=/usr/share/keyrings/cuda-ubuntu-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/${ubuntu_repo}/x86_64/ /"
   if [ "$(id -u)" -eq 0 ]; then
     apt-get update
   else
