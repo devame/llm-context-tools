@@ -16,6 +16,9 @@
 (def ^:private cudnn-package
   (dependencies/value [:semantic :cuda :debian-package]))
 
+(def ^:private cuda-libraries-package
+  (dependencies/value [:semantic :cuda :libraries-debian-package]))
+
 (defn- executable-on-path? [name]
   (boolean
    (some #(and (Files/isRegularFile ^Path % (make-array LinkOption 0))
@@ -42,6 +45,8 @@
           packages (cond-> []
                      (not (:cuda-runtime-present? host))
                      (conj cuda-runtime-package)
+                     (not (:cuda-libraries-present? host))
+                     (conj cuda-libraries-package)
                      (not (:cudnn-present? host))
                      (conj cudnn-package))]
       (when (seq packages)

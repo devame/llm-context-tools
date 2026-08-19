@@ -90,6 +90,7 @@ verify_hash() {
 
 CUDA_MINIMUM_DRIVER="525.60.13"
 CUDA_RUNTIME_PACKAGE="cuda-cudart-12-9"
+CUDA_LIBRARIES_PACKAGE="cuda-libraries-12-9"
 CUDA_CUDNN_PACKAGE="cudnn9-cuda-12"
 
 version_at_least() {
@@ -129,6 +130,9 @@ cuda_library_present() {
   for candidate in \
     "/usr/lib/wsl/lib/$library" \
     "/usr/local/cuda/lib64/$library" \
+    "/usr/local/cuda/targets/x86_64-linux/lib/$library" \
+    "/usr/local/cuda-12.9/lib64/$library" \
+    "/usr/local/cuda-12.9/targets/x86_64-linux/lib/$library" \
     "/usr/lib/x86_64-linux-gnu/$library" \
     "/usr/lib64/$library"; do
     if [ -f "$candidate" ]; then
@@ -151,6 +155,7 @@ cuda_host_preflight() {
   CUDA_DEVICE_VISIBLE=0
   CUDA_LIBCUDA_PRESENT=0
   CUDA_RUNTIME_PRESENT=0
+  CUDA_LIBRARIES_PRESENT=0
   CUDA_CUDNN_PRESENT=0
 
   if [ -n "$CUDA_NVIDIA_SMI" ]; then
@@ -184,6 +189,10 @@ cuda_host_preflight() {
   if cuda_library_present libcudart.so.12; then
     CUDA_RUNTIME_PRESENT=1
   fi
+  if cuda_library_present libcublasLt.so.12 &&
+     cuda_library_present libcurand.so.10; then
+    CUDA_LIBRARIES_PRESENT=1
+  fi
   if cuda_library_present libcudnn.so.9; then
     CUDA_CUDNN_PRESENT=1
   fi
@@ -193,6 +202,7 @@ cuda_host_preflight() {
      [ "$CUDA_DRIVER_COMPATIBLE" -eq 1 ] &&
      [ "$CUDA_LIBCUDA_PRESENT" -eq 1 ] &&
      [ "$CUDA_RUNTIME_PRESENT" -eq 1 ] &&
+     [ "$CUDA_LIBRARIES_PRESENT" -eq 1 ] &&
      [ "$CUDA_CUDNN_PRESENT" -eq 1 ]; then
     CUDA_HOST_READY=1
   else
@@ -201,13 +211,14 @@ cuda_host_preflight() {
 }
 
 print_cuda_host_preflight() {
-  printf 'GPU preflight: GPU=%s; device=%s; driver=%s (minimum %s); libcuda=%s; CUDA 12 runtime=%s; cuDNN 9=%s\n' \
+  printf 'GPU preflight: GPU=%s; device=%s; driver=%s (minimum %s); libcuda=%s; CUDA 12 runtime=%s; CUDA libraries=%s; cuDNN 9=%s\n' \
     "${CUDA_GPU_NAME:-not detected}" \
     "$(if [ "$CUDA_DEVICE_VISIBLE" -eq 1 ]; then printf visible; else printf missing; fi)" \
     "${CUDA_DRIVER_VERSION:-not detected}" \
     "$CUDA_MINIMUM_DRIVER" \
     "$(if [ "$CUDA_LIBCUDA_PRESENT" -eq 1 ]; then printf present; else printf missing; fi)" \
     "$(if [ "$CUDA_RUNTIME_PRESENT" -eq 1 ]; then printf present; else printf missing; fi)" \
+    "$(if [ "$CUDA_LIBRARIES_PRESENT" -eq 1 ]; then printf present; else printf missing; fi)" \
     "$(if [ "$CUDA_CUDNN_PRESENT" -eq 1 ]; then printf present; else printf missing; fi)"
 }
 
@@ -224,6 +235,10 @@ print_cuda_host_actions() {
   if [ "$CUDA_RUNTIME_PRESENT" -eq 0 ]; then
     printf 'Action: install or expose the CUDA 12 runtime (libcudart.so.12; package %s).\n' \
       "$CUDA_RUNTIME_PACKAGE"
+  fi
+  if [ "$CUDA_LIBRARIES_PRESENT" -eq 0 ]; then
+    printf 'Action: install or expose CUDA 12 math libraries (libcublasLt.so.12 and libcurand.so.10; package %s).\n' \
+      "$CUDA_LIBRARIES_PACKAGE"
   fi
   if [ "$CUDA_DEVICE_VISIBLE" -eq 1 ] &&
      [ "$CUDA_DRIVER_PRESENT" -eq 1 ] &&
@@ -402,6 +417,11 @@ cuda_configure_apt_repositories() {
       "$CUDA_RUNTIME_PACKAGE" >&2
     return 1
   }
+  cuda_apt_package_available "$CUDA_LIBRARIES_PACKAGE" || {
+    printf 'ERROR: NVIDIA CUDA repository still has no candidate for %s.\n' \
+      "$CUDA_LIBRARIES_PACKAGE" >&2
+    return 1
+  }
   cuda_apt_package_available "$CUDA_CUDNN_PACKAGE" || {
     printf 'ERROR: NVIDIA CUDA repository still has no candidate for %s.\n' \
       "$CUDA_CUDNN_PACKAGE" >&2
@@ -437,11 +457,20 @@ maybe_install_cuda_dependencies() {
   [ "$CUDA_DEVICE_VISIBLE" -eq 1 ] &&
     [ "$CUDA_DRIVER_PRESENT" -eq 1 ] &&
     [ "$CUDA_DRIVER_COMPATIBLE" -eq 1 ] &&
-    { [ "$CUDA_RUNTIME_PRESENT" -eq 0 ] || [ "$CUDA_CUDNN_PRESENT" -eq 0 ]; } || return 0
+    { [ "$CUDA_RUNTIME_PRESENT" -eq 0 ] ||
+      [ "$CUDA_LIBRARIES_PRESENT" -eq 0 ] ||
+      [ "$CUDA_CUDNN_PRESENT" -eq 0 ]; } || return 0
 
   CUDA_INSTALL_PACKAGES=""
   if [ "$CUDA_RUNTIME_PRESENT" -eq 0 ]; then
     CUDA_INSTALL_PACKAGES="$CUDA_RUNTIME_PACKAGE"
+  fi
+  if [ "$CUDA_LIBRARIES_PRESENT" -eq 0 ]; then
+    if [ -n "$CUDA_INSTALL_PACKAGES" ]; then
+      CUDA_INSTALL_PACKAGES="$CUDA_INSTALL_PACKAGES $CUDA_LIBRARIES_PACKAGE"
+    else
+      CUDA_INSTALL_PACKAGES="$CUDA_LIBRARIES_PACKAGE"
+    fi
   fi
   if [ "$CUDA_CUDNN_PRESENT" -eq 0 ]; then
     if [ -n "$CUDA_INSTALL_PACKAGES" ]; then
@@ -536,6 +565,7 @@ if [ "$INSTALL_SEMANTIC" -eq 1 ]; then
           print_cuda_host_actions
           fail "CUDA was requested but the host preflight is incomplete; fix the reported prerequisites or set LLM_CONTEXT_ACCELERATOR_PACKAGE=cpu"
         }
+        RUNTIME_FLAVOR=cuda
       elif [ "$RUNTIME_FLAVOR_REQUESTED" = "auto" ]; then
         cuda_host_preflight
         maybe_install_cuda_dependencies

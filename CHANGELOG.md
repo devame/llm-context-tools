@@ -1,3 +1,11 @@
+## 0.12.7
+
+- Fix explicit CUDA installer selection and require the CUDA math libraries
+  used by the ONNX Runtime provider.
+- Add version-aware CUDA library path detection and prevent stale provider log
+  diagnostics from forcing a false CPU fallback.
+
+
 ## 0.12.6
 
 - feat: harden dependencies and release workflows

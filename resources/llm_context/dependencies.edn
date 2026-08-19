@@ -6,7 +6,7 @@
  ;; agree with this file; script/verify-dependencies.clj enforces that rule.
  :project
  {:name "llm-context"
-  :version "0.12.6"
+  :version "0.12.7"
   :repository "devame/llm-context-tools"}
 
  :toolchain
@@ -85,6 +85,7 @@
    :cudnn-version "9"
    :minimum-driver "525.60.13"
    :runtime-debian-package "cuda-cudart-12-9"
+   :libraries-debian-package "cuda-libraries-12-9"
    :debian-package "cudnn9-cuda-12"}}
 
  :github

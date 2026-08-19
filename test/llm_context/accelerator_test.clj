@@ -23,6 +23,7 @@
    :driver-compatible? true
    :libcuda-present? true
    :cuda-runtime-present? true
+   :cuda-libraries-present? true
    :cudnn-present? true
    :ready? true
    :wsl? false
