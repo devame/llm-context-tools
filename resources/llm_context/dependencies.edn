@@ -6,7 +6,7 @@
  ;; agree with this file; script/verify-dependencies.clj enforces that rule.
  :project
  {:name "llm-context"
-  :version "0.12.9"
+  :version "0.12.10"
   :repository "devame/llm-context-tools"}
 
  :toolchain

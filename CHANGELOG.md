@@ -1,3 +1,10 @@
+## 0.12.10
+
+- feat: add queue-aware semantic ingestion
+
+
+
+
 ## 0.12.9
 
 - Preserve the NextPlaid log offset in resident-service health views so stale

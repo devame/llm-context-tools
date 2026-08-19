@@ -130,7 +130,7 @@ prepare_and_publish() {
   echo "==> Preparing release $new_version from $base_version"
   "$ROOT_DIR/scripts/bump-version.sh" "$new_version" "$notes_file"
   git add CHANGELOG.md README.md build.clj package.json package-lock.json \
-    src/llm_context/version.clj
+    resources/llm_context/dependencies.edn src/llm_context/version.clj
   git commit -m "chore: prepare release $new_version"
   trap - EXIT
   rm -rf "$notes_directory"
