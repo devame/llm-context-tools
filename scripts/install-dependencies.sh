@@ -890,7 +890,7 @@ cuda_configure_apt_repositories() {
   cuda_remove_stale_sources
   cuda_install_keyring "$ubuntu_repo" ubuntu
   if [[ -e /dev/dxg ]] || grep -qi microsoft /proc/version 2>/dev/null; then
-    cuda_install_keyring wsl wsl
+    cuda_install_keyring wsl-ubuntu wsl
     wsl_repo='deb [signed-by=/usr/share/keyrings/cuda-wsl-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/wsl-ubuntu/x86_64/ /'
     cuda_write_source /etc/apt/sources.list.d/llm-context-cuda-wsl.list "$wsl_repo"
   fi
