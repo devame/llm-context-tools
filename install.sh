@@ -239,6 +239,17 @@ apt_cuda_install_available() {
     { [ "$(id -u)" -eq 0 ] || command -v sudo >/dev/null 2>&1; }
 }
 
+cuda_sudo_preflight() {
+  [ "$(id -u)" -eq 0 ] && return 0
+  command -v sudo >/dev/null 2>&1 || {
+    printf 'ERROR: sudo is required to install CUDA host packages as a non-root user.\n' >&2
+    return 1
+  }
+  printf '\nSudo authentication is required for CUDA 12/cuDNN 9 installation.\n' >&2
+  printf 'Enter your WSL sudo password when prompted.\n' >&2
+  sudo -v
+}
+
 run_cuda_install() {
   if [ "$(id -u)" -eq 0 ]; then
     apt-get update && apt-get -y install $CUDA_INSTALL_PACKAGES
@@ -305,6 +316,10 @@ maybe_install_cuda_dependencies() {
       fail 'LLM_CONTEXT_CUDA_INSTALL and LLM_CONTEXT_CUDNN_INSTALL must be prompt, yes, or no' ;;
   esac
 
+  cuda_sudo_preflight || {
+    printf 'CUDA host dependency installation was not started; authenticate with sudo and rerun the installer.\n' >&2
+    return 0
+  }
   if run_cuda_install; then
     printf 'CUDA host dependency installation completed; rerunning GPU preflight.\n'
   else
