@@ -325,34 +325,35 @@ llm-context doctor
 `setup` reports the visible GPU, NVIDIA driver version, minimum supported
 driver (`525.60.13` for the CUDA 12 package), `libcuda.so.1`, CUDA 12, and
 cuDNN 9. These are static host checks; the first semantic service startup is
-still the authoritative runtime probe. If it finds a missing cuDNN package on
-Debian/Ubuntu, setup offers:
+still the authoritative runtime probe. If it finds missing CUDA 12 or cuDNN
+packages on Debian/Ubuntu, setup offers:
 
 ```bash
-sudo apt-get update && sudo apt-get -y install cudnn9-cuda-12
+sudo apt-get update && sudo apt-get -y install cuda-cudart-12-9 cudnn9-cuda-12
 ```
 
-Use `llm-context setup --install-cudnn --yes` only when that package and its
-repository are already configured; the package name follows the
+Use `llm-context setup --install-cudnn --yes` only when the packages and their
+repository are already configured; the package names follow the
 [NVIDIA cuDNN Linux installation guide](https://docs.nvidia.com/deeplearning/cudnn/installation/latest/linux.html).
 Setup does not install NVIDIA drivers. In WSL, install or update the
 [CUDA-enabled NVIDIA driver on Windows](https://docs.nvidia.com/cuda/pdf/CUDA_on_WSL_User_Guide.pdf);
 do not install a Linux NVIDIA driver inside WSL.
 
 On Linux x86-64, `install.sh` defaults to
-`LLM_CONTEXT_ACCELERATOR_PACKAGE=auto`. When a visible GPU, compatible driver,
-and CUDA 12 runtime are present but cuDNN 9 is missing, the installer asks
-whether it should install `cudnn9-cuda-12` using `apt-get` and `sudo` when
-needed. A declined prompt, a non-interactive terminal, or an unavailable
+`LLM_CONTEXT_ACCELERATOR_PACKAGE=auto`. When a visible GPU and compatible
+driver are present, the installer asks whether it should install whichever of
+`cuda-cudart-12-9` and `cudnn9-cuda-12` is missing, using `apt-get` and `sudo`
+when needed. A declined prompt, a non-interactive terminal, or an unavailable
 package manager falls back to the CPU package and prints the corrective action.
-Set `LLM_CONTEXT_CUDNN_INSTALL=yes` or `no` for automation. Use
+Set `LLM_CONTEXT_CUDA_INSTALL=yes` or `no` for automation;
+`LLM_CONTEXT_CUDNN_INSTALL` remains accepted as a compatibility alias. Use
 `LLM_CONTEXT_ACCELERATOR_PACKAGE=cpu` to force CPU or
 `LLM_CONTEXT_ACCELERATOR_PACKAGE=cuda` to require CUDA and fail early when the
 host is incomplete. For example, opt in from a non-interactive shell with:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/devame/llm-context-tools/main/install.sh \
-  | LLM_CONTEXT_CUDNN_INSTALL=yes sh
+  | LLM_CONTEXT_CUDA_INSTALL=yes sh
 ```
 
 The Windows package is currently CPU-only.

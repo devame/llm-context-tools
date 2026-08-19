@@ -18,7 +18,8 @@
 
 (def package-manager
   {:update ["apt-get" "update"]
-   :install ["apt-get" "-y" "install" "cudnn9-cuda-12"]})
+   :install ["apt-get" "-y" "install" "cudnn9-cuda-12"]
+   :packages ["cudnn9-cuda-12"]})
 
 (deftest setup-does-not-offer-cudnn-for-a-hidden-gpu
   (let [prompted? (atom false)]
@@ -47,4 +48,23 @@
     (is (= [:confirm
             ["apt-get" "update"]
             ["apt-get" "-y" "install" "cudnn9-cuda-12"]]
+           @calls))))
+
+(deftest setup-installs-both-missing-cuda-host-dependencies
+  (let [calls (atom [])
+        missing-both (assoc host :cuda-runtime-present? false)]
+    (with-redefs-fn {#'accelerator/cuda-host-readiness (constantly missing-both)
+                     #'setup/package-manager-command
+                     (constantly {:update ["apt-get" "update"]
+                                  :install ["apt-get" "-y" "install"
+                                             "cuda-cudart-12-9" "cudnn9-cuda-12"]
+                                  :packages ["cuda-cudart-12-9" "cudnn9-cuda-12"]})
+                     #'setup/interactive? (constantly false)
+                     #'setup/run-command! (fn [command]
+                                            (swap! calls conj command)
+                                            true)}
+      #(setup/run! {:install-cudnn? true :yes? true}))
+    (is (= [["apt-get" "update"]
+            ["apt-get" "-y" "install"
+             "cuda-cudart-12-9" "cudnn9-cuda-12"]]
            @calls))))

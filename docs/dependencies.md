@@ -27,7 +27,7 @@ host-runtime pins.
 | Java/Node | Java 23 minimum and compile target; CI uses Java 25 and Node 24 |
 | Janet/native parser | Janet catalog 1.41.2; Tree-sitter ABI 14; Janet grammar source revision and archive hash; Zig 0.15.1 minimum; local WSL/Linux build plus CI-built ARM Linux/macOS/Windows artifacts |
 | Semantic runtime | NextPlaid 1.7.0 at its release-source revision; ONNX Runtime 1.29.0 with per-platform archive hashes |
-| CUDA host | CUDA 12, cuDNN 9, Debian package `cudnn9-cuda-12`, NVIDIA driver 525.60.13 minimum |
+| CUDA host | CUDA 12 runtime package `cuda-cudart-12-9`, cuDNN 9 package `cudnn9-cuda-12`, NVIDIA driver 525.60.13 minimum |
 | Models | LateOn-Code, mxbai edge ColBERT router, and LFM2.5 GGUF at immutable Hugging Face revisions with per-file hashes |
 | npm | No runtime or development npm dependencies; npm is used only to package the launcher and release artifacts |
 | Host tools | Clojure CLI, Java, npm, Zig, curl/wget, tar, checksum tools, and platform installer utilities as listed in the manifest |

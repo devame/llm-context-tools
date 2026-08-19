@@ -10,6 +10,9 @@
 (defn- linux? []
   (str/starts-with? (str/lower-case (System/getProperty "os.name")) "linux"))
 
+(def ^:private cuda-runtime-package
+  (dependencies/value [:semantic :cuda :runtime-debian-package]))
+
 (def ^:private cudnn-package
   (dependencies/value [:semantic :cuda :debian-package]))
 
@@ -31,17 +34,23 @@
   (contains? #{"y" "yes"}
              (some-> (read-line) str/trim str/lower-case)))
 
-(defn- package-manager-command []
+(defn- package-manager-command [host]
   (when (and (linux?) (executable-on-path? "apt-get"))
     (let [prefix (if (= "root" (System/getProperty "user.name"))
                    []
-                   (when (executable-on-path? "sudo") ["sudo"]))]
-      {:update (into prefix ["apt-get" "update"])
-       :install (into prefix ["apt-get" "-y" "install"
-                             cudnn-package])})))
+                   (when (executable-on-path? "sudo") ["sudo"]))
+          packages (cond-> []
+                     (not (:cuda-runtime-present? host))
+                     (conj cuda-runtime-package)
+                     (not (:cudnn-present? host))
+                     (conj cudnn-package))]
+      (when (seq packages)
+        {:update (into prefix ["apt-get" "update"])
+         :install (into prefix (concat ["apt-get" "-y" "install"] packages))
+         :packages packages}))))
 
-(defn- cudnn-installation-eligible? [host]
-  (accelerator/cudnn-installation-eligible? host))
+(defn- cuda-dependency-installation-eligible? [host]
+  (accelerator/cuda-dependency-installation-eligible? host))
 
 (defn- run-command! [command]
   (println "$" (str/join " " command))
@@ -57,46 +66,47 @@
   (when (:wsl? host)
     (println "WSL guidance: install/update the NVIDIA CUDA-enabled driver on Windows;"
              "do not install a Linux NVIDIA driver inside WSL."))
-  (when (and (linux?) (cudnn-installation-eligible? host))
+  (when (and (linux?) (cuda-dependency-installation-eligible? host))
     (if package-manager
       (println "Ubuntu/Debian CUDA 12 command:"
                (str "sudo apt-get update && sudo apt-get -y install "
-                    cudnn-package))
-      (println "Install cuDNN 9 for CUDA 12 using your distribution's package manager.")))
+                    (str/join " " (:packages package-manager))))
+      (println "Install the missing CUDA 12 runtime and/or cuDNN 9 using your distribution's package manager.")))
   (println "After correcting the host, install the matching runtime package with:"
            "LLM_CONTEXT_ACCELERATOR_PACKAGE=cuda sh install.sh"))
 
 (defn run!
-  "Report CUDA host readiness and optionally install cuDNN 9 for CUDA 12.
+  "Report CUDA host readiness and optionally install missing CUDA 12 host libraries.
 
   System driver installation is deliberately not automated: WSL drivers belong
   on Windows, while native Linux drivers are hardware/distribution-specific.
   `--install-cudnn --yes` is the explicit non-interactive exception for the
-  supported Ubuntu/Debian apt package."
+  supported Ubuntu/Debian apt packages. The legacy flag installs whichever of
+  CUDA 12's runtime and cuDNN 9 is missing."
   [{:keys [install-cudnn? yes?]}]
   (let [host (accelerator/cuda-host-readiness {} nil)
-        package-manager (package-manager-command)]
+        package-manager (package-manager-command host)]
     (println "llm-context accelerator setup")
     (println (accelerator/describe-host host))
     (if (:ready? host)
       (println "Static CUDA host prerequisites are present. The first CUDA runtime startup remains the final probe.")
       (do
         (print-guidance! host package-manager)
-        (when (and (cudnn-installation-eligible? host) package-manager)
+        (when (and (cuda-dependency-installation-eligible? host) package-manager)
           (let [install? (cond
                             yes? true
                             (interactive?)
-                            (confirm? "Install cuDNN 9 for CUDA 12 now?")
+                            (confirm? "Install the missing CUDA 12 runtime/cuDNN 9 packages now?")
                             :else false)]
             (when install?
               (if (and (run-command! (:update package-manager))
                        (run-command! (:install package-manager)))
-                (println "cuDNN installation completed. Rerun setup and then install the CUDA runtime package.")
-                (println "cuDNN installation failed; keep the CPU runtime and inspect the command output.")))
+                (println "CUDA host dependency installation completed. Rerun setup and install the CUDA-enabled semantic runtime.")
+                (println "CUDA host dependency installation failed; keep the CPU runtime and inspect the command output.")))
             (when (and (or install-cudnn? yes?) (not install?))
-              (println "cuDNN was not installed: use --yes for non-interactive setup or run setup in a terminal.")))
+              (println "CUDA host dependencies were not installed: use --yes for non-interactive setup or run setup in a terminal.")))
         (when (and (or install-cudnn? yes?)
-                   (cudnn-installation-eligible? host)
+                   (cuda-dependency-installation-eligible? host)
                    (not package-manager))
-          (println "cuDNN was not installed automatically: no supported apt-get package manager was found.")))))
+          (println "CUDA host dependencies were not installed automatically: no supported apt-get package manager was found.")))))
     0))

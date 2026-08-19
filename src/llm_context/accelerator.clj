@@ -70,8 +70,10 @@
                                    "libonnxruntime_providers_shared.so"))}))
 
 (defn cuda-library-directories [settings ^Path executable]
-  (let [configured (map #(Paths/get ^String % (make-array String 0))
-                        (:cuda-library-paths settings))]
+  (let [environment (some-> (System/getenv "LLM_CONTEXT_CUDA_LIBRARY_PATHS")
+                            (str/split #":"))
+        configured (map #(Paths/get ^String % (make-array String 0))
+                        (concat environment (:cuda-library-paths settings)))]
     (vec
      (distinct
       (concat (when executable [(.getParent executable)])
@@ -205,19 +207,23 @@
 (defn fallback-actions [reasons]
   (str/join "; " (map fallback-action reasons)))
 
-(defn cudnn-installation-eligible?
-  "Return true when installing cuDNN is the next useful host action.
+(defn cuda-dependency-installation-eligible?
+  "Return true when CUDA user-space dependencies can be repaired.
 
-  A missing cuDNN library is only actionable after this process can see an
-  NVIDIA device, a compatible driver, and the CUDA 12 runtime. This prevents
-  setup from offering a cuDNN install while the real problem is driver or
-  device visibility."
+  A visible device and compatible NVIDIA driver are enough to make the CUDA 12
+  runtime and cuDNN package installation actionable. The runtime check must not
+  gate cuDNN: a fresh WSL distribution commonly lacks both libraries."
   [host]
   (and (:device-visible? host)
        (:driver-present? host)
        (:driver-compatible? host)
-       (:cuda-runtime-present? host)
-       (not (:cudnn-present? host))))
+       (or (not (:cuda-runtime-present? host))
+           (not (:cudnn-present? host)))))
+
+(defn cudnn-installation-eligible?
+  "Backward-compatible alias for CUDA prerequisite repair eligibility."
+  [host]
+  (cuda-dependency-installation-eligible? host))
 
 (defn host-actions [host]
   (let [reasons (cond-> []
@@ -232,7 +238,10 @@
                   (conj :cuda-driver-library-missing)
                   (not (:cuda-runtime-present? host))
                   (conj :cuda-runtime-missing)
-                  (cudnn-installation-eligible? host)
+                  (and (:device-visible? host)
+                       (:driver-present? host)
+                       (:driver-compatible? host)
+                       (not (:cudnn-present? host)))
                   (conj :cudnn-missing))]
     (mapv fallback-action reasons)))
 

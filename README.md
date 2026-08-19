@@ -45,19 +45,20 @@ The installer verifies downloaded artifacts and installs the CLI and local
 semantic models for the current user. Open a new terminal if the installer
 updates your `PATH`.
 
-On Linux x86-64, the installer performs a GPU/driver/CUDA preflight. It uses
-the CUDA package only when the host has a visible NVIDIA GPU, a compatible
-driver, CUDA 12, and cuDNN 9; otherwise it installs the CPU package and prints
-the corrective action. Use `LLM_CONTEXT_ACCELERATOR_PACKAGE=auto`, `cpu`, or
-`cuda` to choose explicitly. Inspect or repair the host later with:
+On Linux x86-64, the installer performs a GPU/driver/CUDA preflight. When a
+compatible visible NVIDIA GPU is present, it offers to install whichever CUDA
+12 runtime (`cuda-cudart-12-9`) and cuDNN 9 (`cudnn9-cuda-12`) libraries are
+missing; otherwise it installs the CPU package and prints the corrective
+action. Use `LLM_CONTEXT_ACCELERATOR_PACKAGE=auto`, `cpu`, or `cuda` to choose
+explicitly. Inspect or repair the host later with:
 
 ```bash
 llm-context setup
-llm-context setup --install-cudnn       # interactive confirmation
+llm-context setup --install-cudnn       # install missing CUDA 12/cuDNN packages after confirmation
 llm-context setup --install-cudnn --yes # explicit non-interactive install
 ```
 
-The setup command can install the supported cuDNN package on Debian/Ubuntu,
+The setup command can install the supported CUDA 12/cuDNN packages on Debian/Ubuntu,
 but it never installs a GPU driver automatically. In WSL, install or update
 the NVIDIA CUDA-enabled driver on Windows, not a Linux driver inside WSL.
 

@@ -112,13 +112,16 @@
     (is (re-find #"install an NVIDIA driver" description))
     (is (not (re-find #"install cuDNN 9 and expose" description)))))
 
-(deftest cudnn-installation-is-only-offered-after-host-is-ready-for-it
+(deftest cuda-dependency-installation-is-offered-for-compatible-gpu
   (is (accelerator/cudnn-installation-eligible?
        (assoc complete-host :cudnn-present? false)))
+  (is (accelerator/cuda-dependency-installation-eligible?
+       (assoc complete-host
+              :cuda-runtime-present? false
+              :cudnn-present? false)))
   (doseq [host [(assoc complete-host :device-visible? false :cudnn-present? false)
                 (assoc complete-host :driver-present? false :cudnn-present? false)
                 (assoc complete-host :driver-compatible? false :cudnn-present? false)
-                (assoc complete-host :cuda-runtime-present? false :cudnn-present? false)
                 complete-host]]
     (is (not (accelerator/cudnn-installation-eligible? host))))
   (is (not (some #{"install cuDNN 9"}
@@ -128,7 +131,9 @@
                          :cudnn-present? false)))))
   (is (some #{"install cuDNN 9 and expose libcudnn.so.9"}
             (accelerator/host-actions
-             (assoc complete-host :cudnn-present? false)))))
+             (assoc complete-host
+                    :cuda-runtime-present? false
+                    :cudnn-present? false)))))
 
 (deftest selected-model-artifact-must-exist
   (let [{:keys [executable model]} (temp-layout)
