@@ -10,7 +10,8 @@
             [llm-context.dependencies :as dependencies]
             [llm-context.model.ids :as ids]
             [llm-context.project :as project])
-  (:import [java.nio.file Files LinkOption Path]))
+  (:import [java.io PrintWriter Writer]
+           [java.nio.file Files LinkOption Path]))
 
 (def analyzer-version
   (dependencies/value [:jvm :deps 'clj-kondo/clj-kondo :mvn/version]))
@@ -34,6 +35,111 @@
 ;; affect the analysis result.
 (def source-integrity-finding-types
   #{:syntax :reader-error :invalid-token :unclosed-delimiter})
+
+(def ^:private hook-not-found-pattern
+  #"(?i)^WARNING:\s+file\s+(.+?)\s+not found while loading hook\s*$")
+
+(def ^:private severity-pattern
+  #"(?i)^(WARNING|ERROR):\s*(.*)$")
+
+(defn- runtime-event [line]
+  (let [line (str/trim line)]
+    (when (seq line)
+      (if-let [[_ path] (re-matches hook-not-found-pattern line)]
+        {:key [:clj-kondo-hook-not-found]
+         :level :warning
+         :kind :clj-kondo-hook-not-found
+         :path path}
+        (let [[_ severity message] (re-matches severity-pattern line)
+              level (case (some-> severity str/upper-case)
+                      "ERROR" :error
+                      "WARNING" :warning
+                      :info)
+              message (or message line)]
+          {:key [:clj-kondo-runtime-message level message]
+           :level level
+           :kind :clj-kondo-runtime-message
+           :message message})))))
+
+(defn- record-runtime-event [state event]
+  (if-not event
+    state
+    (let [key (:key event)]
+      (if (contains? (:entries state) key)
+        (-> state
+            (update-in [:entries key :count] inc)
+            (cond-> (:path event)
+              (update-in [:entries key :paths] conj (:path event))))
+        (-> state
+            (update :order conj key)
+            (assoc-in [:entries key]
+                      (cond-> (assoc (dissoc event :key :path) :count 1)
+                        (:path event)
+                        (assoc :paths (sorted-set (:path event))))))))))
+
+(defn- captured-diagnostics [{:keys [order entries]}]
+  (mapv
+   (fn [key]
+     (let [{:keys [kind paths] :as event} (get entries key)]
+       (cond-> event
+         (= :clj-kondo-hook-not-found kind)
+         (assoc :message
+                (str "hook files not found: " (str/join ", " paths)))
+         paths (assoc :paths (vec paths)))))
+   order))
+
+(defn- runtime-message-capture []
+  (let [state (atom {:order [] :entries {}})
+        buffer (StringBuilder.)
+        record-line!
+        (fn []
+          (let [line (str buffer)]
+            (.setLength buffer 0)
+            (swap! state record-runtime-event (runtime-event line))))
+        append-character!
+        (fn [character]
+          (let [character (char character)]
+            (if (= \newline character)
+              (record-line!)
+              (.append buffer character))))
+        append-range!
+        (fn [characters offset length]
+          (dotimes [index length]
+            (let [position (+ offset index)
+                  character (if (string? characters)
+                              (.charAt ^String characters position)
+                              (aget ^chars characters position))]
+              (append-character! character))))
+        sink
+        (proxy [Writer] []
+          (write
+            ([value]
+             (locking buffer
+               (cond
+                 (number? value) (append-character! value)
+                 (string? value) (append-range! value 0 (count value))
+                 :else (append-range! value 0 (alength ^chars value)))))
+            ([characters offset length]
+             (locking buffer
+               (append-range! characters offset length))))
+          (flush [])
+          (close []))
+        writer (PrintWriter. sink true)]
+    {:writer writer
+     :finish!
+     (fn []
+       (.flush writer)
+       (locking buffer
+         (when (pos? (.length buffer))
+           (record-line!)))
+       (captured-diagnostics @state))}))
+
+(defn- run-kondo! [options]
+  (let [{:keys [writer finish!]} (runtime-message-capture)
+        result (binding [*err* writer]
+                 (kondo/run! options))]
+    {:result result
+     :diagnostics (finish!)}))
 
 (defn- clojure-file? [file]
   (contains? clojure-languages (:language file)))
@@ -109,8 +215,8 @@
        :configuration-fingerprint (config-fingerprint project)
        :analysis {}
        :diagnostics []}
-      (let [result
-            (kondo/run!
+      (let [{:keys [result diagnostics]}
+            (run-kondo!
              {:lint (mapv (comp str :path) files)
               :cache true
               :cache-dir (str cache-dir)
@@ -134,7 +240,9 @@
          :configuration-fingerprint (config-fingerprint project)
          :summary (:summary result)
          :analysis normalized
-         :diagnostics (->> (:findings result)
-                           (filter #(contains? source-integrity-finding-types
-                                               (:type %)))
-                           (mapv #(finding->diagnostic project %)))}))))
+         :diagnostics
+         (into diagnostics
+               (comp
+                (filter #(contains? source-integrity-finding-types (:type %)))
+                (map #(finding->diagnostic project %)))
+               (:findings result))}))))

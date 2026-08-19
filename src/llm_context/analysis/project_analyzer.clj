@@ -54,6 +54,9 @@
         (map (fn [[kind records]] [kind (count records)]))
         (:analysis snapshot)))
 
+(defn- provider-diagnostics [snapshot]
+  (filterv #(nil? (:file %)) (:diagnostics snapshot)))
+
 (defn- output-counts [outputs]
   (let [entities (mapcat :entities outputs)
         by-type (frequencies (map :entity/type entities))]
@@ -224,7 +227,9 @@
         janet-snapshot (:value janet-phase)
         janet-ms (:elapsed-ms janet-phase)
         janet-analyzer {:catalog-version (:catalog-version janet-snapshot)}
-        janet-diagnostics (vec (:diagnostics janet-snapshot))
+        global-diagnostics
+        (into (provider-diagnostics clojure-snapshot)
+              (:diagnostics janet-snapshot))
         janet-outputs (:outputs janet-snapshot)
         materialize-phase
         (run-phase progress :relationship-materialization
@@ -278,4 +283,4 @@
       :output (output-counts outputs)}
      ;; File-scoped clj-kondo integrity diagnostics live on their output so
      ;; preservation decisions and user reporting share one source of truth.
-     :diagnostics janet-diagnostics})))
+     :diagnostics global-diagnostics})))
