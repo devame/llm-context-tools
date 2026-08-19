@@ -62,12 +62,12 @@ printf '%s\n' "$DOCTOR_OUTPUT"
 # doctor failure remains a release failure.
 if [ "$DOCTOR_STATUS" -ne 0 ]; then
   printf '%s\n' "$DOCTOR_OUTPUT" |
-    grep -E '^warn semantic-accelerator cpu/' >/dev/null
+    grep -E '^warn +semantic-accelerator cpu/' >/dev/null
   printf '%s\n' "$DOCTOR_OUTPUT" |
-    grep -F 'warn cuda-host GPU: not detected' >/dev/null
+    grep -E '^warn +cuda-host GPU: not detected' >/dev/null
   printf '%s\n' "$DOCTOR_OUTPUT" |
-    grep -F 'ok semantic-execution' >/dev/null
+    grep -E '^ok +semantic-execution' >/dev/null
   printf '%s\n' "$DOCTOR_OUTPUT" |
-    grep -E '^ok semantic-queue +2 indexed, 0 pending, 0 leased, 0 failed, 0 dirty' \
+    grep -E '^ok +semantic-queue +2 indexed, 0 pending, 0 leased, 0 failed, 0 dirty' \
       >/dev/null
 fi
