@@ -1,3 +1,10 @@
+## 0.12.11
+
+- fix: wait through semantic runtime recovery
+
+
+
+
 ## 0.12.10
 
 - feat: add queue-aware semantic ingestion

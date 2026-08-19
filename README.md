@@ -75,7 +75,7 @@ curl -fsSL https://raw.githubusercontent.com/devame/llm-context-tools/main/insta
   | LLM_CONTEXT_SKIP_SEMANTIC=1 sh
 ```
 
-Set `LLM_CONTEXT_VERSION=0.12.10` to pin the current release. See the
+Set `LLM_CONTEXT_VERSION=0.12.11` to pin the current release. See the
 [installation and troubleshooting guide](docs/user-guide.md#installation-and-troubleshooting)
 for custom locations, CUDA, and verified model packages.
 
@@ -262,7 +262,7 @@ around the same JAR:
 
 ```bash
 npm pack
-npm install --global ./llm-context-0.12.10.tgz
+npm install --global ./llm-context-0.12.11.tgz
 llm-context doctor
 ```
 
