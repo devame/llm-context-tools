@@ -156,7 +156,10 @@ jobs:
             --output-dir native-artifacts
       - name: Verify native parser artifact
         shell: bash
-        run: test -s native-artifacts/*
+        run: |
+          for artifact in native-artifacts/*; do
+            test -s "$artifact"
+          done
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: ${{ matrix.artifact }}

@@ -82,6 +82,12 @@ jobs:
           script/build-janet-grammar.sh \
             --platform "${{ matrix.platform }}" \
             --output-dir native-artifacts
+      - name: Verify native parser artifacts
+        shell: bash
+        run: |
+          for artifact in native-artifacts/*; do
+            test -s "$artifact"
+          done
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: ${{ matrix.artifact }}
