@@ -21,6 +21,23 @@ metadata visibility, and removes only its own marked directory after success.
 A failed directory is retained and printed for diagnosis; absolute paths,
 symbol IDs, and source text are omitted from the saved report.
 
+Use explicit comma-separated request and concurrency candidates for a finer
+sweep around a promising result:
+
+```bash
+clojure -M:qualify-semantic-ingestion /path/to/project \
+  --sample-size 512 --request-batches 128,160,192,224,256 \
+  --request-concurrencies 1 --output semantic-ingestion-fine-report.edn
+```
+
+On 2026-08-20, this fine sweep on `cl-viz-cljs` with NextPlaid 1.7.0 and a
+6 GB GTX 1660 selected `192x1` as the project-specific cold-ingestion knee.
+Relative to `32x1`, it improved symbol throughput by 8.8%, reduced process
+writes by 83.4%, and reduced visibility time by 52.5%. `224x1` was slightly
+slower and approached the VRAM limit; `256x1` timed out. This single-project
+result supports an explicit project profile, but does not satisfy the
+cross-repository gate for changing the global default.
+
 The command refuses to run while the project service owns the graph. This is
 the conservative resource-safety mode: qualification never competes with the
 live model or mutates the active provider index.

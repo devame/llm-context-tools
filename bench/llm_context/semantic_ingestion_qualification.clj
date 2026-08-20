@@ -3,6 +3,7 @@
   semantic documents. This command never starts against the live index."
   (:require [clojure.edn :as edn]
             [clojure.pprint :as pprint]
+            [clojure.string :as str]
             [datalevin.core :as d]
             [llm-context.config :as config]
             [llm-context.project :as project]
@@ -19,11 +20,14 @@
            [java.util.concurrent Callable ExecutionException Executors
             TimeUnit]))
 
-(def matrix
-  (vec (for [request-batch [32 128 300 512]
-             request-concurrency [1 2]]
+(defn qualification-matrix [request-batches request-concurrencies]
+  (vec (for [request-batch request-batches
+             request-concurrency request-concurrencies]
          {:request-provider-document-limit request-batch
           :request-concurrency-limit request-concurrency})))
+
+(def matrix
+  (qualification-matrix [32 128 300 512] [1 2]))
 
 (def ^:private marker-name ".llm-context-semantic-qualification.edn")
 (def ^:private marker-format 1)
@@ -164,13 +168,31 @@
 (defn- visible-documents [client documents]
   (vec
    (mapcat #(index/indexed-documents client %)
-           (partition-all 128 (mapv :symbol-id documents)))))
+           (partition-all 128 (distinct (map :symbol-id documents))))))
+
+(defn- retriable-visibility-error? [error]
+  (let [status (:status (ex-data error))]
+    (or (= 429 status)
+        (and (int? status) (<= 500 status 599)))))
 
 (defn- await-visible! [client documents timeout-ms]
   (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
     (loop []
-      (let [visible (visible-documents client documents)]
+      (let [result
+            (try
+              {:visible (visible-documents client documents)}
+              (catch clojure.lang.ExceptionInfo error
+                (if (retriable-visibility-error? error)
+                  {:error error}
+                  (throw error))))
+            visible (:visible result)
+            error (:error result)]
         (cond
+          (and error (>= (System/currentTimeMillis) deadline))
+          (throw error)
+
+          error (do (Thread/sleep 250) (recur))
+
           (exact-visible? visible documents) visible
           (>= (System/currentTimeMillis) deadline)
           (throw
@@ -205,17 +227,30 @@
         (.shutdown executor)
         (.awaitTermination executor 5 TimeUnit/SECONDS)))))
 
-(defn- submit-documents! [client documents request-limit concurrency]
+(defn- submit-documents!
+  [client documents request-limit concurrency visibility-timeout-ms]
   (let [batches (mapv vec (partition-all request-limit documents))]
     (reduce
      (fn [result wave]
-       (let [measured (submit-wave! client wave)]
+       (let [measured (submit-wave! client wave)
+             submitted (into (:submitted-documents result)
+                             (mapcat identity wave))
+             visibility-start (System/nanoTime)
+             visible (await-visible! client submitted visibility-timeout-ms)
+             visibility-ms
+             (/ (- (System/nanoTime) visibility-start) 1000000.0)]
          (-> result
              (update :submit-ms + (:elapsed-ms measured))
+             (update :visibility-ms + visibility-ms)
              (update :request-latencies-ms into
-                     (:request-latencies-ms measured)))))
+                     (:request-latencies-ms measured))
+             (assoc :submitted-documents submitted
+                    :visible-documents visible))))
      {:request-count (count batches)
       :submit-ms 0.0
+      :visibility-ms 0.0
+      :submitted-documents []
+      :visible-documents []
       :request-latencies-ms []}
      (partition-all concurrency batches))))
 
@@ -236,7 +271,7 @@
     (when (Files/isRegularFile path (make-array LinkOption 0))
       (let [rows (->> (Files/readAllLines path)
                       (keep #(when-let [[_ key value]
-                               (re-matches #"([^:]+):\\s+(\\d+)" %)]
+                               (re-matches #"([^:]+):\s+(\d+)" %)]
                                [(keyword key) (parse-long value)]))
                       (into {}))]
         {:read-bytes (:read_bytes rows)
@@ -249,7 +284,7 @@
     (when (Files/isRegularFile path (make-array LinkOption 0))
       (some (fn [line]
               (when-let [[_ value]
-                         (re-matches #"VmRSS:\\s+(\\d+)\\s+kB" line)]
+                         (re-matches #"VmRSS:\s+(\d+)\s+kB" line)]
                 (* 1024 (parse-long value))))
             (Files/readAllLines path)))))
 
@@ -335,12 +370,10 @@
             provider-documents (vec (mapcat :chunks documents))
             io-before (process-io (:process launched))
             submit (submit-documents! client provider-documents
-                                      request-limit concurrency)
-            visibility-start (System/nanoTime)
-            visible (await-visible! client provider-documents
-                                    (:visibility-timeout-ms settings))
-            visibility-ms
-            (/ (- (System/nanoTime) visibility-start) 1000000.0)
+                                      request-limit concurrency
+                                      (:visibility-timeout-ms settings))
+            visible (:visible-documents submit)
+            visibility-ms (:visibility-ms submit)
             operation-ms (+ (:submit-ms submit) visibility-ms)
             operation-seconds (/ (max 1.0 operation-ms) 1000.0)
             io-after (process-io (:process launched))
@@ -418,46 +451,59 @@
                       :request-concurrency-limit))
        vec))
 
-(defn run-qualification! [project settings sample-size]
-  (with-open [_lease (lifecycle/acquire! project)]
-    (store/with-store [graph project settings]
-      (let [prepare-start (System/nanoTime)
-            documents (rendered-sample graph project settings sample-size)
-            prepare-ms (/ (- (System/nanoTime) prepare-start) 1000000.0)
-            _ (when-not (seq documents)
-                (throw
-                 (ex-info "No indexable semantic documents were available"
-                          {:type :semantic-qualification/empty-sample})))
-            sample-summary
-            {:symbol-jobs (count documents)
-             :prepare-ms prepare-ms
-             :provider-documents (reduce + 0 (map (comp count :chunks)
-                                                   documents))
-             :text-bytes (reduce + 0 (map :sample/text-bytes documents))
-             :strata
-             (frequencies
-              (map (juxt :sample/language :sample/source-role
-                         :sample/byte-bucket :sample/chunk-count)
-                   documents))}
-            cases (mapv #(run-case! project
-                                     (get-in settings [:semantic :lateon-code])
-                                     documents %)
-                        matrix)]
-        {:qualification/version 1
-         :provider-version
-         (get-in settings [:semantic :lateon-code :next-plaid-version])
-         :model (get-in settings [:semantic :lateon-code :model])
-         :model-revision
-         (get-in settings [:semantic :lateon-code :model-revision])
-         :document-version
-         (get-in settings [:semantic :lateon-code :document-version])
-         :sample sample-summary
-         :cases cases
-         :ranking (mapv #(select-keys
-                          % [:request-provider-document-limit
-                             :request-concurrency-limit :wall-ms :submit-ms
-                             :visibility-ms])
-                        (rank-cases cases))}))))
+(defn run-qualification!
+  ([project settings sample-size]
+   (run-qualification! project settings sample-size matrix))
+  ([project settings sample-size cases-to-run]
+   (with-open [_lease (lifecycle/acquire! project)]
+     (store/with-store [graph project settings]
+       (let [prepare-start (System/nanoTime)
+             documents (rendered-sample graph project settings sample-size)
+             prepare-ms (/ (- (System/nanoTime) prepare-start) 1000000.0)
+             _ (when-not (seq documents)
+                 (throw
+                  (ex-info "No indexable semantic documents were available"
+                           {:type :semantic-qualification/empty-sample})))
+             sample-summary
+             {:symbol-jobs (count documents)
+              :prepare-ms prepare-ms
+              :provider-documents (reduce + 0 (map (comp count :chunks)
+                                                    documents))
+              :text-bytes (reduce + 0 (map :sample/text-bytes documents))
+              :strata
+              (frequencies
+               (map (juxt :sample/language :sample/source-role
+                          :sample/byte-bucket :sample/chunk-count)
+                    documents))}
+             cases (mapv #(run-case! project
+                                      (get-in settings [:semantic :lateon-code])
+                                      documents %)
+                         cases-to-run)]
+         {:qualification/version 1
+          :provider-version
+          (get-in settings [:semantic :lateon-code :next-plaid-version])
+          :model (get-in settings [:semantic :lateon-code :model])
+          :model-revision
+          (get-in settings [:semantic :lateon-code :model-revision])
+          :document-version
+          (get-in settings [:semantic :lateon-code :document-version])
+          :sample sample-summary
+          :cases cases
+          :ranking (mapv #(select-keys
+                           % [:request-provider-document-limit
+                              :request-concurrency-limit :wall-ms :submit-ms
+                              :visibility-ms])
+                         (rank-cases cases))})))))
+
+(defn- positive-integer-list [option value]
+  (let [values (some->> value
+                        (#(str/split % #"," -1))
+                        (mapv parse-long))]
+    (when-not (and (seq values) (every? pos-int? values))
+      (throw (ex-info (str option
+                           " requires comma-separated positive integers")
+                      {:exit-code 2})))
+    (vec (distinct values))))
 
 (defn- parse-args [args]
   (let [[project-path & options] args]
@@ -465,10 +511,14 @@
       (throw
        (ex-info
         (str "Usage: clojure -M:qualify-semantic-ingestion PROJECT "
-             "[--sample-size N] [--output REPORT.edn]")
+             "[--sample-size N] [--request-batches N,N] "
+             "[--request-concurrencies N,N] [--output REPORT.edn]")
         {:exit-code 2})))
     (loop [remaining options
-           parsed {:project-path project-path :sample-size 256}]
+           parsed {:project-path project-path
+                   :sample-size 256
+                   :request-batches [32 128 300 512]
+                   :request-concurrencies [1 2]}]
       (if-let [option (first remaining)]
         (case option
           "--sample-size"
@@ -477,6 +527,14 @@
               (throw (ex-info "--sample-size requires a positive integer"
                               {:exit-code 2})))
             (recur (nnext remaining) (assoc parsed :sample-size value)))
+          "--request-batches"
+          (recur (nnext remaining)
+                 (assoc parsed :request-batches
+                        (positive-integer-list option (second remaining))))
+          "--request-concurrencies"
+          (recur (nnext remaining)
+                 (assoc parsed :request-concurrencies
+                        (positive-integer-list option (second remaining))))
           "--output"
           (if-let [value (second remaining)]
             (recur (nnext remaining) (assoc parsed :output value))
@@ -487,10 +545,12 @@
 
 (defn -main [& args]
   (try
-    (let [{:keys [project-path sample-size output]} (parse-args args)
+    (let [{:keys [project-path sample-size output request-batches
+                  request-concurrencies]} (parse-args args)
           project (project/context project-path)
           settings (config/load-config project)
-          report (run-qualification! project settings sample-size)
+          cases (qualification-matrix request-batches request-concurrencies)
+          report (run-qualification! project settings sample-size cases)
           safe (safe-report report)]
       (when output
         (let [path (absolute (:root project) output)]

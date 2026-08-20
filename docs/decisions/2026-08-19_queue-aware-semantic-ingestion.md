@@ -694,6 +694,16 @@ Validation requires positive bounds, `exit-threshold <= backlog-threshold`, and
 accepted/finalizer bounds no smaller than one request. Unknown profiles and a
 finalizer enabled without queue-aware ingestion fail configuration validation.
 
+Qualification amendment (2026-08-20): a source-redacted 512-symbol run on
+`cl-viz-cljs` rendered 1,052 provider documents with NextPlaid 1.7.0 on a
+6 GB GTX 1660. A concurrency-one fine sweep measured `128`, `160`, `192`,
+`224`, and `256` provider documents per request. `192x1` was the practical
+knee: compared with `32x1`, symbol throughput increased 8.8%, process writes
+fell 83.4%, and exact-visibility time fell 52.5%. `224x1` was 0.5% slower and
+reached approximately 5.35 GB VRAM; `256x1` timed out. The project may therefore
+opt into `192x1`, but this does not pass the cross-repository promotion gate and
+does not change the checked-in global defaults. Gate 2 remains separate.
+
 ## Commit-sized implementation plan
 
 Each unit below is intended to be one reviewable commit. A unit may update
