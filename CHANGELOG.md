@@ -1,3 +1,10 @@
+## 0.12.13
+
+- feat: qualify bounded semantic ingestion sweeps
+
+
+
+
 ## 0.12.12
 
 - fix: bound semantic provider waves to avoid CUDA OOM
